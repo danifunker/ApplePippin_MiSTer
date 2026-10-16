@@ -1,2 +1,6 @@
 # Downloaded third-party material (not committed)
 scratch/
+
+# ROM disassembly listings: committed as disasm/disasm.tar.xz
+# (tools/rom/pack.py unpack to extract, pack to rebuild)
+disasm/*/
