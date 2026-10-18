@@ -173,19 +173,25 @@ release, not the board tests.
 
 ## 8. What I need from you
 
-1. **ROMs:** Kinka 1.3 (and 1.2 if you have it). Not needed: the CD drive's
-   MCU ROM, Cuda (already here).
-2. **Disc images:** Pippin Kickstart; three or more retail titles,
-   including one with CD audio (Racing Days needs CD audio to start); the
-   Pippin Utilities disc if you have it. They stay outside the repository.
+1. **ROMs and discs:** received 2026-10-18 in `scratch/pippin/` (git-ignored):
+   Kinka 1.3 (87a1337d) and 1.2 (4fead4b3), both MAME's; the GM/dev ROM; the
+   1.0 ROM's four chips; Super Marathon (U), Power Rangers Zeo (USA),
+   Racing Days (J, CD audio), Macintosh on Pippin (USA), all BIN/CUE. With
+   1.3 here it is the default ROM from Day 1 (1.0 stays as the second ROM
+   that must keep booting); Day 12's ROM work shrinks to the options. No
+   Kickstart: the retail discs are signed and boot on the retail ROMs.
 3. **Board access, to work without waiting on you:** the MiSTer's address,
    an SSH key for it (MacPPC7300 used `~/.ssh/mister_only`), the MiSTer
    Remote (mrext, port 8182) running on it, and the board's HDMI on your
    capture if you want `kvms.py`. Without it, board tests 1 and 2 (Days 5
    and 8) need about 30 minutes of you each.
-4. **Main_MiSTer:** OK to add `applepippin` to `is_mac_scsi_family()` and
-   `is_mac_scsi_optimized()` on `Mac-ppc-enhancements`? You build and
-   install Main (or I build it here and copy it with board access).
+4. **Main_MiSTer:** done 2026-10-18 on a new branch `pippin-cdrom` off
+   your fork's `master` (00bdff0, which already has MacPPC7300's CD support),
+   in the worktree `~/repos/Main_MiSTer-pippin`: `applepippin` added to
+   `is_mac_scsi_family()` and `is_mac_scsi_optimized()` (commit 0e25569, not
+   pushed). It builds with `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf`
+   on the PATH (`bin/MiSTer`); it goes on the board with the first disc test
+   (Day 6-8).
 5. **A real Pippin:** if you have one, a few measurements would settle what
    the emulators guess (Taos, Aspen, the PVR); not needed for the plan.
 
