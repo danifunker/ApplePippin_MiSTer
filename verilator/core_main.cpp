@@ -164,6 +164,7 @@ struct Options {
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
 	std::string disk[2];           // disk images for SCSI IDs 0 and 1 (hps_io slots 0 and 1)
+	std::string cd;                // a CD's CUE sheet, served on slot 4 as the Main's Mac CD layer
 	unsigned disk_latency = 2000;  // memory clocks from a block request to hps_io's acknowledge
 	bool disk_log = false;         // print every block moved
 	bool disk_ignore_cd_probe = false; // negative control: reproduce the old unanswered slot-4 probe
@@ -290,15 +291,23 @@ struct Disk {
 // after a latency (the ARM reading the file), sd_ack up, the 512 bytes
 // written into the core's buffer (sd_buff_wr) or read from it (sd_buff_din,
 // a clock or two after the address), sd_ack down.
+#ifdef PIPPIN_MACHINE
+#include "cdhost.h"
+#endif
+
 struct SdHost {
 	Disk disk[2];
+#ifdef PIPPIN_MACHINE
+	CdHost cd;                     // slot 4: the Main's Mac CD layer (--cd)
+	int n = 512;                   // the request's bytes (sd_blk_cnt + 1 blocks)
+#endif
 	int st = 0;                    // 0 idle, 1 waiting, 2 moving, 3 the acknowledge falls
 	int slot = 0;
 	bool we = false;
 	uint32_t lba = 0;
 	unsigned wait = 0;
 	int k = 0, sub = 0;
-	uint8_t buf[512];
+	uint8_t buf[4096];
 	uint64_t clocks = 0;
 	// what the core sees
 	unsigned mounted = 0, ack = 0;
@@ -774,6 +783,7 @@ int main(int argc, char** argv) {
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
 		else if (a == "--disk0") opt.disk[0] = next();
+		else if (a == "--cd") opt.cd = next();
 		else if (a == "--disk1") opt.disk[1] = next();
 		else if (a == "--disk-latency") opt.disk_latency = (unsigned)std::atoi(next().c_str());
 		else if (a == "--disk-log") opt.disk_log = true;
@@ -1004,6 +1014,7 @@ int main(int argc, char** argv) {
 		sd.disk[i].size = (uint64_t)std::ftell(sd.disk[i].f);
 		std::printf("disk %d: %s, %llu blocks\n", i, opt.disk[i].c_str(), (unsigned long long)(sd.disk[i].size / 512));
 	}
+	if (!opt.cd.empty() && !sd.cd.mount(opt.cd)) return 2;
 #endif
 	uint32_t gpr[32] = {0};
 	std::pair<unsigned, uint64_t> beats[8];   // the register writes the core reported for this instruction
@@ -1135,22 +1146,26 @@ int main(int argc, char** argv) {
 		// the mounts, early (the machine still in reset, as at a core's start)
 		for (int i = 0; i < 2; i++)
 			if (sd.disk[i].f && sd.clocks == 16u + 16u * i) { sd.mounted = 1u << i; sd.img_size = sd.disk[i].size; }
+		if (sd.cd.mounted() && sd.clocks == 48u) { sd.mounted = 1u << 4; sd.img_size = sd.cd.size(); }
 		switch (sd.st) {
 			case 0: {
 				unsigned rd = dut->sd_rd, wr = dut->sd_wr;
 				// The target probes Main's CD capability window even without
 				// a CD image. Complete it with zeros: this bench models no CD
 				// drive. Ignoring slot 4 blocks the channel shared by the disks.
-				bool cd_probe = (rd & 0x10u) && !(wr & 0x10u) && dut->sd_lba == 0x7E120000u;
+				bool cd_probe = (rd & 0x10u) && !(wr & 0x10u) && dut->sd_lba == 0x7E120000u && !sd.cd.mounted();
 				if (cd_probe && !sd.cd_probe_noted) {
 					std::printf("disk host: CD probe slot 4 block %08X, sd_rd %02X sd_wr %02X (%s)\n",
 						(uint32_t)dut->sd_lba, rd, wr, opt.disk_ignore_cd_probe ? "left unanswered" : "answering no CD drive");
 					sd.cd_probe_noted = true;
 				}
-				if (((rd | wr) & 3) || (cd_probe && !opt.disk_ignore_cd_probe)) {
+				bool cd_req = sd.cd.mounted() && ((rd | wr) & 0x10u);
+				if (((rd | wr) & 3) || cd_req || (cd_probe && !opt.disk_ignore_cd_probe)) {
 					sd.slot = ((rd | wr) & 1) ? 0 : ((rd | wr) & 2) ? 1 : 4;
 					sd.we = (wr >> sd.slot) & 1;
 					sd.lba = dut->sd_lba;
+					sd.n = 512 * ((dut->sd_blk_cnt & 0x3F) + 1);
+					if (sd.n > (int)sizeof(sd.buf)) sd.n = sizeof(sd.buf);
 					sd.wait = opt.disk_latency;
 					sd.st = 1;
 				}
@@ -1162,6 +1177,7 @@ int main(int argc, char** argv) {
 				sd.k = 0; sd.sub = 0;
 				if (!sd.we) {
 					if (sd.slot < 2) sd.disk[sd.slot].read(sd.lba, sd.buf);
+					else if (sd.slot == 4 && sd.cd.mounted()) sd.cd.fill(sd.lba, sd.buf, sd.n);
 					else std::memset(sd.buf, 0, sizeof(sd.buf));
 				}
 				sd.buff_addr = 0;
@@ -1171,16 +1187,17 @@ int main(int argc, char** argv) {
 				if (!sd.we) {
 					// a byte a write strobe, the address moving on after it
 					if (sd.sub == 0) { sd.buff_addr = sd.k; sd.buff_dout = sd.buf[sd.k]; sd.buff_wr = true; sd.sub = 1; }
-					else { sd.sub = 0; if (++sd.k == 512) sd.st = 3; }
+					else { sd.sub = 0; if (++sd.k == (sd.slot == 4 ? sd.n : 512)) sd.st = 3; }
 				} else {
 					// the address, then the buffer's answer two clocks later
 					if (sd.sub == 0) { sd.buff_addr = sd.k; sd.sub = 1; }
 					else if (sd.sub == 1) sd.sub = 2;
-					else { sd.buf[sd.k] = (uint8_t)dut->sd_buff_din; sd.sub = 0; if (++sd.k == 512) sd.st = 3; }
+					else { sd.buf[sd.k] = (uint8_t)dut->sd_buff_din; sd.sub = 0; if (++sd.k == (sd.slot == 4 ? sd.n : 512)) sd.st = 3; }
 				}
 				break;
 			default:
-				if (sd.slot == 4) sd.absent_cd_probes++;
+				if (sd.slot == 4 && sd.cd.mounted()) { if (sd.we) sd.cd.command(sd.lba, sd.buf); else sd.reads++; }
+				else if (sd.slot == 4) sd.absent_cd_probes++;
 				else if (sd.we) { sd.disk[sd.slot].write(sd.lba, sd.buf); sd.writes++; } else sd.reads++;
 				if (opt.disk_log && sd.slot < 2)
 					std::printf("disk %d: %s block %u after %llu instructions\n", sd.slot, sd.we ? "wrote" : "read", sd.lba,
