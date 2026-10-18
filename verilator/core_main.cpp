@@ -312,6 +312,9 @@ struct Frame {
 	std::vector<std::vector<uint32_t>> rows;
 	bool in_line = false;
 	bool vb_q = true;
+	// interlaced timing (Taos's NTSC and PAL): two fields woven, field 0's lines the even ones
+	std::vector<std::vector<uint32_t>> field_rows[2];
+	int fields = 0;
 };
 
 // The memory port: a request (one line or one word) is acknowledged after
@@ -1275,6 +1278,15 @@ int main(int argc, char** argv) {
 				fr.rows.back().push_back((uint32_t)dut->vid_r << 16 | (uint32_t)dut->vid_g << 8 | dut->vid_b);
 			}
 			else fr.in_line = false;
+			if (!fr.vb_q && vb && dut->vid_interlaced) {
+				fr.field_rows[dut->vid_field & 1] = fr.rows;
+				fr.rows.clear();
+				if (++fr.fields < 2) { fr.vb_q = vb; return; }
+				fr.fields = 0;
+				for (size_t i = 0; i < std::max(fr.field_rows[0].size(), fr.field_rows[1].size()); i++)
+					for (int f = 0; f < 2; f++)
+						if (i < fr.field_rows[f].size()) fr.rows.push_back(fr.field_rows[f][i]);
+			}
 			if (!fr.vb_q && vb) {
 				size_t w = fr.rows.empty() ? 0 : fr.rows[0].size();
 				// (a %llu in the name: the instruction count, a file per frame)
@@ -1846,10 +1858,20 @@ int main(int argc, char** argv) {
 						}
 						uint32_t xo = (w >> 1) & 0x3FF;
 						unsigned spr = ((w >> 16) & 31) | (((w >> 11) & 31) << 5);
-						static const unsigned spr604[] = {1, 8, 9, 18, 19, 22, 25, 26, 27, 268, 269, 272, 273, 274, 275, 282,
-						                                  284, 285, 287, 952, 953, 954, 955, 959, 1008, 1010, 1013, 1023};
+						// the SPRs the CPU has (dingusppc accepts any): the 604's as measured; the
+						// 603's as DSPPC603 has them (docs/DSPPC603_notes.md: no performance
+						// monitor, DABR or PIR; the table search registers, HASH1 and HASH2
+						// read-only), which the NanoKernel probes for by writing and reading back
+#if CPU_MODEL == 603
+						static const unsigned spr_set[] = {1, 8, 9, 18, 19, 22, 25, 26, 27, 268, 269, 272, 273, 274, 275, 282,
+						                                   284, 285, 287, 976, 977, 980, 981, 982, 1008, 1010};
+						bool has = (spr >= 528 && spr <= 543) || ((spr == 978 || spr == 979) && xo == 339);
+#else
+						static const unsigned spr_set[] = {1, 8, 9, 18, 19, 22, 25, 26, 27, 268, 269, 272, 273, 274, 275, 282,
+						                                   284, 285, 287, 952, 953, 954, 955, 959, 1008, 1010, 1013, 1023};
 						bool has = spr >= 528 && spr <= 543;
-						for (unsigned s : spr604) has = has || s == spr;
+#endif
+						for (unsigned s : spr_set) has = has || s == spr;
 						if (known && (w >> 26) == 31 && (xo == 467 || xo == 339) && !has) {
 							uint32_t at = before.pc;
 							ref_set_spr(26, at);
@@ -1860,8 +1882,8 @@ int main(int argc, char** argv) {
 							ref_set_state(&t);
 							ref_get_state(&before);
 							if (illegal_spr_notes++ < 10)
-								std::printf("note: %s of SPR %u at %08X after %llu instructions: a program exception on a 604\n",
-									xo == 467 ? "mtspr" : "mfspr", spr, at, (unsigned long long)retired);
+								std::printf("note: %s of SPR %u at %08X after %llu instructions: a program exception on a %d\n",
+									xo == 467 ? "mtspr" : "mfspr", spr, at, (unsigned long long)retired, CPU_MODEL);
 						}
 					}
 #endif

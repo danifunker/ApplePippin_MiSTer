@@ -234,23 +234,17 @@ module Pippin_machine
 	input  logic         v_ack,
 	input  logic [255:0] v_rdata,
 
-	// the video registers, to the picture side (Pippin_video), standing
-	// still while they are used
-	output logic         timing_on,
-	output logic [191:0] sw_params,
-	output logic [21:0]  fb_base,
-	output logic [14:0]  row_words,
-	output logic         hs_pos,
-	output logic         vs_pos,
-	output logic [7:0]   dac_cr,
-	output logic [7:0]   dbl_buf_cr,
-	output logic [15:0]  cursor_x,
-	output logic [191:0] cursor_clut,
+	// Taos's registers, to the picture side (Pippin_taosvideo), standing
+	// still while they are used; its vertical blanking back (asynchronous)
+	output logic         taos_on,
+	output logic [479:0] taos_swatch,
+	output logic [31:0]  taos_fbb,
+	output logic [31:0]  taos_roww,
+	output logic         taos_c16,
 	output logic [7:0]   athens_d2,
 	output logic [7:0]   athens_n2,
 	output logic [7:0]   athens_p2,
-	input  logic         vbl_start_tog,
-	input  logic         vbl_end_tog,
+	input  logic         vbl,
 	input  logic         clk_v,
 	input  logic [23:0]  clut_index,
 	output logic [23:0]  clut_rgb,
@@ -591,31 +585,28 @@ Pippin_pcicfg #(.BRIDGE(2)) aspen_pci (
 );
 
 // ---- Taos: its registers and colour table -------------------------------------------------
-logic [31:0] taos_rdata;
-logic [31:0] taos_fb_base, taos_row_words, taos_crt_ctrl;
-logic        taos_color16;
+logic [31:0] taos_rdata, taos_crt_ctrl;
 logic [1:0]  taos_video_mode;
-logic [479:0] taos_swatch;
 logic        taos_vsync;
+logic [7:0]  dac_cr, dbl_buf_cr;          // (RaDACal's, in Grand Central: not the Pippin's)
+logic [15:0] cursor_x;
+logic [191:0] cursor_clut;
+logic [2:0]  vbl_s;
 
 Pippin_taos taos (
 	.clk, .reset(board_reset),
 	.sel(p_sel & p_dev[6]), .clut_sel(p_sel & p_dev[5]), .we(p_we), .addr(p_a[10:2]), .be(p_be), .wdata(p_wd),
 	.rdata(taos_rdata), .mon_id, .tray_closed, .vsync(taos_vsync),
-	.fb_base(taos_fb_base), .row_words(taos_row_words), .color16(taos_color16), .video_mode(taos_video_mode),
+	.fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16), .video_mode(taos_video_mode),
 	.crt_ctrl(taos_crt_ctrl), .swatch(taos_swatch),
 	.clk_v, .v_index_r(clut_index[23:16]), .v_index_g(clut_index[15:8]), .v_index_b(clut_index[7:0]),
 	.v_rgb(clut_rgb)
 );
-assign taos_vsync = 1'b0;                 // the scan-out's, when it exists
-
-// the Control video's outputs, until Taos's scan-out replaces them: no picture
-assign timing_on  = 1'b0;
-assign sw_params  = 192'd0;
-assign fb_base    = 22'd0;
-assign row_words  = 15'd0;
-assign hs_pos     = 1'b0;
-assign vs_pos     = 1'b0;
+// the vertical sync input (GPIO 6, active low: 0 in the blanking, as MAME has it), from the
+// scan-out's clock
+always_ff @(posedge clk) vbl_s <= {vbl_s[1:0], vbl};
+assign taos_vsync = ~vbl_s[2];
+assign taos_on    = taos_crt_ctrl[24];
 
 logic cuda_treq, cuda_cb1, cuda_cb2_oe, cuda_cb2_out;
 logic via_tip, via_byteack, via_cb2_oe, via_cb2_out;
@@ -721,7 +712,8 @@ Pippin_adb adb (
 	.ps2_key, .ps2_mouse, .joy, .power_key, .tr_ev(adb_tr_ev), .tr_info(adb_tr_info)
 );
 
-Pippin_athens athens (
+// the Pippin's Athens Prime at 29 (dingusppc's taos.cpp AthensClocks(0x29), MAME's athensprime.cpp:26)
+Pippin_athens #(.ADDR(7'h29)) athens (
 	.clk, .reset, .scl(iic_scl), .sda(iic_sda), .sda_low(athens_sda_low),
 	.d2(athens_d2), .n2(athens_n2), .p2_mux2(athens_p2)
 );

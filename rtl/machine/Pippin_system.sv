@@ -169,6 +169,8 @@ module Pippin_system
 	output logic         vid_vs,
 	output logic         vid_hblank,
 	output logic         vid_vblank,
+	output logic         vid_field,       // the field shown (interlaced timing: NTSC, PAL)
+	output logic         vid_interlaced,
 
 	// the machine's debug registers (the memory test's report)
 	output logic [31:0]  dbg_status,
@@ -253,13 +255,11 @@ logic [159:0] vw_dbg;
 logic [21:2]  vw_addr;
 logic [31:0]  vw_be;
 logic [255:0] vw_wdata, vw_rdata;
-logic         timing_on, hs_pos, vs_pos, vbl_start_tog, vbl_end_tog;
-logic [191:0] sw_params, cursor_clut;
-logic [21:0]  fb_base;
-logic [14:0]  row_words;
-logic [7:0]   dac_cr, dbl_buf_cr, athens_d2, athens_n2, athens_p2;
+logic         taos_on, taos_c16, vbl;
+logic [479:0] taos_swatch;
+logic [31:0]  taos_fbb, taos_roww;
+logic [7:0]   athens_d2, athens_n2, athens_p2;
 logic [23:0]  clut_index;
-logic [15:0]  cursor_x;
 logic [23:0]  clut_rgb;
 logic         net_link, net_tx_we, net_tx_go, net_tx_done, net_rx_avail, net_rx_done, net_mac_ok;
 logic [7:0]   net_tx_wa, net_rx_ra;
@@ -287,8 +287,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
 	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
-	.timing_on, .sw_params, .fb_base, .row_words, .hs_pos, .vs_pos, .dac_cr, .dbl_buf_cr,
-	.cursor_x, .cursor_clut, .athens_d2, .athens_n2, .athens_p2, .vbl_start_tog, .vbl_end_tog,
+	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .vbl,
 	.clk_v(clk_b), .clut_index, .clut_rgb,
 	.dbg_status, .dbg_passes, .dbg_errors, .dbg_first,
 	.tr_mesh, .tr_ev(scsi_tr_ev), .tr_rec(scsi_tr_rec)
@@ -460,17 +459,17 @@ Pippin_enet enet (
 	.rx_done(net_rx_done), .link(net_link), .mac(net_mac), .mac_ok(net_mac_ok)
 );
 
-Pippin_video video (
+Pippin_taosvideo video (
 	.clk(clk_b), .reset(reset_b),
 	.c_req(vb_req), .c_we(vb_we), .c_line(vb_line), .c_addr(vb_addr[21:2]), .c_be(vb_be), .c_wdata(vb_wdata),
 	.c_ack(vb_ack), .c_rdata(vb_rdata),
 	.ddr_busy(va_busy), .ddr_burstcnt(va_burstcnt), .ddr_addr(va_addr), .ddr_dout, .ddr_dout_ready(va_dout_ready),
 	.ddr_rd(va_rd), .ddr_din(va_din), .ddr_be(va_be), .ddr_we(va_we),
-	.timing_on, .sw_params, .fb_base, .row_words, .hs_pos, .vs_pos, .dac_cr, .dbl_buf_cr,
-	.cursor_x, .cursor_clut, .athens_d2, .athens_n2, .athens_p2, .vbl_start_tog, .vbl_end_tog,
+	.timing_on(taos_on), .swatch(taos_swatch), .fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16),
+	.athens_d2, .athens_n2, .athens_p2, .vbl,
 	.clut_index, .clut_rgb,
 	.ce_pix(vid_ce), .r(vid_r), .g(vid_g), .b(vid_b), .hs(vid_hs), .vs(vid_vs),
-	.hblank(vid_hblank), .vblank(vid_vblank)
+	.hblank(vid_hblank), .vblank(vid_vblank), .field(vid_field), .interlaced(vid_interlaced)
 );
 
 // the L2 cache between the machine's memory port and the crossing
