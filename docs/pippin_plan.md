@@ -63,7 +63,7 @@ CTS/RTS wiring to the MiSTer.
   Aspen, Taos, the flash, the machine's address decoder, the top level.
 - **Main_MiSTer** turns its Mac CD support on by core name
   (`support/mac/mac.cpp`, `is_mac_scsi_family()`: `maclc`, `macplus`,
-  `macquadra800`, `macppc7300`). A core named `ApplePippin` needs one line
+  `macquadra800`, `macppc7300`). A core named `BandaiPippin` needs one line
   on your `Mac-ppc-enhancements` branch.
 - **Simulation speed** (MacPPC7300's machine bench): about 400,000
   instructions a second in lockstep, so the logo (300 million) is about 13
@@ -79,13 +79,13 @@ CTS/RTS wiring to the MiSTer.
 | 5 MB RAM by default (the retail machine), OSD option 13 MB | DingusPPC's and MAME's retail setting | |
 | Video: Taos reports **NTSC (monitor ID 5) by default**, the OSD offers VGA (ID 6) and PAL (ID 3); the scan-out follows Taos's own timing registers (480i at 15.7 kHz for NTSC, 640 x 480 at 31 kHz for VGA), from the frame buffer in DDR3 through MacPPC7300's video path; HDMI through ascal either way | The real @WORLD's default output, and DingusPPC's default (the reference run is NTSC); 15 kHz analog out for CRTs comes with it | VGA default (simpler timing, no interlace) |
 | Clocks: CPU 66 MHz, memory 100 MHz (as MacPPC7300) | The real Pippin's 66 MHz; MacPPC7300's board runs at 70 | 70 MHz if titles need speed |
-| Core name `ApplePippin`, CD on block slot 4, Main_MiSTer's Mac CD path | The same contract as MacPPC7300, so its CD target RTL is reused unchanged | |
+| Core name `BandaiPippin`, CD on block slot 4, Main_MiSTer's Mac CD path | The same contract as MacPPC7300, so its CD target RTL is reused unchanged | |
 | Flash saves in a `.sav` on block slot 2, written back like MacPPC7300's NVRAM | The same mechanism, already proven | |
 
 ## 4. Architecture
 
 ```
-ApplePippin.sv            the MiSTer top (from MacPPC7300.sv): hps_io, OSD, PLL, SDRAM,
+BandaiPippin.sv            the MiSTer top (from MacPPC7300.sv): hps_io, OSD, PLL, SDRAM,
                           DDR3, video out, audio, block slots, ROM download
 rtl/DSPPC603/             the CPU (done)
 rtl/machine/
@@ -148,9 +148,9 @@ The days are working days for me; board tests need you or remote access.
 | 1 (Oct 19) | Import the machine RTL and the machine bench (`core_main` machine mode, `run_machine.py`, `run_gui.py`). `Pippin_machine` with ROM, RAM, Aspen (registers, mirrors, PCI config), Taos registers as storage, everything else open bus. | The ROM runs from reset in lockstep through Aspen's memory sizing and its PCI configuration of Grand Central (the first 1-2 million instructions), device log equal to `machref`'s to there |
 | 2 | Grand Central, DBDMA, VIA, Cuda (cold start holds the CPU), ADB, ESCC, SWIM3, NVRAM, AWACS, Athens on Cuda's I2C; MESH with no targets | Lockstep through Cuda's power-up and PRAM traffic into Mac OS's start (tens of millions of instructions); devdiff clean apart from timing |
 | 3 | Taos: CLUT, GPIO_IN, timing registers, the scan-out from VRAM in DDR3 (MacPPC7300's video path) | The bench's frame at 300 million instructions equals DingusPPC's Pippin logo |
-| 4 | The MiSTer top: `ApplePippin.sv`, `.qsf`, PLL (66/100 MHz), OSD (ROM, RAM size, reset), ROM download, video and audio out; first full Quartus build | It builds; timing within MacPPC7300's usual slack; size measured |
+| 4 | The MiSTer top: `BandaiPippin.sv`, `.qsf`, PLL (66/100 MHz), OSD (ROM, RAM size, reset), ROM download, video and audio out; first full Quartus build | It builds; timing within MacPPC7300's usual slack; size measured |
 | 5 | **Board test 1** (you or remote): the logo on HDMI. Fix what the board shows. Meanwhile: the flash (`Pippin_flash`), its save on slot 2 | The logo and the insert-disc screen on the board; the flash passes its own bench (command sequences against the datasheet) |
-| 6 | MESH with the CD target at ID 3 (MacPPC7300's, its INQUIRY changed to the Pippin's drive: MATSHITA CR-8005A 4.0i), CD audio; the Main_MiSTer line for `ApplePippin` (commit on your branch, you build Main) | In the bench, a disc image boots past the insert-disc screen, its SCSI traffic matching DingusPPC's (`cdr_img2`) |
+| 6 | MESH with the CD target at ID 3 (MacPPC7300's, its INQUIRY changed to the Pippin's drive: MATSHITA CR-8005A 4.0i), CD audio; the Main_MiSTer line for `BandaiPippin` (commit on your branch, you build Main) | In the bench, a disc image boots past the insert-disc screen, its SCSI traffic matching DingusPPC's (`cdr_img2`) |
 | 7 | The AppleJack on ADB, the gamepad and analog-stick mapping, OSD buttons (eject, reset, power) | The controller's ADB traffic as DingusPPC's AppleJack; the pointer moves in the bench |
 | 8 | **Board test 2**: a disc (Kickstart, then a title) from the OSD, sound, controller | A title starts on the board with sound and controller |
 | 9-10 | Compatibility: the titles you have, each to its first interactive screen; fix what fails (lockstep runs of the failing title in the bench find the CPU's and devices' part) | Most titles start; a list in `docs/compatibility.md` |
@@ -188,7 +188,7 @@ release, not the board tests.
    and 8) need about 30 minutes of you each.
 3. **Main_MiSTer:** done 2026-10-18 on a new branch `pippin-cdrom` off
    your fork's `master` (00bdff0, which already has MacPPC7300's CD support),
-   in the worktree `~/repos/Main_MiSTer-pippin`: `applepippin` added to
+   in the worktree `~/repos/Main_MiSTer-pippin`: `bandaipippin` added to
    `is_mac_scsi_family()` and `is_mac_scsi_optimized()` (commit 0e25569, not
    pushed). It builds with `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf`
    on the PATH (`bin/MiSTer`); it goes on the board with the first disc test
@@ -227,7 +227,7 @@ release, not the board tests.
   sizing, PCI, Open Firmware, the NanoKernel's SPR probes, into Mac OS),
   until a bench fault (the VRAM was device space to the reference; fixed,
   being rerun).
-- The MiSTer top (`ApplePippin.sv`, from MacPPC7300's): the OSD (ROM, CD on
+- The MiSTer top (`BandaiPippin.sv`, from MacPPC7300's): the OSD (ROM, CD on
   slot 4, the save flash on slot 2, RAM 5/13/21 MB, video NTSC/VGA/PAL, the
   AppleJack first), Taos's field to the framework. Quartus Analysis &
   Synthesis passes; no fit yet.

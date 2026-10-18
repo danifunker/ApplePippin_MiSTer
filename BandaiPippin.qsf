@@ -230,11 +230,11 @@ set_global_assignment -name DEVICE 5CSEBA6U23I7
 set_global_assignment -name FAMILY "Cyclone V"
 set_global_assignment -name CDF_FILE jtag.cdf
 set_global_assignment -name QIP_FILE sys/sys.qip
-set_global_assignment -name SDC_FILE ApplePippin.sdc
+set_global_assignment -name SDC_FILE BandaiPippin.sdc
 set_global_assignment -name QIP_FILE rtl/DSPPC603/DSPPC603.qip
 set_global_assignment -name QIP_FILE rtl/machine/Pippin_machine.qip
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/machine/Pippin_sdram.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ApplePippin.sv
+set_global_assignment -name SYSTEMVERILOG_FILE BandaiPippin.sv
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to SDRAM_DQ[*]
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to HDMI_TX_CLK
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to HDMI_TX_DE

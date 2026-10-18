@@ -44,7 +44,7 @@ Newest last.
 
 ### 2. The user LED flickers at about 35 Hz
 
-- Here: commit 5bba4ad (`ApplePippin.sv`, "THE LED").
+- Here: commit 5bba4ad (`ApplePippin.sv`, now `BandaiPippin.sv`, "THE LED").
 - What: `MacPPC7300.sv` drives `LED_USER` from `retired[20]`, bit 20 of the
   instructions retired: the CPU's heartbeat, a toggle every 2^20
   instructions, about 35 times a second at 70 MHz ("the LEDs going wild",
