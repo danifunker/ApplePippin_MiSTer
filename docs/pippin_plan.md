@@ -235,3 +235,10 @@ release, not the board tests.
 - Lessons: Verilator builds at `-j 3` (an OOM reboot at -j 0 next to a
   Quartus fit); the dingusppc Pippin's logo frame (Kinka 1.3, 300 M
   instructions) is the reference for the first picture.
+- **First full build** (2026-10-18 16:04, Quartus 17.0, seed 1): 33,731 ALMs
+  (80 %), 340 RAM blocks (61 %), 48 DSP blocks; the CPU's clock 63.14 MHz
+  worst case against its 70 MHz (slack about -1 ns, as MacPPC7300's 70 MHz
+  builds that run on the board), memory 101.0 MHz. Not yet on the board.
+- The reference for discs: dingusppc's Pippin (Kinka 1.3) boots Super
+  Marathon to its title screen at 1.4 billion instructions. The bench now
+  serves a CD (`--cd FILE.cue`, the Main's own response code).
