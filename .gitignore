@@ -40,3 +40,4 @@ build_id.v
 c5_pin_model_dump.txt
 *.sopcinfo
 jtag.cdf
+syn/mister_host
