@@ -51,7 +51,11 @@
 //  has them (its rtl/adb.sv; formats from tashnotes' macintosh/adb/
 //  protocols): the Gravis MouseStick II or Firebird, or the SideWinder 3D
 //  Pro's mouse half (joy: address 3, handler 01, a mouse until its driver
-//  sets 23, 4E or 02), the Gravis Mac GamePad (pad: address 2, handler 02,
+//  sets 23, 4E or 02), the Pippin's AppleJack (joy: address 3, handler 01,
+//  a mouse with the shoulder buttons until the Pippin's driver sets 46: four
+//  bytes, MAME's adbhlepippin.cpp and tashnotes' atmark_pippin_controller.md;
+//  the left stick is the trackball, buttons 1-9 green, red, blue, yellow,
+//  left and right shoulder, circle, diamond, square), the Gravis Mac GamePad (pad: address 2, handler 02,
 //  arrow keys until its driver sets 34) or the SideWinder's joystick (pad:
 //  address 4, handler 5D). Devices sharing an address: Talk 3's lowest
 //  (keyboard, mouse, joy, pad) answers and the others note the collision,
@@ -72,7 +76,7 @@ module Pippin_adb
 	input  logic [10:0] ps2_key,         // [10] toggles, [9] pressed, [8] extended, [7:0] the code
 	input  logic [24:0] ps2_mouse,       // [24] toggles, [23:16] Y, [15:8] X, [5] Y sign, [4] X sign, [0] left button
 	// {stick moves pointer, controller (0 none, 1 MouseStick II, 2 Firebird, 3 GamePad,
-	// 4 SideWinder), right stick {Y, X}, left stick {Y, X}, joystick_0[15:0]}; sticks signed,
+	// 4 SideWinder, 5 AppleJack), right stick {Y, X}, left stick {Y, X}, joystick_0[15:0]}; sticks signed,
 	// up and left negative
 	input  logic [51:0] joy,
 	output logic        power_key,       // a clock: the power key pressed (it also wakes a machine that is off)
@@ -272,7 +276,8 @@ end
 wire [2:0] j_mode = jr[50:48];
 wire       j_ptr  = jr[51];
 wire       m_ms = j_mode == 3'd1, m_fb = j_mode == 3'd2, m_gp = j_mode == 3'd3, m_sw = j_mode == 3'd4;
-wire       joy_on = m_ms | m_fb | m_sw;
+wire       m_aj = j_mode == 3'd5;
+wire       joy_on = m_ms | m_fb | m_sw | m_aj;
 wire       pad_on = m_gp | m_sw;
 wire [3:0] pad_home = m_gp ? 4'd2 : 4'd4;
 wire [7:0] pad_hid0 = m_gp ? 8'h02 : 8'h5D;
@@ -296,8 +301,8 @@ wire [7:0] joy_b  = jr[11:4];         // buttons 1-8
 // (registered with the pad's directions, the size and sign a clock before the rest: at
 // 100 MHz the mouse's report did not fit behind it, nor the rate behind the stick)
 wire       stick_c = j_ptr && (j_mode == 3'd0 || (m_gp && pad_hid == 8'h02));
-wire [7:0] pt_x  = m_gp ? an_x : joy_x;
-wire [7:0] pt_y  = m_gp ? an_y : joy_y;
+wire [7:0] pt_x  = (m_gp | m_aj) ? an_x : joy_x;
+wire [7:0] pt_y  = (m_gp | m_aj) ? an_y : joy_y;
 logic [7:0] pt_xa, pt_ya;
 logic       pt_xn, pt_yn;
 always_ff @(posedge clk) begin
@@ -330,7 +335,16 @@ logic       js_force, js_btn;
 wire        joy_ptrmode = joy_hid == 8'h01 || joy_hid == 8'h02;
 wire        joy_moved = js_force || joy_x[7:1] != js_lx || joy_y[7:1] != js_ly ||
                         (joy_hid == 8'h4E && joy_t[7:1] != js_lt) || joy_b != js_lb;
-wire        joy_has = joy_on && (joy_ptrmode ? (j_ptr && (pt_xo || pt_yo || joy_b[0] != js_btn)) : joy_moved);
+// the AppleJack: its buttons and D-pad {up, right, down, left, buttons 9-1}, reported on any change
+wire [12:0] aj_now  = {jd_u, jd_r, jd_d, jd_l, jr[12:4]};
+logic [12:0] aj_last;
+wire        aj_has  = js_force || pt_xo || pt_yo || aj_now != aj_last;
+wire        joy_has = joy_on && (m_aj ? aj_has :
+                      joy_ptrmode ? (j_ptr && (pt_xo || pt_yo || joy_b[0] != js_btn)) : joy_moved);
+// its report, buttons active low: {left shoulder, Y}, {right shoulder, X}; with handler 46
+// also {green, red, down, right, left, up, yellow, blue} and {F8, diamond, circle, square}
+wire  [7:0] aj_b2 = ~{aj_now[0], aj_now[1], aj_now[10], aj_now[11], aj_now[9], aj_now[12], aj_now[3], aj_now[2]};
+wire  [7:0] aj_b3 = {5'b11111, ~aj_now[7], ~aj_now[6], ~aj_now[8]};
 
 // MouseStick II (23): a still mouse word, X and Y x 75 / 16 (about +-600), buttons active low
 // {1, 1, 1, right top (5), left top (4), trigger (1), bottom (3), top (2)}
@@ -349,7 +363,11 @@ wire  [7:0] fb_b2 = {1'b1, ~joy_b[1], ~joy_b[2], 2'b11, ~joy_b[0], ~joy_b[3], 1'
 logic [63:0] joy_rep;                 // Talk 0, from its first byte
 logic [3:0]  joy_n;
 always_comb begin
-	if (joy_ptrmode) begin
+	if (m_aj) begin
+		joy_n   = (joy_hid == 8'h46) ? 4'd4 : 4'd2;
+		joy_rep = {~aj_now[4], pt_yo ? ptr_dy : 7'd0, ~aj_now[5], pt_xo ? ptr_dx : 7'd0, aj_b2, aj_b3, 32'd0};
+	end
+	else if (joy_ptrmode) begin
 		joy_n = 4'd2; joy_rep = {~joy_b[0], ptr_dy, 1'b1, ptr_dx, 48'd0};
 	end
 	else if (joy_hid == 8'h4E) begin
@@ -438,6 +456,7 @@ logic signed [10:0] st_dx_q, st_dy_q;
 logic [63:0]       joy_rep_q, pad_rep_q;
 logic [3:0]        joy_n_q, pad_n_q;
 logic [7:0]        jx_q, jy_q, jt_q, jrx_q, jb_q;
+logic [12:0]       aj_q;
 logic [3:0]        pdir_q, pk_sent_q;
 always_ff @(posedge clk) begin
 	mouse_has_q <= mouse_has;
@@ -453,6 +472,7 @@ always_ff @(posedge clk) begin
 	pad_rep_q   <= pad_rep;
 	pad_n_q     <= pad_n;
 	{jx_q, jy_q, jt_q, jrx_q, jb_q} <= {joy_x, joy_y, joy_t, joy_rx, joy_b};
+	aj_q        <= aj_now;
 	pdir_q      <= p_dir;
 	pk_sent_q   <= pk_sent;
 end
@@ -509,6 +529,7 @@ wire       srq_want = (!kq_empty && kbd_srq_en && cmd_full[7:4] != kbd_addr) ||
 // the handlers a Listen 3 may set
 wire [7:0] l_hid   = lrx[7:0];
 wire       joy_acc = l_hid == 8'h01 || ((m_ms | m_fb) && l_hid == 8'h23) || (m_fb && l_hid == 8'h4E) ||
+                     (m_aj && l_hid == 8'h46) ||
                      (m_sw && l_hid == 8'h02);
 wire       pad_acc = (m_gp && (l_hid == 8'h02 || l_hid == 8'h34)) || (m_sw && l_hid == 8'h5D);
 
@@ -691,7 +712,7 @@ always_ff @(posedge clk) begin
 						else if (jh && joy_has_q) begin
 							say(joy_n_q, joy_rep_q);
 							js_lx <= jx_q[7:1]; js_ly <= jy_q[7:1]; js_lt <= jt_q[7:1];
-							js_lb <= jb_q; js_btn <= jb_q[0]; js_force <= 1'b0;
+							js_lb <= jb_q; js_btn <= jb_q[0]; js_force <= 1'b0; aj_last <= aj_q;
 						end
 						else if (ph && pad_has_q) begin
 							say(pad_n_q, pad_rep_q);
