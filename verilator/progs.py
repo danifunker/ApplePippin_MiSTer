@@ -1,0 +1,2167 @@
+#!/usr/bin/env python3
+"""Programs for the DSPPC604 pipeline test bench (core_tb).
+
+    python progs.py golden OUT [results.csv]     the real-604 integer vectors as code
+    python progs.py goldenfp OUT [results.csv]   the real-604 floating-point vectors as code
+    python progs.py random OUT COUNT [SEED] [xlate]  random instruction stream for lockstep,
+                                                 with address translation on if asked
+    python progs.py fprandom OUT COUNT [SEED]    random floating-point program, with the
+                                                 state fpmodel.py expects after every instruction
+    python progs.py exctest OUT                  each exception once, with what its handler must see
+    python progs.py mmutest OUT                  address translation: BATs, page tables, DSI, ISI, tlbie
+    python progs.py resvtest OUT                 lwarx/stwcx., dcbz and the cache instructions
+    python progs.py cachetest OUT                the caches: write-back, the cache instructions, HID0, DMA
+    python progs.py widecachetest OUT            doublewords through cached and uncached aliases
+    python progs.py updtest OUT                  the update forms, the indexed loads with rD = rB first
+    python progs.py irqtest OUT [LOOPS]          a computation that interrupts must not disturb
+                                                 (run with --irq-every and --tb-run)
+    python progs.py irqwalktest OUT [LOOPS]      the same with a page-table walk every loop
+    python progs.py irqwalkfaulttest OUT [LOOPS] interrupts while walks end in page faults
+    python progs.py vecwalktest OUT              a fetch's walk into the page of the vector a DSI
+                                                 redirects to, started in that cycle (lockstep)
+    python progs.py memtest OUT.sv               the machine's memory-test boot ROM, as RTL
+                                                 (rtl/machine/MacPPC7300_bootrom.sv)
+    python progs.py specfetchrom OUT.rom         machine lockstep: discarded I-fetch before an MMIO load
+
+The file format is described at the top of core_main.cpp.
+"""
+
+import csv
+import os
+import random
+import sys
+
+CODE_BASE = 0x00010000
+DATA_A = 0x00800000          # base register r1
+DATA_B = 0x00900001          # base register r2: deliberately unaligned
+DATA_SPAN = 0x1000           # bytes initialised either side of each base
+POOL_BASE = 0x00400000       # constants for the floating-point programs
+
+
+# ---- encoders ------------------------------------------------------------------
+def D(op, rt, ra, imm):
+    return (op << 26) | (rt << 21) | (ra << 16) | (imm & 0xFFFF)
+
+
+def X(rt, ra, rb, xo, rc=0):
+    return (31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (xo << 1) | rc
+
+
+def M(op, rs, ra, sh, mb, me, rc=0):
+    return (op << 26) | (rs << 21) | (ra << 16) | (sh << 11) | (mb << 6) | (me << 1) | rc
+
+
+def li32(r, v):
+    """Load a 32-bit constant, in one instruction when it fits."""
+    v &= 0xFFFFFFFF
+    if v < 0x8000 or v >= 0xFFFF8000:
+        return [D(14, r, 0, v)]                       # li
+    if v & 0xFFFF == 0:
+        return [D(15, r, 0, v >> 16)]                 # lis
+    return [D(15, r, 0, v >> 16), D(24, r, r, v)]     # lis, ori
+
+
+def mtspr(spr, rs):
+    return (31 << 26) | (rs << 21) | ((spr & 31) << 16) | ((spr >> 5) << 11) | (467 << 1)
+
+
+def mfspr(spr, rd):
+    return (31 << 26) | (rd << 21) | ((spr & 31) << 16) | ((spr >> 5) << 11) | (339 << 1)
+
+
+def mtcrf(mask, rs):
+    return (31 << 26) | (rs << 21) | (mask << 12) | (144 << 1)
+
+
+def mtmsr(rs):
+    return (31 << 26) | (rs << 21) | (146 << 1)
+
+
+B_SELF = 0x48000000
+RFI = 0x4C000064
+XER, LR, CTR = 1, 8, 9
+SRR0, SRR1 = 26, 27
+MSR_FP, MSR_PR, MSR_EE = 0x2000, 0x4000, 0x8000
+
+
+def set_msr(value, scratch=0):
+    """The core leaves reset with MSR = 0x40 (vectors at FFFxxxxx, no floating point)."""
+    return li32(scratch, value) + [mtmsr(scratch)]
+
+
+HID0 = 1008
+HID0_ICE, HID0_DCE = 0x8000, 0x4000
+
+
+def caches_on(scratch=7, value=HID0_ICE | HID0_DCE):
+    """HID0: both caches enabled (they are off after reset)."""
+    return li32(scratch, value) + [mtspr(HID0, scratch)]
+
+
+def install_handlers(p):
+    """Exception handlers at the vectors. They leave SRR0 (advanced) and SRR1
+    in r30 and r31, where a lockstep run compares them.
+      program, FP unavailable, alignment: step over the instruction
+      DSI: the same, with DAR and DSISR left in r28 and r29
+      system call: switch between user and supervisor mode"""
+    skip = [mfspr(SRR0, 30), mfspr(SRR1, 31), D(14, 30, 30, 4), mtspr(SRR0, 30), RFI]
+    for vec in (0x600, 0x700, 0x800):
+        for i, w in enumerate(skip):
+            p.data[vec + 4 * i] = w
+    for i, w in enumerate(skip[:2] + [mfspr(19, 28), mfspr(18, 29)] + skip[2:]):
+        p.data[0x300 + 4 * i] = w
+    toggle = [mfspr(SRR0, 30), mfspr(SRR1, 31), D(26, 31, 31, MSR_PR), mtspr(SRR1, 31), RFI]
+    for i, w in enumerate(toggle):
+        p.data[0xC00 + 4 * i] = w
+
+
+class Program:
+    def __init__(self):
+        self.words = []          # code
+        self.checks = []         # (index into words, text)
+        self.data = {}           # addr -> word
+        self.expect = {}         # addr -> word memory must hold at the end
+
+    def pc(self):
+        return CODE_BASE + 4 * len(self.words)
+
+    def write(self, path):
+        with open(path, "w", newline="\n") as fh:
+            fh.write("R %08X\n" % CODE_BASE)
+            for a in sorted(self.data):
+                fh.write("M %08X %08X\n" % (a, self.data[a]))
+            for i, w in enumerate(self.words):
+                fh.write("M %08X %08X\n" % (CODE_BASE + 4 * i, w))
+            for i, text in self.checks:
+                fh.write("C %08X %s\n" % (CODE_BASE + 4 * i, text))
+            for a in sorted(self.expect):
+                fh.write("X %08X %08X\n" % (a, self.expect[a]))
+            fh.write("E %08X\n" % (CODE_BASE + 4 * (len(self.words) - 1)))
+
+
+# ---- the golden vectors as one program -----------------------------------------
+MEMV_BASE = 0x00700000       # the memory vectors' buffers, 8 bytes each
+FP_LS_XO = (535, 567, 599, 631, 663, 695, 727, 759, 983)   # lfsx ... stfiwx
+
+
+def is_fp_insn(insn):
+    """Floating-point arithmetic, FPSCR instructions, loads and stores: run
+    by goldenfp, with MSR[FP] on and the registers loaded from a pool."""
+    op = insn >> 26
+    return op in (59, 63) or 48 <= op <= 55 or (op == 31 and ((insn >> 1) & 0x3FF) in FP_LS_XO)
+
+
+def is_mem_vector(r):
+    """A memory vector (the sources with `mem` in their name): r6 points at an
+    8-byte buffer that starts as the f6 pattern and is recorded in f6's
+    place; r6 is recorded less the buffer's address."""
+    return "mem" in r["source"].split("-")
+
+
+def mem_buffer(p, v, n):
+    """The buffer of memory vector number n: its contents before, and what
+    memory must hold at the end. Returns its address."""
+    buf = MEMV_BASE + 8 * n
+    p.data[buf], p.data[buf + 4] = v["in_f6"] >> 32, v["in_f6"] & 0xFFFFFFFF
+    p.expect[buf], p.expect[buf + 4] = v["out_f6"] >> 32, v["out_f6"] & 0xFFFFFFFF
+    return buf
+
+
+def golden(out, path):
+    p = Program()
+    p.words += caches_on() + set_msr(0)
+    n = n_mem = 0
+    with open(path) as fh:
+        for r in csv.DictReader(fh):
+            insn = int(r["insn"], 16)
+            if is_fp_insn(insn):
+                continue                              # see goldenfp
+            v = {k: int(r[k], 16) for k in r if k.startswith(("in_", "out_"))}
+            r6_in, r6_out = v["in_r6"], v["out_r6"]
+            if is_mem_vector(r):
+                buf = mem_buffer(p, v, n_mem)
+                n_mem += 1
+                r6_in, r6_out = buf + r6_in, buf + r6_out
+            setup = [
+                li32(3, v["in_r3"]), li32(4, v["in_r4"]), li32(5, v["in_r5"]), li32(6, r6_in),
+                li32(7, v["in_cr"]) + [mtcrf(0xFF, 7)],
+                li32(8, v["in_xer"]) + [mtspr(XER, 8)],
+                li32(9, v["in_ctr"]) + [mtspr(CTR, 9)],
+            ]
+            # vary which values are produced just ahead of the instruction
+            k = n % len(setup)
+            for group in setup[k:] + setup[:k]:
+                p.words += group
+            p.checks.append((len(p.words), "%08X %08X %08X %08X %08X %08X %08X %08X 0 0 0 0 %s#%s" % (
+                v["out_r3"], v["out_r4"], v["out_r5"], r6_out,
+                v["out_cr"], v["out_xer"], v["out_ctr"], 0, r["name"], r["index"])))
+            p.words.append(insn)
+            n += 1
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d vectors (%d through memory), %d instructions -> %s" % (n, n_mem, len(p.words), out))
+
+
+def lfd(fr, ra, d):
+    return D(50, fr, ra, d)
+
+
+def mtfsf(fm, frb, rc=0):
+    return (63 << 26) | (fm << 17) | (frb << 11) | (711 << 1) | rc
+
+
+def check_text(r, cr, xer, ctr, fpscr, f, tag):
+    return "%08X %08X %08X %08X %08X %08X %08X %08X %016X %016X %016X %016X %s" % (
+        r[0], r[1], r[2], r[3], cr, xer, ctr, fpscr, f[0], f[1], f[2], f[3], tag)
+
+
+def goldenfp(out, path):
+    """Each vector: f4-f6 and FPSCR loaded from a constant pool, f3 zeroed, CR
+    set, then the instruction. r10 points at the vector's constants. A memory
+    vector also gets its buffer, at r6."""
+    p = Program()
+    p.words += caches_on() + set_msr(MSR_FP)
+    n = n_mem = 0
+    with open(path) as fh:
+        for r in csv.DictReader(fh):
+            insn = int(r["insn"], 16)
+            if not is_fp_insn(insn):
+                continue
+            v = {k: int(r[k], 16) for k in r if k.startswith(("in_", "out_"))}
+            block = POOL_BASE + 40 * n
+            for i, d in enumerate((v["in_f4"], v["in_f5"], v["in_f6"], v["in_fpscr"], 0)):
+                p.data[block + 8 * i] = d >> 32
+                p.data[block + 8 * i + 4] = d & 0xFFFFFFFF
+            setup = [
+                [lfd(4, 10, 0)], [lfd(5, 10, 8)], [lfd(6, 10, 16)], [lfd(3, 10, 32)],
+                [lfd(7, 10, 24), mtfsf(0xFF, 7)],
+                li32(7, v["in_cr"]) + [mtcrf(0xFF, 7)],
+            ]
+            r6_out, f6_out = v["out_r6"], v["out_f6"]
+            if is_mem_vector(r):
+                buf = mem_buffer(p, v, n_mem)
+                n_mem += 1
+                setup.append(li32(6, buf + v["in_r6"]))
+                r6_out, f6_out = buf + r6_out, v["in_f6"]       # the register keeps the pattern
+            elif n_mem:
+                setup.append(li32(6, v["in_r6"]))               # r6 back from the last buffer
+            k = n % len(setup)
+            p.words += [D(15, 10, 0, block >> 16), D(24, 10, 10, block)]
+            for group in setup[k:] + setup[:k]:
+                p.words += group
+            p.checks.append((len(p.words), check_text(
+                [v["out_r3"], v["out_r4"], v["out_r5"], r6_out], v["out_cr"], v["out_xer"],
+                v["out_ctr"], v["out_fpscr"], [v["out_f3"], v["out_f4"], v["out_f5"], f6_out],
+                "%s#%s" % (r["name"], r["index"]))))
+            p.words.append(insn)
+            n += 1
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d vectors (%d through memory), %d instructions -> %s" % (n, n_mem, len(p.words), out))
+
+
+# ---- exceptions, one at a time ---------------------------------------------------
+NOP = 0x60000000
+DAR, DSISR, DEC, SPRG0, SPRG1 = 19, 18, 22, 272, 273
+
+
+def align_dsisr(insn):
+    """What a 604 puts in DSISR for an alignment exception: the architecture's
+    opcode fields, then, where the architecture says rD and rA, the measured
+    rD and rD - 1 (8 and 7 for dcbz)."""
+    if insn >> 26 == 31:
+        d = (((insn >> 1) & 3) << 15) | (((insn >> 6) & 1) << 14) | (((insn >> 7) & 15) << 10)
+        rd = 8 if ((insn >> 1) & 0x3FF) == 1014 else (insn >> 21) & 31
+    else:
+        d = (((insn >> 26) & 1) << 14) | (((insn >> 27) & 15) << 10)
+        rd = (insn >> 21) & 31
+    return d | (rd << 5) | ((rd - 1) & 31)
+
+
+def exctest(out):
+    """Raises each exception the core has, once. The handler copies SRR0, SRR1,
+    DAR and DSISR to r3-r6 and returns past the instruction (with the
+    floating-point trap enables off), so the check on the following nop sees
+    exactly what the exception delivered."""
+    p = Program()
+    body = [mfspr(SRR0, 3), mfspr(SRR1, 4), mfspr(DAR, 5), mfspr(DSISR, 6)]
+    tail = [D(14, 31, 0, 0x900), X(4, 31, 31, 60), mtspr(SRR1, 31), RFI]      # SRR1 &= ~(FE0|FE1)
+    skip = body + [D(14, 30, 3, 4), mtspr(SRR0, 30)] + tail
+    for vec in (0x600, 0x700, 0x800):
+        for i, w in enumerate(skip):
+            p.data[vec + 4 * i] = w
+    for i, w in enumerate(body + tail):                                        # sc: SRR0 is already past it
+        p.data[0xC00 + 4 * i] = w
+
+    st = {"dar": 0, "dsisr": 0, "fpscr": 0, "msr": 0}
+
+    def setm(v):
+        p.words.extend(set_msr(v, 7))
+        st["msr"] = v
+
+    def expect(insn, info, pc_after=False, align_ea=None, xer=0):
+        """insn raises an exception; the nop after it is checked."""
+        at = p.pc()
+        p.words.append(insn)
+        if align_ea is not None:
+            st["dar"] = align_ea
+            st["dsisr"] = align_dsisr(insn)
+        srr1 = (st["msr"] & 0x87C0FFFF) | info
+        st["seen"] = [at + 4 if pc_after else at, srr1, st["dar"], st["dsisr"]]
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(
+            st["seen"], 0, xer, 0, st["fpscr"], [0, 0, 0, 0], "exc%X" % len(p.checks))))
+        st["msr"] &= ~0x900                    # the handler returns with FE0 and FE1 off
+
+    def no_exc(insn, xer=0):
+        """insn must execute without an exception: what the last handler left
+        in r3-r6 is still there afterwards."""
+        p.words.append(insn)
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(
+            st["seen"], 0, xer, 0, st["fpscr"], [0, 0, 0, 0], "noexc%X" % len(p.checks))))
+
+    p.words += caches_on()
+    setm(0)
+    p.words += li32(1, DATA_A)
+    expect(0x44000002, 0, pc_after=True)                          # sc
+    expect(D(3, 31, 0, 0), 0x00020000)                            # twi 31,r0,0: trap always
+    expect(0x00000000, 0x00080000)                                # not an instruction
+    expect(mfspr(1009, 9), 0x00080000)                            # an SPR that does not exist (HID1 is the 604e's)
+    expect(X(5, 0, 9, 150), 0x00080000)                           # stwcx without the dot: illegal on a 604
+    expect(0xFC201090, 0)                                         # fmr with MSR[FP] off
+    setm(MSR_FP)
+    expect(D(46, 29, 1, 2), 0, align_ea=DATA_A + 2)               # lmw at an odd address
+    expect(D(47, 29, 1, 6), 0, align_ea=DATA_A + 6)               # stmw
+    expect(D(50, 1, 1, 1), 0, align_ea=DATA_A + 1)                # lfd
+    p.words += li32(8, 3)
+    expect(X(2, 1, 8, 663), 0, align_ea=DATA_A + 3)               # stfsx
+    # a string operation that is not word-aligned and crosses a 4 KB boundary,
+    # or is word-aligned and crosses a 256 MB boundary, is not performed either
+    p.words += li32(8, DATA_A + 0xFFE)
+    expect(X(29, 8, 4, 597), 0, align_ea=DATA_A + 0xFFE)          # lswi r29,r8,4: bytes FFE-1001
+    no_exc(X(29, 8, 2, 725))                                      # stswi r29,r8,2: ends at FFF
+    p.words += li32(0, 0) + li32(9, 3) + [mtspr(XER, 9)]
+    expect(X(29, 8, 0, 533), 0, align_ea=DATA_A + 0xFFE, xer=3)   # lswx r29,r8,r0: XER says 3 bytes
+    p.words += li32(9, 2) + [mtspr(XER, 9)]
+    no_exc(X(29, 8, 0, 661), xer=2)                               # stswx, 2 bytes
+    p.words += li32(9, 0) + [mtspr(XER, 9)]
+    p.words += li32(8, DATA_A + 0xFFC)
+    no_exc(X(29, 8, 8, 597))                                      # lswi, word-aligned across 4 KB
+    p.words += li32(8, 0x0FFFFFFC)
+    expect(X(29, 8, 8, 725), 0, align_ea=0x0FFFFFFC)              # stswi across 256 MB
+    setm(MSR_FP | MSR_PR)
+    expect(X(9, 0, 0, 83), 0x00040000)                            # mfmsr in user mode
+    expect(mfspr(SRR0, 9), 0x00040000)                            # a supervisor SPR in user mode
+    expect(mfspr(1023, 9), 0x00040000)                            # PIR too
+    expect(mfspr(1009, 9), 0x00080000)                            # one that does not exist is illegal, not privileged (measured)
+    no_exc(mfspr(268, 9))                                         # the time base through mfspr, in user mode
+    expect(0x44000002, 0, pc_after=True)                          # sc from user mode
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks -> %s" % (len(p.words), len(p.checks), out))
+
+
+def fpexctest(out):
+    """Enabled floating-point exceptions: one raised by the instruction itself,
+    and one pending when the trap enable is switched on."""
+    p = Program()
+    body = [mfspr(SRR0, 3), mfspr(SRR1, 4), mfspr(DAR, 5), mfspr(DSISR, 6)]
+    tail = [D(14, 31, 0, 0x900), X(4, 31, 31, 60), mtspr(SRR1, 31), RFI]
+    for i, w in enumerate(body + [D(14, 30, 3, 4), mtspr(SRR0, 30)] + tail):
+        p.data[0x700 + 4 * i] = w
+    FE0 = 0x800
+    p.words += caches_on() + set_msr(MSR_FP | FE0, 7) + li32(1, DATA_A) + li32(9, 0)
+    p.words.append((63 << 26) | (6 << 23) | (8 << 12) | (134 << 1))      # mtfsfi 6,8: FPSCR[VE] on
+    at = p.pc()
+    p.words.append((63 << 26) | (3 << 21) | (0 << 16) | (0 << 11) | (18 << 1))   # fdiv f3,f0,f0: 0/0
+    # Independent work may execute speculatively behind the faulting FPU
+    # instruction. Each increment must retire exactly once after the handler.
+    p.words += [D(14, 9, 9, 1)] * 4
+    fpscr = 0x80000000 | 0x40000000 | 0x20000000 | 0x00200000 | 0x80     # FX FEX VX VXZDZ, VE
+    srr1 = (MSR_FP | FE0) | 0x00100000
+    p.words.append(NOP)
+    p.checks.append((len(p.words) - 1, check_text([at, srr1, 0, 0], 0, 0, 0, fpscr, [0, 0, 0, 0], "own")))
+    # FEX is still set and the handler returned with the enables off: switching
+    # them on again must trap on the next instruction, before it executes, and
+    # SRR1[15] then says SRR0 is not the instruction that caused it (measured)
+    p.words += set_msr(MSR_FP | FE0, 7)
+    at = p.pc()
+    p.words.append(D(14, 9, 0, 0x55))                                    # li r9,0x55: must not execute
+    p.words.append(NOP)
+    p.checks.append((len(p.words) - 1, check_text([at, srr1 | 0x00010000, 0, 0], 0, 0, 0, fpscr, [0, 0, 0, 0], "pending")))
+    p.words.append(D(36, 9, 1, 0))
+    p.expect[DATA_A] = 4
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks -> %s" % (len(p.words), len(p.checks), out))
+
+
+# ---- address translation ----------------------------------------------------------
+MSR_IR, MSR_DR = 0x20, 0x10
+IBAT0U, DBAT0U, SDR1 = 528, 536, 25
+
+
+def mtsr(n, rs):
+    return (31 << 26) | (rs << 21) | (n << 16) | (210 << 1)
+
+
+def tlbie(rb):
+    return (31 << 26) | (rb << 11) | (306 << 1)
+
+
+def batu(ea, bl_128k, vs=1, vp=0):
+    """BAT upper word: 128 KB blocks, bl_128k of them (a power of two)."""
+    return (ea & 0xFFFE0000) | ((bl_128k - 1) << 2) | (vs << 1) | vp
+
+
+def batl(pa, pp, wimg=0):
+    return (pa & 0xFFFE0000) | (wimg << 3) | pp
+
+
+def pte_words(vsid, ea, pa, pp, wimg=0, h=0, r=0, c=0):
+    w0 = 0x80000000 | (vsid << 7) | (h << 6) | ((ea >> 22) & 0x3F)
+    w1 = (pa & 0xFFFFF000) | (r << 8) | (c << 7) | (wimg << 3) | pp
+    return w0, w1
+
+
+def pteg_addr(sdr1, vsid, ea, h):
+    hash1 = (vsid & 0x7FFFF) ^ ((ea >> 12) & 0xFFFF)
+    hsh = (~hash1 & 0x7FFFF) if h else hash1
+    return (sdr1 & 0xFFFF0000) | (((hsh >> 10) & (sdr1 & 0x1FF)) << 16) | ((hsh & 0x3FF) << 6)
+
+
+class PageTable:
+    """Places PTEs in a program's memory image: the next free slot of the
+    group the address hashes to. ptes maps each PTE's word-1 address to the
+    value it must hold when the program ends."""
+
+    def __init__(self, p, sdr1, srs):
+        self.p, self.sdr1, self.srs = p, sdr1, srs
+        self.slots = {}
+        self.ptes = {}
+
+    def map(self, ea, pa, pp, wimg=0, h=0, r_final=0, c_final=0, vsid=None):
+        if vsid is None:
+            vsid = self.srs[ea >> 28] & 0xFFFFFF
+        grp = pteg_addr(self.sdr1, vsid, ea, h)
+        slot = self.slots.get(grp, 0)
+        assert slot < 8, "page table group full"
+        self.slots[grp] = slot + 1
+        w0, w1 = pte_words(vsid, ea, pa, pp, wimg, h)
+        a = grp + 8 * slot
+        self.p.data[a], self.p.data[a + 4] = w0, w1
+        self.ptes[a + 4] = w1 | (r_final << 8) | (c_final << 7)
+        return a + 4
+
+
+def mmutest(out):
+    """Translation on: BATs, page tables (both hash groups), the referenced and
+    changed bits, every cause of DSI and ISI with the DAR, DSISR and SRR1 it
+    must deliver, accesses that cross into an unmapped page, tlbie, the keys
+    in user mode, eciwx/ecowx. Nothing here is compared with an emulator; the
+    expectations are the architecture's and the 604 manual's."""
+    p = Program()
+    BLR = 0x4E800020
+    st = {"r": [0, 0, 0, 0], "msr": 0}
+
+    # handlers: DSI and the others copy SRR0, SRR1, DAR, DSISR to r3-r6 and
+    # step over the instruction; ISI returns to LR instead (the failed fetch
+    # was a blrl); sc toggles user mode
+    body = [mfspr(SRR0, 3), mfspr(SRR1, 4), mfspr(DAR, 5), mfspr(DSISR, 6)]
+    for vec in (0x300, 0x600, 0x700):
+        for i, w in enumerate(body + [D(14, 30, 3, 4), mtspr(SRR0, 30), RFI]):
+            p.data[vec + 4 * i] = w
+    for i, w in enumerate(body[:2] + [mfspr(LR, 30), mtspr(SRR0, 30), RFI]):
+        p.data[0x400 + 4 * i] = w
+    for i, w in enumerate([mfspr(SRR0, 30), mfspr(SRR1, 31), D(26, 31, 31, MSR_PR), mtspr(SRR1, 31), RFI]):
+        p.data[0xC00 + 4 * i] = w
+
+    def check(tag):
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(
+            list(st["r"]), 0, 0, 0, 0, [0, 0, 0, 0], tag)))
+
+    def expect(insn, vec, info, dar=None, dsisr=None, pc=None):
+        at = p.pc()
+        p.words.append(insn)
+        st["r"][0] = at if pc is None else pc
+        st["r"][1] = (st["msr"] & 0x87C0FFFF) | info
+        if vec == 0x300:
+            st["r"][2], st["r"][3] = dar, dsisr
+        check("x%03X_%d" % (vec, len(p.checks)))
+
+    def isi(target, info):
+        """blrl to target must take an ISI with these SRR1 bits."""
+        p.words += li32(9, target) + [mtspr(LR, 9)]
+        expect(0x4E800021, 0x400, info, pc=target)                            # blrl
+
+    def load(reg, ra, d, value):
+        """lwz must deliver value, with no exception."""
+        p.words.append(D(32, reg, ra, d))
+        st["r"][reg - 3] = value
+        check("ld%d" % len(p.checks))
+
+    # ---- the map ----
+    # BATs: identity for the first 128 KB (vectors, this code) and the page
+    # table; a read-only data block; a no-access instruction block
+    bats = {
+        IBAT0U: batu(0, 1, vs=1, vp=1), IBAT0U + 1: batl(0, 2),
+        IBAT0U + 2: batu(0x00600000, 1), IBAT0U + 3: batl(0x00020000, 0),
+        DBAT0U: batu(0, 1, vs=1, vp=1), DBAT0U + 1: batl(0, 2),
+        DBAT0U + 2: batu(0x00500000, 1), DBAT0U + 3: batl(0x00320000, 1),
+        DBAT0U + 4: batu(0x00100000, 1), DBAT0U + 5: batl(0x00100000, 2),
+    }
+    # segment registers: 0 plain, 1 no-execute, 2 supervisor key, 3 direct-store
+    srs = {0: 0x10, 1: 0x10000011, 2: 0x40000012, 3: 0x80000013}
+    for n in range(4, 16):
+        srs[n] = 0x20 + n
+    sdr1 = 0x00100000                       # 64 KB table at 1 MB, HTABMASK 0
+    CODE = 0x00020000                       # physical page holding one blr
+    p.data[CODE] = BLR
+
+    table = PageTable(p, sdr1, srs)
+    map_page = table.map
+    ptes = table.ptes
+
+    A, B, U, RO, SEC, TL, XP, XG, RO2 = (0x00200000, 0x00201000, 0x00202000, 0x00203000,
+                                         0x00204000, 0x00205000, 0x00206000, 0x00207000, 0x00209000)
+    map_page(A, 0x00300000, 2, r_final=1, c_final=1)          # loaded then stored: C set by a second walk
+    map_page(B, 0x00301000, 2, r_final=1, c_final=1)
+    map_page(RO, 0x00303000, 3, r_final=1)                    # read-only: a load, then a store that faults
+    map_page(SEC, 0x00304000, 2, h=1, r_final=1)              # in the secondary group
+    tl_pte = map_page(TL, 0x00305000, 2, r_final=1)           # remapped after a tlbie
+    map_page(XP, CODE, 2, r_final=1)                          # executable
+    map_page(XG, CODE, 2, wimg=1, r_final=1)                  # guarded: no fetch, but the walk sets R
+    map_page(RO2, 0x00309000, 3, r_final=1)                   # first touched by a store that faults
+    map_page(0x10000000, CODE, 2)                             # no-execute segment: never walked
+    map_page(0x20000000, CODE, 0, r_final=1)                  # key: no access in supervisor mode, read in user mode
+    map_page(0x30000000, CODE, 2)                             # direct-store segment: never walked
+
+    p.data[0x00301000] = 0x11111111
+    p.data[0x00301FFC] = 0x22222222
+    p.data[0x00303000] = 0x33333333
+    p.data[0x00304000] = 0x44444444
+    p.data[0x00305000] = 0x55555555
+    p.data[0x00306000] = 0x66666666
+    p.data[0x00320000] = 0x77777777
+
+    # ---- set it all up, translation off ----
+    p.words += caches_on()
+    for n, v in srs.items():
+        p.words += li32(7, v) + [mtsr(n, 7)]
+    for n, v in bats.items():
+        p.words += li32(7, v) + [mtspr(n, 7)]
+    p.words += li32(7, sdr1) + [mtspr(SDR1, 7)]
+    p.words += li32(10, B) + li32(11, 0xABCD1234) + li32(12, U) + li32(13, RO) + li32(14, SEC) + li32(15, TL)
+    p.words += li32(16, 0x20000000) + li32(17, 0x30000000) + li32(18, 0x00500000) + li32(19, 0x00301000)
+    p.words += li32(20, A) + li32(21, RO2) + li32(0, 0)
+    p.words += set_msr(MSR_IR | MSR_DR, 7)
+    st["msr"] = MSR_IR | MSR_DR
+
+    # ---- data ----
+    load(5, 10, 0, 0x11111111)                                               # page B
+    p.words.append(D(36, 11, 10, 4))                                         # stw into B: C set
+    p.expect[0x00301004] = 0xABCD1234
+    expect(D(32, 5, 12, 0), 0x300, 0, dar=U, dsisr=0x40000000)               # no page: load
+    expect(D(36, 11, 12, 8), 0x300, 0, dar=U + 8, dsisr=0x42000000)          # ... store
+    expect(D(32, 5, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x40000000)           # crosses into it
+    expect(D(36, 11, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x42000000)          # ... the first two bytes are stored
+    p.expect[0x00301FFC] = 0x2222ABCD
+    expect(D(46, 28, 10, 0xFF8), 0x300, 0, dar=U, dsisr=0x40000000)          # lmw r28: two words, then the fault
+    load(5, 13, 0, 0x33333333)                                               # read-only page
+    expect(D(36, 11, 13, 0), 0x300, 0, dar=RO, dsisr=0x0A000000)             # protection, store
+    expect(D(36, 11, 21, 0), 0x300, 0, dar=RO2, dsisr=0x0A000000)            # ... found by the walk itself
+    load(5, 21, 0, 0)
+    load(5, 14, 0, 0x44444444)                                               # secondary hash
+    load(5, 20, 0, 0)                                                        # page A: loaded (R)...
+    p.words.append(D(36, 11, 20, 0x10))                                      # ... then stored (C by a walk)
+    p.expect[0x00300010] = 0xABCD1234
+    expect(D(32, 5, 16, 0), 0x300, 0, dar=0x20000000, dsisr=0x08000000)      # key 1, PP 00
+    expect(D(32, 5, 17, 0), 0x300, 0, dar=0x30000000, dsisr=0x80000000)      # direct-store segment
+    expect(D(36, 11, 17, 4), 0x300, 0, dar=0x30000004, dsisr=0x82000000)
+    load(5, 18, 0, 0x77777777)                                               # read-only BAT
+    expect(D(36, 11, 18, 0), 0x300, 0, dar=0x00500000, dsisr=0x0A000000)
+    expect(X(5, 0, 10, 310), 0x300, 0, dar=B, dsisr=0x00100000)              # eciwx
+    expect(X(11, 0, 10, 438), 0x300, 0, dar=B, dsisr=0x02100000)             # ecowx
+
+    # tlbie: the stale entry is used until it is invalidated
+    load(5, 15, 0, 0x55555555)
+    _, w1 = pte_words(srs[0], TL, 0x00306000, 2)
+    p.words += li32(7, w1) + li32(8, tl_pte) + [D(36, 7, 8, 0)]
+    load(5, 15, 0, 0x55555555)
+    p.words.append(tlbie(15))
+    load(5, 15, 0, 0x66666666)
+    ptes[tl_pte] = w1 | 0x100
+
+    # mtsr with translation on: the same address under two VSIDs
+    VS = 0x0020A000
+    map_page(VS, 0x0030A000, 2, r_final=1)                                   # under segment 0's VSID (0x10)
+    map_page(VS, 0x0030B000, 2, r_final=1, vsid=0x40)                        # under the VSID 0x40
+    p.data[0x0030A000] = 0xAAAAAAAA
+    p.data[0x0030B000] = 0xBBBBBBBB
+    p.words += li32(22, VS)
+    load(5, 22, 0, 0xAAAAAAAA)
+    p.words += li32(7, 0x40) + [mtsr(0, 7)]
+    load(5, 22, 0, 0xBBBBBBBB)
+    p.words += li32(7, srs[0]) + [mtsr(0, 7)]
+    load(5, 22, 0, 0xAAAAAAAA)
+
+    # ---- fetches ----
+    p.words += li32(9, XP) + [mtspr(LR, 9), 0x4E800021]                      # executable page: returns
+    check("x_ok")
+    isi(XG, 0x10000000)                                                      # guarded
+    isi(0x10000000, 0x10000000)                                              # no-execute segment
+    isi(0x20000000, 0x08000000)                                              # key
+    isi(0x30000000, 0x10000000)                                              # direct-store segment
+    isi(0x00208000, 0x40000000)                                              # no page
+    isi(0x00600000, 0x08000000)                                              # IBAT with PP 00
+
+    # ---- user mode: the key of segment 2 is open ----
+    p.words.append(0x44000002)
+    st["msr"] |= MSR_PR
+    check("user")
+    load(5, 16, 0, BLR)
+    expect(D(32, 5, 12, 0), 0x300, 0, dar=U, dsisr=0x40000000)
+    p.words.append(0x44000002)
+    st["msr"] &= ~MSR_PR
+    check("super")
+
+    # ---- off again: physical addresses ----
+    p.words += set_msr(0, 7)
+    st["msr"] = 0
+    load(5, 19, 0, 0x11111111)
+
+    p.expect.update(ptes)
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks, %d memory words -> %s" % (len(p.words), len(p.checks), len(p.expect), out))
+
+
+def resvtest(out):
+    """lwarx/stwcx., dcbz and the cache instructions: CR0 and memory after
+    stwcx. with and without a reservation and across an exception; dcbz
+    zeroing a line, and its alignment exception with the data cache off or
+    on a cache-inhibited page; dcbf/dcbst/icbi/dcbi doing nothing but
+    translating (DSI, protection, the R and C bits); their alignment and
+    privilege rules."""
+    p = Program()
+    DCE = HID0_DCE
+    st = {"r": [0, 0, 0, 0], "cr": 0, "xer": 0, "msr": 0}
+
+    body = [mfspr(SRR0, 3), mfspr(SRR1, 4), mfspr(DAR, 5), mfspr(DSISR, 6)]
+    for vec in (0x300, 0x600, 0x700):
+        for i, w in enumerate(body + [D(14, 30, 3, 4), mtspr(SRR0, 30), RFI]):
+            p.data[vec + 4 * i] = w
+    for i, w in enumerate([mfspr(SRR0, 30), mfspr(SRR1, 31), D(26, 31, 31, MSR_PR), mtspr(SRR1, 31), RFI]):
+        p.data[0xC00 + 4 * i] = w
+
+    def check(tag):
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(
+            list(st["r"]), st["cr"], st["xer"], 0, 0, [0, 0, 0, 0], tag)))
+
+    def expect(insn, vec, info=0, dar=None, dsisr=None):
+        at = p.pc()
+        p.words.append(insn)
+        st["r"][0] = at
+        st["r"][1] = (st["msr"] & 0x87C0FFFF) | info
+        if dar is not None:
+            st["r"][2], st["r"][3] = dar, dsisr
+        check("x%03X_%d" % (vec, len(p.checks)))
+
+    x_dsisr = align_dsisr
+
+    def load(reg, ra, d, value):
+        p.words.append(D(32, reg, ra, d))
+        st["r"][reg - 3] = value
+        check("ld%d" % len(p.checks))
+
+    def stwcx(rs, ra, rb, ok):
+        p.words.append(X(rs, ra, rb, 150, 1))
+        st["cr"] = (st["cr"] & 0x0FFFFFFF) | ((0x20000000 if ok else 0) | ((st["xer"] >> 3) & 0x10000000))
+        check("stwcx%d" % len(p.checks))
+
+    LINE = DATA_A + 0x40                     # a line of known words, with neighbours
+    for i in range(-2, 10):
+        p.data[LINE + 4 * i] = 0x11111111 * ((i + 2) % 9 + 1)
+    p.words += caches_on(7, HID0_ICE) + set_msr(0, 7)
+    p.words += li32(9, DATA_A) + li32(10, LINE + 0x17) + li32(11, 0xABCD1234) + li32(12, 0x55AA55AA) + li32(0, 0)
+    p.words += li32(13, DATA_A + 2)
+
+    # ---- dcbz with the data cache off: alignment exception ----
+    dcbz = X(0, 0, 10, 1014)
+    expect(dcbz, 0x600, dar=LINE + 0x17, dsisr=x_dsisr(dcbz))
+    p.words += caches_on(7, HID0_ICE | DCE)
+    p.words.append(dcbz)                                                     # zeroes LINE .. LINE+1F
+    check("dcbz")
+    for i in range(-2, 10):
+        p.expect[LINE + 4 * i] = 0 if 0 <= i < 8 else 0x11111111 * ((i + 2) % 9 + 1)
+
+    # ---- the reservation ----
+    p.words.append(X(5, 0, 9, 20))                                           # lwarx r5,0,r9
+    st["r"][2] = 0
+    check("lwarx")
+    stwcx(11, 0, 9, True)
+    load(5, 9, 0, 0xABCD1234)
+    stwcx(12, 0, 9, False)                                                   # no reservation: not stored
+    load(5, 9, 0, 0xABCD1234)
+    p.words.append(X(5, 0, 9, 20))
+    p.words.append(0x44000002)                                               # sc: to user mode and ...
+    st["msr"] |= MSR_PR
+    p.words.append(0x44000002)                                               # ... back; the reservation survives
+    st["msr"] &= ~MSR_PR
+    stwcx(12, 0, 9, True)
+    load(5, 9, 0, 0x55AA55AA)
+    p.words += li32(7, 0x80000000) + [mtspr(XER, 7)]                         # SO shows in CR0
+    st["xer"] = 0x80000000
+    p.words.append(X(5, 0, 9, 20))
+    stwcx(11, 0, 9, True)
+    stwcx(11, 0, 9, False)
+    p.words += li32(7, 0) + [mtspr(XER, 7)]
+    st["xer"] = 0
+    lwarx_u = X(5, 0, 13, 20)
+    expect(lwarx_u, 0x600, dar=DATA_A + 2, dsisr=x_dsisr(lwarx_u))          # not word-aligned
+    stwcx_u = X(11, 0, 13, 150, 1)
+    expect(stwcx_u, 0x600, dar=DATA_A + 2, dsisr=x_dsisr(stwcx_u))
+    st["cr"] = st["cr"]                                                      # CR0 untouched by the faulting stwcx.
+
+    # ---- cache instructions, translation off: nothing happens ----
+    for xo in (54, 86, 982, 470):                                            # dcbst dcbf icbi dcbi
+        p.words.append(X(0, 0, 13, xo))
+    check("cacheops")
+    p.words.append(0x44000002)
+    st["msr"] |= MSR_PR
+    expect(X(0, 0, 13, 470), 0x700, info=0x00040000)                        # dcbi is privileged
+    p.words.append(0x44000002)
+    st["msr"] &= ~MSR_PR
+
+    # ---- with translation: the pages decide ----
+    srs = {n: 0x200 + n for n in range(16)}
+    sdr1 = 0x00100000
+    table = PageTable(p, sdr1, srs)
+    RW, CI, RO, HOLE = 0x00700000, 0x00701000, 0x00702000, 0x00703000
+    table.map(RW, 0x00A00000, 2, r_final=1, c_final=1)                      # dcbz zeroes here
+    table.map(CI, 0x00A01000, 2, wimg=4, r_final=1)                         # cache-inhibited: dcbz is alignment
+    table.map(RO, 0x00A02000, 3, r_final=1)                                 # dcbst/dcbf/icbi may, dcbi may not
+    for i in range(8):
+        p.data[0x00A00020 + 4 * i] = 0x22222222
+    for n, v in srs.items():
+        p.words += li32(7, v) + [mtsr(n, 7)]
+    for spr, v in ((IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
+                   (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)):
+        p.words += li32(7, v) + [mtspr(spr, 7)]
+    p.words += li32(14, RW + 0x2C) + li32(15, CI + 0x10) + li32(16, RO + 0x30) + li32(17, HOLE + 0x40)
+    p.words += set_msr(MSR_IR | MSR_DR, 7)
+    st["msr"] = MSR_IR | MSR_DR
+    p.words.append(X(0, 0, 14, 1014))                                        # dcbz: line at RW+20
+    check("dcbz_x")
+    for i in range(8):
+        p.expect[0x00A00020 + 4 * i] = 0
+    dz = X(0, 0, 15, 1014)
+    expect(dz, 0x600, dar=CI + 0x00, dsisr=x_dsisr(dz))                     # cache-inhibited page: alignment
+    dz = X(0, 0, 17, 1014)
+    expect(dz, 0x300, dar=HOLE + 0x40, dsisr=0x42000000)                    # no page: DSI, a store
+    for xo in (54, 86, 982):                                                 # dcbst dcbf icbi on the read-only page
+        p.words.append(X(0, 0, 16, xo))
+    check("touch_ro")
+    expect(X(0, 0, 16, 470), 0x300, dar=RO + 0x30, dsisr=0x0A000000)        # dcbi: a store
+    expect(X(0, 0, 17, 86), 0x300, dar=HOLE + 0x40, dsisr=0x40000000)       # dcbf: no page
+    expect(X(0, 0, 17, 982), 0x300, dar=HOLE + 0x40, dsisr=0x40000000)      # icbi
+    p.words += li32(18, RW + 0x40)
+    p.words.append(X(0, 0, 18, 470))                                         # dcbi on the RW page (another line): C set
+    check("dcbi_rw")
+    p.words += set_msr(0, 7)
+    st["msr"] = 0
+
+    p.expect.update(table.ptes)
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks, %d memory words -> %s" % (len(p.words), len(p.checks), len(p.expect), out))
+
+
+def cachetest(out):
+    """The caches: evictions and write-back, what memory holds (seen through a
+    cache-inhibited alias of the same physical page) after dcbf, dcbst, dcbi,
+    DCFI, with the data cache locked or off, and on a write-through page;
+    self-modifying code with dcbst/icbi and with ICFI; DMA through the snoop
+    port both ways (the test bench's engine, started by stores to 00FFFFF4
+    and 00FFFFF8)."""
+    p = Program()
+    st = {"r": [0, 0, 0, 0], "cr": 0}
+
+    def check(tag):
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(
+            list(st["r"]), st["cr"], 0, 0, 0, [0, 0, 0, 0], tag)))
+
+    def load(reg, ra, d, value):
+        p.words.append(D(32, reg, ra, d))
+        st["r"][reg - 3] = value
+        check("ld%d" % len(p.checks))
+
+    # one physical page (PHYS) seen three ways: cacheable at CA, cache-inhibited
+    # at CI, write-through at WT; a second physical page behind CODE, executable
+    PHYS, CODE_PHYS = 0x00A00000, 0x00A01000
+    CA, CI, WT, CODE = 0x00700000, 0x00701000, 0x00702000, 0x00703000
+    srs = {n: 0x300 + n for n in range(16)}
+    sdr1 = 0x00100000
+    table = PageTable(p, sdr1, srs)
+    # CA and CI are walked before the DCFI below, which throws their R and C
+    # updates away with everything else the data cache holds; nothing walks
+    # them again
+    table.map(CA, PHYS, 2)
+    table.map(CI, PHYS, 2, wimg=4)
+    table.map(WT, PHYS, 2, wimg=8, r_final=1, c_final=1)
+    table.map(CODE, CODE_PHYS, 2, r_final=1, c_final=1)
+    BLR = 0x4E800020
+    p.data[CODE_PHYS] = D(14, 3, 0, 0x111)                                   # li r3,0x111
+    p.data[CODE_PHYS + 4] = BLR
+
+    p.words += caches_on() + set_msr(0, 7)
+    for n, v in srs.items():
+        p.words += li32(7, v) + [mtsr(n, 7)]
+    for spr, v in ((IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
+                   (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)):
+        p.words += li32(7, v) + [mtspr(spr, 7)]
+    p.words += li32(10, CA) + li32(11, CI) + li32(12, WT) + li32(13, CODE) + li32(0, 0)
+    p.words += li32(20, 0x11111111) + li32(21, 0x22222222) + li32(22, 0x33333333) + li32(23, 0x44444444)
+
+    # ---- evictions: nine lines of one set, through the BAT (cacheable) ----
+    base = 0x00400000
+    for k in range(9):
+        p.words += li32(8, base + 0x1000 * k) + li32(9, 0x1000 * k + 7) + [D(36, 9, 8, 0)]
+    for k in range(9):
+        p.words += li32(8, base + 0x1000 * k)
+        load(5, 8, 0, 0x1000 * k + 7)
+    for k in range(9):
+        p.expect[base + 0x1000 * k] = 0x1000 * k + 7
+
+    p.words += set_msr(MSR_IR | MSR_DR, 7)
+
+    # ---- what memory holds: the cache-inhibited alias sees it ----
+    p.words.append(D(36, 20, 10, 0))                                         # stw via CA: dirty in the cache
+    load(5, 11, 0, 0)                                                        # memory still has 0
+    p.words.append(X(0, 0, 10, 86))                                          # dcbf: written back
+    load(5, 11, 0, 0x11111111)
+    p.words.append(D(36, 21, 10, 0))
+    p.words.append(X(0, 0, 10, 54))                                          # dcbst: written back, still cached
+    load(5, 11, 0, 0x22222222)
+    p.words.append(D(36, 22, 10, 0))
+    p.words.append(X(0, 0, 10, 470))                                         # dcbi: the new store is lost
+    load(5, 11, 0, 0x22222222)
+    load(5, 10, 0, 0x22222222)                                               # ... and the cache refetches
+    p.words.append(D(36, 23, 10, 0))
+    p.words += caches_on(7, HID0_ICE | HID0_DCE | 0x0400)                    # DCFI: everything invalid, nothing written
+    load(5, 11, 0, 0x22222222)
+    p.words += caches_on(7, HID0_ICE | HID0_DCE | 0x1000)                    # DLOCK: a miss goes to memory
+    p.words.append(D(36, 20, 10, 4))
+    load(5, 11, 4, 0x11111111)
+    p.words += caches_on(7, HID0_ICE | HID0_DCE)
+    load(5, 10, 4, 0x11111111)                                               # now cached
+    p.words.append(D(36, 21, 10, 4))                                         # dirty
+    load(5, 11, 4, 0x11111111)
+    p.words += caches_on(7, HID0_ICE)                                        # DCE off: memory directly
+    p.words.append(D(36, 22, 10, 8))
+    load(5, 11, 8, 0x33333333)
+    p.words += caches_on(7, HID0_ICE | HID0_DCE)
+    load(5, 10, 4, 0x22222222)                                               # the dirty line is still there
+    p.words.append(D(36, 23, 12, 0x20))                                      # write-through: memory at once
+    load(5, 11, 0x20, 0x44444444)
+    load(5, 12, 0x20, 0x44444444)
+    p.words.append(X(0, 0, 10, 86))                                          # dcbf line 0 (dirty: 22222222 at +4)
+    p.words.append(X(0, 0, 12, 86))
+    p.expect[PHYS] = 0x22222222
+    p.expect[PHYS + 4] = 0x22222222
+    p.expect[PHYS + 8] = 0                      # the dirty line, filled before the store made with the cache off, covers it
+    p.expect[PHYS + 0x20] = 0x44444444
+
+    # ---- self-modifying code: li r3,0x111 becomes li r3,0x222 ----
+    p.words += [mtspr(LR, 13), 0x4E800021]                                   # blrl: r3 = 0x111
+    st["r"][0] = 0x111
+    check("code1")
+    p.words += li32(9, D(14, 3, 0, 0x222)) + [D(36, 9, 13, 0)]               # store the new instruction
+    p.words += [X(0, 0, 13, 54), X(0, 0, 13, 982), 0x4C00012C]               # dcbst, icbi, isync
+    p.words += [mtspr(LR, 13), 0x4E800021]
+    st["r"][0] = 0x222
+    check("code2")
+    p.words += li32(9, D(14, 3, 0, 0x333)) + [D(36, 9, 13, 0), X(0, 0, 13, 54)]
+    p.words += caches_on(7, HID0_ICE | HID0_DCE | 0x0800) + [0x4C00012C]     # ICFI
+    p.words += [mtspr(LR, 13), 0x4E800021]
+    st["r"][0] = 0x333
+    check("code3")
+    p.expect[CODE_PHYS] = D(14, 3, 0, 0x333)
+
+    # ---- DMA: the engine writes 64 bytes the CPU has cached, then reads 64 the CPU dirtied ----
+    p.words += set_msr(0, 7)
+    BUF, RESULT, GO_W, GO_R = 0x00FFF000, 0x00FFFFFC, 0x00FFFFF4, 0x00FFFFF8
+    p.words += li32(14, BUF) + li32(15, RESULT) + li32(16, GO_W) + li32(17, GO_R)
+    p.words.append(D(36, 0, 15, 0))                                          # result <- 0
+    load(5, 14, 0, 0)                                                        # the buffer is cached (zero)
+    load(5, 14, 32, 0)
+    p.words += li32(9, 0x5A000000) + [D(36, 9, 16, 0)]                       # start the DMA write
+    wait = [D(32, 3, 15, 0), (11 << 26) | (0 << 23) | (3 << 16) | 0, (16 << 26) | (12 << 21) | (2 << 16) | 0xFFF8]
+    p.words += wait                                                          # until result != 0: lwz, cmpwi, beq -8
+    st["r"][0] = 1
+    st["cr"] = 0x40000000                                                    # the compare: 1 > 0
+    load(5, 14, 0, 0x5A000000)                                               # the CPU sees the DMA's data
+    load(5, 14, 60, 0x5A000000 + 15 * 0x01010101)
+    for i in range(16):
+        p.words += li32(9, 0x0C000000 + i) + [D(36, 9, 14, 4 * i)]          # dirty the buffer
+    p.words.append(D(36, 0, 15, 0))
+    p.words.append(D(36, 9, 17, 0))                                          # start the DMA read
+    p.words += wait
+    st["r"][0] = (16 * 0x0C000000 + sum(range(16))) & 0xFFFFFFFF            # its checksum of what the CPU wrote
+    st["cr"] = 0x80000000                                                    # negative
+    check("dma")
+    for i in range(16):
+        p.expect[BUF + 4 * i] = 0x0C000000 + i
+
+    p.expect.update(table.ptes)
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks, %d memory words -> %s" % (len(p.words), len(p.checks), len(p.expect), out))
+
+
+def widecachetest(out):
+    """Doubleword loads/stores at every useful line position and across a
+    page boundary, with cache misses, hits, write-through, cache-inhibited,
+    locked and disabled caches. Check both words through aliases after each
+    phase so a stale half or wrong byte order cannot hide in the cache."""
+    p = Program()
+    phys, source = 0x00A00000, 0x00080000
+    ca, ci, wt = 0x00700000, 0x00702000, 0x00704000
+    srs, sdr1 = {n: 0x300 + n for n in range(16)}, 0x00100000
+    table = PageTable(p, sdr1, srs)
+    for ea, wimg in ((ca, 0), (ci, 4), (wt, 8)):
+        for page in (0, 0x1000):
+            table.map(ea + page, phys + page, 2, wimg=wimg, r_final=1, c_final=1)
+    a, b = 0x400921FB54442D18, 0xC010123456ABCDEF
+    p.data[source], p.data[source + 4] = a >> 32, a & 0xFFFFFFFF
+    p.data[source + 8], p.data[source + 12] = b >> 32, b & 0xFFFFFFFF
+    p.words += caches_on() + set_msr(0, 7)
+    for n, v in srs.items():
+        p.words += li32(7, v) + [mtsr(n, 7)]
+    for spr, v in ((IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
+                   (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)):
+        p.words += li32(7, v) + [mtspr(spr, 7)]
+    p.words += set_msr(MSR_IR | MSR_DR | MSR_FP, 7) + li32(11, source)
+    p.words += [D(50, 3, 11, 0), D(50, 4, 11, 8)]
+    f = [a, b, 0, 0]
+
+    def load(fr, ra, value, tag):
+        p.words += [D(50, fr, ra, 0), NOP]
+        f[fr - 3] = value
+        p.checks.append((len(p.words) - 1, check_text([0] * 4, 0, 0, 0, 0, list(f), tag)))
+
+    for off in (0, 4, 8, 24, 28, 0xFFC):
+        p.words += li32(8, ca + off) + li32(9, ci + off) + li32(10, wt + off)
+        p.words += [X(0, 0, 8, 470), D(54, 3, 8, 0)]
+        load(5, 8, a, "cached_%x" % off)
+        p.words.append(X(0, 0, 8, 54))
+        if off & 31 == 28:
+            p.words += li32(12, ca + off + 4) + [X(0, 0, 12, 54)]
+        load(6, 9, a, "flushed_%x" % off)
+        p.words.append(D(54, 4, 10, 0))
+        load(5, 9, b, "write_through_memory_%x" % off)
+        load(6, 8, b, "write_through_cache_%x" % off)
+        p.words += [D(54, 3, 9, 0), X(0, 0, 8, 470)]
+        if off & 31 == 28:
+            p.words.append(X(0, 0, 12, 470))
+        load(5, 8, a, "inhibited_%x" % off)
+        p.words.append(X(0, 0, 8, 470))
+        if off & 31 == 28:
+            p.words.append(X(0, 0, 12, 470))
+        p.words += caches_on(7, HID0_ICE | HID0_DCE | 0x1000) + [D(54, 4, 8, 0)]
+        load(6, 9, b, "locked_miss_%x" % off)
+        p.words += caches_on(7, HID0_ICE) + [D(54, 3, 8, 0)]
+        load(5, 9, a, "disabled_%x" % off)
+        p.words += caches_on(7, HID0_ICE | HID0_DCE)
+        load(6, 8, a, "enabled_%x" % off)
+        p.expect[phys + off], p.expect[phys + off + 4] = a >> 32, a & 0xFFFFFFFF
+    # Overlapping stores in the first line leave the later store's word.
+    p.expect[phys + 4], p.expect[phys + 8] = a >> 32, a >> 32
+    p.expect[phys + 28] = a >> 32
+    p.expect.update(table.ptes)
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks -> %s" % (len(p.words), len(p.checks), out))
+
+
+def updtest(out):
+    """The update forms. First the indexed loads whose rD is their rB
+    (lwzux r4,r3,r4, and lbzux, lhzux, lhaux the same: a valid form, only
+    rA = 0 and rA = rD are not, and one the 7600's NanoKernel uses), which
+    the sequencer got wrong until 2026-10-07: rA took the address plus the
+    loaded value, the update being formed from rB after the load had written
+    it. Each with the data cache off, then on a line the cache does not hold
+    and again on one it does, aligned and not, with rB small and with rB
+    large and rA wrapped to meet it, every one followed by an add and a load
+    that use both results. Then the same loads with rD and rB distinct, the
+    indexed stores with rS = rB, lfdux and stfdux, and the D-form loads and
+    stores with update, stwu r3,-16(r3) among them. Run with and without
+    wait states; the buffer is checked whole at the end."""
+    p = Program()
+    st = {"r": [0, 0, 0, 0], "f": [0, 0, 0, 0]}
+    rnd = random.Random(11)
+    M32 = 0xFFFFFFFF
+
+    BUF = DATA_A + 0x400                     # 64 lines of random words
+    for a in range(BUF, BUF + 0x800, 4):
+        p.data[a] = rnd.getrandbits(32)
+    mem = dict(p.data)                       # what memory holds as the program runs
+
+    def word(a):
+        return mem.get(a & ~3, 0)
+
+    def byte(a):
+        return (word(a) >> (8 * (3 - (a & 3)))) & 0xFF
+
+    def fetch(a, n, sext=False):
+        """The n bytes at a, big-endian, as the register takes them."""
+        v = 0
+        for i in range(n):
+            v = (v << 8) | byte(a + i)
+        if sext and v & (1 << (8 * n - 1)):
+            v |= (M32 << (8 * n)) & M32
+        return v
+
+    def store(a, n, v):
+        for i in range(n):
+            w = a + i
+            sh = 8 * (3 - (w & 3))
+            mem[w & ~3] = (word(w) & ~(0xFF << sh) & M32) | (((v >> (8 * (n - 1 - i))) & 0xFF) << sh)
+
+    def check(tag):
+        p.words.append(NOP)
+        p.checks.append((len(p.words) - 1, check_text(list(st["r"]), 0, 0, 0, 0, list(st["f"]), tag)))
+
+    def after(ea):
+        """add r5,r3,r4 and lbz r6,0(r3): the updated rA and the loaded rD used at once."""
+        p.words.append(X(5, 3, 4, 266))
+        p.words.append(D(34, 6, 3, 0))
+        st["r"][2] = (st["r"][0] + st["r"][1]) & M32
+        st["r"][3] = byte(ea)
+
+    def setup(ea, rb_val):
+        p.words += li32(3, (ea - rb_val) & M32) + li32(4, rb_val)
+
+    def ld_same(xo, n, sext, name, ea, rb_val, tag):
+        """lXux r4,r3,r4: r3 <- ea, r4 <- the datum."""
+        setup(ea, rb_val)
+        p.words.append(X(4, 3, 4, xo))
+        st["r"][0], st["r"][1] = ea, fetch(ea, n, sext)
+        after(ea)
+        check("%s_%s_%d" % (name, tag, len(p.checks)))
+
+    def ld_diff(xo, n, sext, name, ea, rb_val, tag):
+        """lXux r5,r3,r4: r3 <- ea, r5 <- the datum, r4 as it was."""
+        setup(ea, rb_val)
+        p.words.append(X(5, 3, 4, xo))
+        st["r"][0], st["r"][1], st["r"][2] = ea, rb_val, fetch(ea, n, sext)
+        p.words.append(D(34, 6, 3, 0))
+        st["r"][3] = byte(ea)
+        check("%s_%s_%d" % (name, tag, len(p.checks)))
+
+    def st_same(xo, n, name, ea, rb_val, tag):
+        """stXux r4,r3,r4: the low bytes of r4 to ea, r3 <- ea."""
+        setup(ea, rb_val)
+        p.words.append(X(4, 3, 4, xo))
+        store(ea, n, rb_val)
+        st["r"][0], st["r"][1] = ea, rb_val
+        after(ea)
+        check("%s_%s_%d" % (name, tag, len(p.checks)))
+
+    # (xo, bytes, sign-extended, name, offset into the line: aligned for the size)
+    LOADS = ((119, 1, False, "lbzux", 0x3), (311, 2, False, "lhzux", 0x6),
+             (375, 2, True, "lhaux", 0xA), (55, 4, False, "lwzux", 0xC))
+    STORES = ((247, 1, "stbux", 0x3), (439, 2, "sthux", 0x6), (183, 4, "stwux", 0xC))
+
+    lines = [0]
+
+    def fresh():
+        """A line nothing has touched yet."""
+        lines[0] += 1
+        return BUF + 0x20 * lines[0]
+
+    def same_forms(regime):
+        for xo, n, sext, name, off in LOADS:
+            for k in range(2):
+                # k = 1: one byte further (a halfword across a word, a word
+                # misaligned), rB a large value and rA wrapped to meet it
+                line = fresh()
+                ea = line + off + k
+                rb_val = (off + k) if k == 0 else (rnd.getrandbits(32) | 0x80000001)
+                ld_same(xo, n, sext, name, ea, rb_val, regime)
+                if regime == "miss":
+                    ld_same(xo, n, sext, name, ea, rb_val, "hit")
+        line = fresh()
+        fresh()                                                               # the word crosses into the next line
+        ld_same(55, 4, False, "lwzux", line + 0x1D, 0x1D, regime + "_x")
+        if regime == "miss":
+            ld_same(55, 4, False, "lwzux", line + 0x1D, 0x1D, "hit_x")
+
+    p.words += caches_on(7, HID0_ICE) + set_msr(MSR_FP, 7)
+    p.words += li32(9, BUF)
+    for i in range(4):                                                        # f3-f6 known
+        a = BUF + 0x7C0 + 8 * i
+        p.words.append(lfd(3 + i, 9, 0x7C0 + 8 * i))
+        st["f"][i] = (word(a) << 32) | word(a + 4)
+
+    # ---- rD = rB: the data cache off, then a miss and a hit on each ----
+    same_forms("dce_off")
+    p.words += caches_on(7, HID0_ICE | HID0_DCE)
+    same_forms("miss")
+
+    # ---- rD and rB distinct; the stores with rS = rB ----
+    for xo, n, sext, name, off in LOADS:
+        line = fresh()
+        ld_diff(xo, n, sext, name, line + off, rnd.getrandbits(32), "diff")
+    for xo, n, name, off in STORES:
+        line = fresh()
+        st_same(xo, n, name, line + off, 0x7 + off, "small")
+        st_same(xo, n, name, line + off + 1, rnd.getrandbits(32) | 0x80000001, "large")
+
+    # ---- the floating-point indexed update forms ----
+    line = fresh()
+    setup(line + 8, 8)
+    p.words.append(X(4, 3, 4, 631))                                           # lfdux f4,r3,r4
+    st["r"][0], st["r"][1] = line + 8, 8
+    st["f"][1] = (word(line + 8) << 32) | word(line + 12)
+    after(line + 8)
+    check("lfdux")
+    line = fresh()
+    setup(line + 16, 16)
+    p.words.append(X(5, 3, 4, 759))                                           # stfdux f5,r3,r4
+    st["r"][0], st["r"][1] = line + 16, 16
+    store(line + 16, 4, st["f"][2] >> 32)
+    store(line + 20, 4, st["f"][2] & M32)
+    after(line + 16)
+    check("stfdux")
+
+    # ---- the D-form update loads and stores ----
+    for op, n, sext, name in ((35, 1, False, "lbzu"), (41, 2, False, "lhzu"), (43, 2, True, "lhau"), (33, 4, False, "lwzu")):
+        line = fresh()
+        d = rnd.randrange(-0x10, 0x10) * n
+        p.words += li32(3, line + 0x10)
+        p.words.append(D(op, 4, 3, d))                                        # lXu r4,d(r3)
+        st["r"][0], st["r"][1] = line + 0x10 + d, fetch(line + 0x10 + d, n, sext)
+        after(line + 0x10 + d)
+        check(name)
+    for op, n, name in ((39, 1, "stbu"), (45, 2, "sthu"), (37, 4, "stwu")):
+        line = fresh()
+        d = rnd.randrange(-0x10, 0x10) * n
+        v = rnd.getrandbits(32)
+        p.words += li32(3, line + 0x10) + li32(4, v)
+        p.words.append(D(op, 4, 3, d))                                        # stXu r4,d(r3)
+        store(line + 0x10 + d, n, v)
+        st["r"][0], st["r"][1] = line + 0x10 + d, v
+        after(line + 0x10 + d)
+        check(name)
+    line = fresh()
+    p.words += li32(3, line + 0x18)
+    p.words.append(D(37, 3, 3, -16 & 0xFFFF))                                 # stwu r3,-16(r3): the ABI's prologue
+    store(line + 0x8, 4, line + 0x18)
+    st["r"][0] = line + 0x8
+    p.words.append(D(32, 4, 3, 0))                                            # lwz r4,0(r3)
+    st["r"][1] = line + 0x18
+    after(line + 0x8)
+    check("stwu_sp")
+
+    for a in range(BUF, BUF + 0x800, 4):
+        p.expect[a] = mem[a]
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks, %d memory words -> %s" % (len(p.words), len(p.checks), len(p.expect), out))
+
+
+def acktest(out):
+    """Cold instruction lines competing with uncached data transfers.
+    The bus response may remain high after the receiving cache advances."""
+    p = Program()
+    p.words = caches_on(value=HID0_ICE) + li32(1, DATA_A) + li32(4, 0) + li32(2, 0x00900000)
+    p.data[DATA_A] = 42
+    for _ in range(1000):
+        p.words += [D(32, 3, 1, 0), D(14, 4, 4, 1)] + [D(14, 0, 0, 0)] * 6
+    p.words += [D(36, 3, 2, 0), D(36, 4, 2, 4), B_SELF]
+    p.expect[0x00900000], p.expect[0x00900004] = 42, 1000
+    p.write(out)
+
+
+def irqtest(out, loops, translated=False, faulting=False, overlap=False):
+    """A loop whose results are known, running with interrupts enabled. The
+    external and decrementer handlers each count in memory (00FFFFE0 and
+    00FFFFE4) and change nothing the loop can see; the external one also
+    acknowledges by storing to 00FFFFF0."""
+    p = Program()
+    COUNT = 0x00FFFFE0
+    save = [mtspr(SPRG0, 30), mtspr(SPRG1, 31), D(15, 30, 0, COUNT >> 16), D(24, 30, 30, COUNT)]
+    back = [mfspr(SPRG0, 30), mfspr(SPRG1, 31), RFI]
+    ext = save + [D(32, 31, 30, 0), D(14, 31, 31, 1), D(36, 31, 30, 0), D(36, 31, 30, 16)] + back
+    dec = save + [D(32, 31, 30, 4), D(14, 31, 31, 1), D(36, 31, 30, 4),
+                  D(14, 31, 0, 300), mtspr(DEC, 31)] + back
+    for i, w in enumerate(ext):
+        p.data[0x500 + 4 * i] = w
+    for i, w in enumerate(dec):
+        p.data[0x900 + 4 * i] = w
+    if faulting:
+        # Skip each faulting store/load and count it. A cancelled walk must
+        # never fault on an instruction in the interrupt handler instead.
+        dsi = save + [D(32, 31, 30, 8), D(14, 31, 31, 1), D(36, 31, 30, 8),
+                      mfspr(SRR0, 31), D(14, 31, 31, 4), mtspr(SRR0, 31)] + back
+        for i, w in enumerate(dsi):
+            p.data[0x300 + 4 * i] = w
+        p.expect[COUNT + 8] = 2 * loops
+
+    p.words += caches_on() + set_msr(0, 7)
+    if translated:
+        # Keep code/vectors, the page table, and interrupt counters on BATs.
+        # The loop's data page is invalidated each time to force a walk
+        # which an interrupt may cancel before the request is granted.
+        for spr, value in (
+                (IBAT0U, batu(0, 1)), (IBAT0U + 1, batl(0, 2)),
+                (DBAT0U, batu(0, 1)), (DBAT0U + 1, batl(0, 2)),
+                (DBAT0U + 2, batu(0x00100000, 1)), (DBAT0U + 3, batl(0x00100000, 2)),
+                (DBAT0U + 4, batu(0x00FE0000, 1)), (DBAT0U + 5, batl(0x00FE0000, 2)),
+                (SDR1, 0x00100000)):
+            p.words += li32(7, value) + [mtspr(spr, 7)]
+        p.words += li32(7, 0x10) + [mtsr(0, 7)]
+        pt = PageTable(p, 0x00100000, {0: 0x10})
+        if not faulting:
+            pt.map(DATA_A, DATA_A, 2, r_final=1, c_final=1)
+        p.expect.update(pt.ptes)
+    p.words += li32(1, DATA_A) + li32(3, 1) + li32(4, 0) + li32(5, 0) + li32(6, 0)
+    p.words += li32(7, 100) + [mtspr(DEC, 7)]
+    p.words += li32(7, loops) + [mtspr(CTR, 7)]
+    p.words += set_msr(MSR_EE | (0x30 if translated else 0), 7)
+    body = [D(7, 3, 3, 33),            # mulli r3,r3,33
+            D(14, 3, 3, 7),            # addi  r3,r3,7
+            X(4, 4, 3, 266),           # add   r4,r4,r3
+            D(36, 4, 1, 0),            # stw   r4,0(r1)
+            D(32, 5, 1, 0),            # lwz   r5,0(r1)
+            X(5, 6, 3, 316),           # xor   r6,r5,r3
+            X(6, 6, 4, 459)]           # divwu r6,r6,r4 (a long instruction to interrupt)
+    if overlap:
+        # These wrap and fill the completion queue during the division;
+        # interrupts may cancel them and restart the interrupted instruction.
+        body += [D(14, 3, 3, 1)] * 12
+    if translated:
+        body = [X(0, 0, 1, 306)] + body
+    p.words += body
+    p.words.append((16 << 26) | (16 << 21) | ((-4 * len(body)) & 0xFFFC))     # bdnz
+    p.words += set_msr(0, 7)
+    r3, r4, r5, r6 = 1, 0, 0, 0
+    for _ in range(loops):
+        r3 = (r3 * 33 + 7) & 0xFFFFFFFF
+        r4 = (r4 + r3) & 0xFFFFFFFF
+        r5 = 0 if faulting else r4
+        r6 = r5 ^ r3
+        r6 = (r6 // r4) if r4 else ((r6 << 4) | 0xF) & 0xFFFFFFFF
+        if overlap:
+            r3 = (r3 + 12) & 0xFFFFFFFF
+    p.words.append(NOP)
+    p.checks.append((len(p.words) - 1, check_text([r3, r4, r5, r6], 0, 0, 0, 0, [0, 0, 0, 0], "loop")))
+    p.expect[DATA_A] = 0 if faulting else r4
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d loops -> %s" % (len(p.words), loops, out))
+
+
+def vecwalktest(out, tries=10):
+    """A fetch's page-table walk that starts in the cycle an exception
+    redirects to its vector, in the vector's own page, must be cancelled
+    (2026-10-15: it was not, and the vector's fetch took the walk's "no
+    page", an ISI at 0300 with the interrupted context's r1 still live; Debian
+    died at its first user process). Translation on, no BAT: a blr learned as
+    a return (its first target sequential, so no ITT) is reached again
+    behind a load whose page has no PTE, with the return stack's top the DSI
+    handler's bl at 0300: the fetch goes to page 0 and wants the walker while
+    the load's walk runs, and gets it as that walk ends in the DSI. Each try
+    has its own blr, pages and distance (0 to 4 nops) from the load. Run in
+    lockstep: the core must take the DSI as dingusppc does."""
+    p = Program()
+    SDR1_V, LIST = 0x00100000, 0x00FE0000
+    SPRG2, SPRG3 = 274, 275
+    # the DSI handler, in real mode: validates the next PTE of the list
+    # (the faults come in a known order), from a subroutine called with bl
+    dsi = assemble([mtspr(SPRG0, 29), mtspr(SPRG1, 30), mtspr(SPRG2, 31), mfspr(LR, 29), mtspr(SPRG3, 29),
+                    0x48000005,                               # bl the next instruction
+                    D(15, 29, 0, LIST >> 16), D(32, 30, 29, 0), D(32, 31, 30, 0), D(32, 29, 30, 4),
+                    D(36, 29, 31, 0), D(14, 30, 30, 8), D(15, 29, 0, LIST >> 16), D(36, 30, 29, 0),
+                    X(0, 0, 0, 598),                          # sync
+                    mfspr(SPRG3, 29), mtspr(LR, 29), mfspr(SPRG0, 29), mfspr(SPRG1, 30), mfspr(SPRG2, 31),
+                    RFI], 0x300)
+    for i, w in enumerate(dsi):
+        p.data[0x300 + 4 * i] = w
+
+    pt = PageTable(p, SDR1_V, {0: 0x10})
+    pt.map(CODE_BASE, CODE_BASE, 2, r_final=1)
+    pend = []
+    for j in range(tries):
+        for ea, v in ((0x00200000 + 0x1000 * j, 0x100 + j), (0x00280000 + 0x1000 * j, 0x200 + j)):
+            p.data[ea] = v
+            a1 = pt.map(ea, ea, 2, r_final=1)
+            pend.append((a1 - 4, p.data[a1 - 4]))
+            p.data[a1 - 4] &= 0x7FFFFFFF                          # not valid until the handler says so
+    p.data[LIST] = LIST + 8
+    for k, (a0, w0) in enumerate(pend):
+        p.data[LIST + 8 + 8 * k], p.data[LIST + 12 + 8 * k] = a0, w0
+        p.expect[a0] = w0
+    p.expect.update(pt.ptes)
+
+    items = caches_on() + set_msr(0, 7) + li32(7, SDR1_V) + [mtspr(SDR1, 7)] + li32(7, 0x10) + [mtsr(0, 7)]
+    items += set_msr(MSR_IR | MSR_DR, 7) + li32(21, 0)
+    for j in range(tries):
+        items += [D(14, 20, 0, 0)] + li32(16, 0x00200000 + 0x1000 * j) + li32(17, 0x00280000 + 0x1000 * j)
+        items += [("la", 0, "site%d" % j, 4), mtspr(LR, 0), ("b", "site%d" % j)]
+        items += [("label", "load%d" % j), D(32, 5, 16, 0), D(32, 6, 17, 0)] + [NOP] * (j % 5)
+        items += [("label", "site%d" % j), 0x4E800020, cmpwi(20, 0), D(14, 20, 20, 1), ("bc", 12, 2, "load%d" % j),
+                  X(21, 21, 5, 266), X(21, 21, 6, 266)]           # add r21,r21,r5; add r21,r21,r6
+    items += set_msr(0, 7) + [D(36, 21, 0, 0x7000), B_SELF]      # stw r21 at 7000, untranslated
+    p.words = assemble(items, CODE_BASE)
+    assert len(p.words) < 1024, "the code is one page"
+    p.expect[0x7000] = sum(0x300 + 2 * j for j in range(tries))
+    p.write(out)
+    print("%d instructions, %d tries -> %s" % (len(p.words), tries, out))
+
+
+# ---- random floating-point programs, checked against fpmodel.py ------------------
+SCRATCH = 0x00500000
+
+
+def fpbench(out, kind, count=2000):
+    """Floating-point microbenchmarks, straight-line, no checks: the cycle
+    count is the measure (the lockstep bench still compares every
+    instruction with dingusppc). f1 = 1.5 and f2 = 1.25 from the pool.
+      dep       fadd f3, f3, f1 repeated: a dependent chain
+      indep     fadd f3..f6 = f1 + f2 in turn: independent operations
+      mul       fmul f3..f6 = f1 * f2 in turn
+      madd      fmadd f3..f6 = f1 * f2 + f2 in turn
+      mulchain  fmul f3, f3, f2 repeated (overflows to infinity late)
+      lfdmadd   lfd f1; lfd f2; fmadd f3, f1, f2, f3 repeated: a loop body"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fpmodel as fm
+
+    p = Program()
+    p.data[POOL_BASE] = 0x3FF80000
+    p.data[POOL_BASE + 4] = 0
+    p.data[POOL_BASE + 8] = 0x3FF40000
+    p.data[POOL_BASE + 12] = 0
+    p.words += caches_on() + set_msr(MSR_FP) + li32(10, POOL_BASE)
+    p.words += [lfd(1, 10, 0), lfd(2, 10, 8), lfd(3, 10, 8), lfd(4, 10, 8), lfd(5, 10, 8), lfd(6, 10, 8)]
+    fadd  = lambda d, a, b: fm._a(63, d, a, b, 0, 21, 0)
+    fmul  = lambda d, a, c: fm._a(63, d, a, 0, c, 25, 0)
+    fmadd = lambda d, a, b, c: fm._a(63, d, a, b, c, 29, 0)
+    i = 0
+    while len(p.words) < count + 20:
+        d = 3 + (i & 3)
+        if kind == "dep":
+            p.words.append(fadd(3, 3, 1))
+        elif kind == "indep":
+            p.words.append(fadd(d, 1, 2))
+        elif kind == "mul":
+            p.words.append(fmul(d, 1, 2))
+        elif kind == "madd":
+            p.words.append(fmadd(d, 1, 2, 2))
+        elif kind == "mulchain":
+            p.words.append(fmul(3, 3, 2))
+        elif kind == "lfdmadd":
+            p.words += [lfd(1, 10, 0), lfd(2, 10, 8), fmadd(3, 1, 2, 3)]
+        else:
+            raise SystemExit("fpbench: unknown kind " + kind)
+        i += 1
+    p.words.append(D(14, 0, 0, 0))                    # a last nop: the end marker
+    p.write(out)
+
+
+def fpqtest(out, loops):
+    """FP operations leaving EX into the completion queue, with everything that
+    may follow them: a store of the queued result, a compare, a branch the
+    predictor cannot learn (it alternates), a system call, loads, integer
+    work, and interrupts (the handlers of irqtest). Compared with dingusppc
+    at every instruction (--lockstep); the values stay exact (1.5, 1.25 and
+    their products and sums)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fpmodel as fm
+
+    p = Program()
+    COUNT = 0x00FFFFE0
+    save = [mtspr(SPRG0, 30), mtspr(SPRG1, 31), D(15, 30, 0, COUNT >> 16), D(24, 30, 30, COUNT)]
+    back = [mfspr(SPRG0, 30), mfspr(SPRG1, 31), RFI]
+    ext = save + [D(32, 31, 30, 0), D(14, 31, 31, 1), D(36, 31, 30, 0), D(36, 31, 30, 16)] + back
+    dec = save + [D(32, 31, 30, 4), D(14, 31, 31, 1), D(36, 31, 30, 4),
+                  D(14, 31, 0, 300), mtspr(DEC, 31)] + back
+    for i, w in enumerate(ext):
+        p.data[0x500 + 4 * i] = w
+    for i, w in enumerate(dec):
+        p.data[0x900 + 4 * i] = w
+    p.data[0xC00] = RFI                                  # sc: back at once
+    p.data[DATA_A] = 0x3FF80000                          # 1.5
+    p.data[DATA_A + 4] = 0
+    p.data[DATA_A + 8] = 0x3FF40000                      # 1.25
+    p.data[DATA_A + 12] = 0
+    fmadd = lambda d, a, b, c: fm._a(63, d, a, b, c, 29, 0)
+    fmul = lambda d, a, c: fm._a(63, d, a, 0, c, 25, 0)
+    fadd = lambda d, a, b: fm._a(63, d, a, b, 0, 21, 0)
+    fcmpu = lambda crf, a, b: (63 << 26) | (crf << 23) | (a << 16) | (b << 11)
+    stfd = lambda fr, ra, d: D(54, fr, ra, d)
+    bc = lambda bo, bi, off: (16 << 26) | (bo << 21) | (bi << 16) | (off & 0xFFFC)
+    SC = 0x44000002
+    p.words += caches_on() + set_msr(MSR_FP, 7) + li32(1, DATA_A) + li32(3, 0) + li32(4, 0)
+    p.words += [lfd(1, 1, 0), lfd(2, 1, 8), lfd(3, 1, 8), lfd(4, 1, 8), lfd(5, 1, 0), lfd(6, 1, 0)]
+    p.words += li32(7, 100) + [mtspr(DEC, 7)]
+    p.words += li32(7, loops) + [mtspr(CTR, 7)]
+    p.words += set_msr(MSR_FP | MSR_EE, 7)
+    body = [fmadd(3, 1, 2, 3),             # the chain: leaves EX into the queue
+            stfd(3, 1, 16),                # the queued result stored (waits for its pop)
+            D(28, 3, 7, 1),                # andi. r7,r3,1
+            bc(12, 2, 12),                 # beq +12: alternates with r3, over the pending fmadd
+            fmul(4, 1, 2),                 # (not taken) an independent operation behind it
+            fadd(5, 5, 2),                 # ... and a dependent one
+            fcmpu(1, 3, 4),                # a compare behind queued operations (its CR waits for them)
+            SC,                            # a system call behind them: the exception waits for their pop
+            lfd(6, 1, 16),                 # the stored result back
+            fadd(6, 6, 1),
+            D(14, 3, 3, 1),                # addi r3,r3,1
+            X(4, 4, 7, 266)]               # add r4,r4,r7
+    p.words += body
+    p.words.append(bc(16, 0, -4 * len(body)))                                 # bdnz
+    p.words += set_msr(0, 7)
+    p.words.append(NOP)
+    p.write(out)
+
+
+def fprandom(out, count, seed):
+    """Straight-line floating-point code. This script executes it as well, with
+    fpmodel.py, and records the state every instruction must leave behind.
+    f3-f6 are the only registers written, so the four the test bench checks
+    are the whole floating-point state that changes."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import fpmodel as fm
+
+    rnd = random.Random(seed)
+    p = Program()
+    mem = {}                                   # word address -> value, the model's memory
+
+    def poke(addr, word):
+        mem[addr] = word
+        p.data[addr] = word
+
+    doubles = [fm._rand_double(rnd) for _ in range(256)]
+    singles = [rnd.choice((rnd.getrandbits(32), rnd.getrandbits(32) & 0x807FFFFF,
+                           (rnd.getrandbits(32) & 0x807FFFFF) | 0x7F800000,
+                           rnd.getrandbits(32) & 0x80000000, 0x7F800000, 0x00000001))
+               for _ in range(256)]
+    for i, d in enumerate(doubles):
+        poke(POOL_BASE + 8 * i, d >> 32)
+        poke(POOL_BASE + 8 * i + 4, d & 0xFFFFFFFF)
+    for i, w in enumerate(singles):
+        poke(POOL_BASE + 0x1000 + 4 * i, w)
+
+    fpr = [0] * 32
+    st = {"fpscr": 0, "cr": 0, "r11": SCRATCH}
+
+    def emit(word):
+        p.words.append(word)
+
+    def check(tag):
+        p.checks.append((len(p.words) - 1, check_text(
+            [0, 0, 0, 0], st["cr"], 0, 0, st["fpscr"], fpr[3:7], tag)))
+
+    def cr1():
+        st["cr"] = (st["cr"] & ~0x0F000000) | ((st["fpscr"] >> 28) << 24)
+
+    def set_crf(field, val):
+        sh = 28 - 4 * field
+        st["cr"] = (st["cr"] & ~(0xF << sh)) | (val << sh)
+
+    # prologue: bases, an index, and every source register loaded
+    p.words += caches_on() + set_msr(MSR_FP)
+    p.words += li32(10, POOL_BASE) + li32(11, SCRATCH) + li32(12, 8) + li32(9, SCRATCH + 0x800)
+    for r in range(0, 8):
+        i = rnd.randrange(256)
+        emit(lfd(r, 10, 8 * i))
+        fpr[r] = doubles[i]
+
+    dst = lambda: rnd.randrange(3, 7)
+    src = lambda: rnd.randrange(0, 8)
+    bit = lambda: rnd.getrandbits(1)
+    arith = [n for n in fm.GEN_OPS if n not in ("FCMPU", "FCMPO")]
+
+    done = 0
+    while done < count:
+        k = rnd.random()
+        if k < 0.45:
+            # arithmetic, moves, conversions
+            name = rnd.choice(arith)
+            op, xo, uses = fm.GEN_OPS[name]
+            d, a, b, c = dst(), src(), src(), src()
+            rc = 0 if name == "FSEL" else bit()
+            fm.UNDEFINED = False
+            res, new, _ = fm.execute(name, fpr[a], fpr[b], fpr[c], st["fpscr"])
+            if fm.UNDEFINED:
+                continue
+            emit(fm._a(op, d, a if "a" in uses else 0, b if "b" in uses else 0,
+                       c if "c" in uses else 0, xo, rc))
+            if res is not None:
+                fpr[d] = res
+            st["fpscr"] = new
+            if rc:
+                cr1()
+            check(name)
+        elif k < 0.50:
+            name = rnd.choice(("FCMPU", "FCMPO"))
+            op, xo, _ = fm.GEN_OPS[name]
+            a, b, crf = src(), src(), rnd.randrange(8)
+            _, new, c = fm.execute(name, fpr[a], fpr[b], 0, st["fpscr"])
+            emit(fm._a(op, crf << 2, a, b, 0, xo, 0))
+            st["fpscr"] = new
+            set_crf(crf, c)
+            check(name)
+        elif k < 0.62:
+            # loads: displacement, indexed (r10 + r12), and with update through r11
+            d, form = dst(), rnd.randrange(4)
+            double = bit()
+            if form == 0:
+                i = rnd.randrange(256)
+                addr = POOL_BASE + (8 * i if double else 0x1000 + 4 * i)
+                emit(D(50 if double else 48, d, 10, addr - POOL_BASE))       # lfd, lfs
+            elif form == 1:
+                addr = POOL_BASE + 8                                         # r10 + r12
+                emit(X(d, 10, 12, 599 if double else 535))                   # lfdx, lfsx
+            else:
+                # lfdu / lfsu from where r11 points after the update: move r11 within the scratch area
+                step = 4 * rnd.randrange(-4, 5)
+                addr = st["r11"] + step
+                if addr < SCRATCH - 0x400 or addr > SCRATCH + 0x400:
+                    continue
+                st["r11"] = addr
+                emit(D(51 if double else 49, d, 11, step))
+            hi = mem.get(addr, 0)
+            if double:
+                fpr[d] = (hi << 32) | mem.get(addr + 4, 0)
+            else:
+                fpr[d] = fm.single_to_double(hi)
+            check("load")
+        elif k < 0.76:
+            # stores into the scratch area
+            s, form = src(), rnd.randrange(3)
+            kind = rnd.choice(("d", "s", "iw"))
+            if form == 0:
+                off = 4 * rnd.randrange(-128, 128)
+                addr = SCRATCH + 0x800 + off                             # r9 + off
+                if kind == "iw":
+                    emit(D(14, 8, 0, off))                               # li r8, off
+                    emit(X(s, 9, 8, 983))                                # stfiwx
+                else:
+                    emit(D(54 if kind == "d" else 52, s, 9, off))
+            elif form == 1:
+                step = 4 * rnd.randrange(-4, 5)
+                addr = st["r11"] + step
+                if kind == "iw" or addr < SCRATCH - 0x400 or addr > SCRATCH + 0x400:
+                    continue
+                st["r11"] = addr
+                emit(D(55 if kind == "d" else 53, s, 11, step))          # stfdu, stfsu
+            else:
+                addr = st["r11"] + 8                                     # r11 + r12
+                if kind == "iw":
+                    emit(X(s, 11, 12, 983))
+                else:
+                    emit(X(s, 11, 12, 727 if kind == "d" else 663))      # stfdx, stfsx
+            v = fpr[s]
+            if kind == "d":
+                mem[addr], mem[addr + 4] = v >> 32, v & 0xFFFFFFFF
+            elif kind == "s":
+                mem[addr] = fm.double_to_single(v)
+            else:
+                mem[addr] = v & 0xFFFFFFFF
+            check("store")
+        else:
+            # FPSCR instructions
+            j = rnd.randrange(6)
+            rc = bit()
+            if j == 0:
+                d = dst()
+                emit((63 << 26) | (d << 21) | (583 << 1) | rc)           # mffs
+                fpr[d] = 0xFFF8000000000000 | st["fpscr"]
+            elif j == 1:
+                b, mask = src(), rnd.choice((0xFF, 0xFF, rnd.getrandbits(8)))
+                emit(mtfsf(mask, b, rc))
+                st["fpscr"], _ = fm.fpscr_instr("mtfsf", st["fpscr"], fm=mask, value=fpr[b] & 0xFFFFFFFF)
+            elif j == 2:
+                fld, imm = rnd.randrange(8), rnd.getrandbits(4)
+                emit((63 << 26) | (fld << 23) | (imm << 12) | (134 << 1) | rc)
+                st["fpscr"], _ = fm.fpscr_instr("mtfsfi", st["fpscr"], field=fld, value=imm)
+            elif j in (3, 4):
+                b = rnd.randrange(32)
+                emit((63 << 26) | (b << 21) | ((70 if j == 3 else 38) << 1) | rc)
+                st["fpscr"], _ = fm.fpscr_instr("mtfsb0" if j == 3 else "mtfsb1", st["fpscr"], bit=b)
+            else:
+                rc = 0
+                crf, fld = rnd.randrange(8), rnd.randrange(8)
+                emit((63 << 26) | (crf << 23) | (fld << 18) | (64 << 1))  # mcrfs
+                st["fpscr"], c = fm.fpscr_instr("mcrfs", st["fpscr"], field=fld)
+                set_crf(crf, c)
+            if rc:
+                cr1()
+            check("fpscr")
+        done += 1
+
+    for a, wv in mem.items():
+        if a >= SCRATCH - 0x1000:
+            p.expect[a] = wv
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions, %d checks -> %s" % (len(p.words), len(p.checks), out))
+
+
+# ---- random instruction streams ------------------------------------------------
+# r0: small index, r1 and r2: data bases. None is ever a random destination;
+# the bases drift upwards by r0 with every update form.
+#
+# With translate, the data regions are page-mapped 4 MB above their virtual
+# addresses (the bases keep their values). The page below each base is
+# read-only and the one above it is missing, so that DSIs happen from the
+# start, and the same again 32 KB and 64 KB up for programs that drift far;
+# the code, the vectors and the page table are reached through a BAT. The
+# random stream then keeps MSR[IR,DR] set, leaves the segment registers alone
+# and includes tlbie.
+PHYS_OFFSET = 0x00400000
+
+
+REPEAT_COUNT = 0x00300000     # the repeat option's pass counter (no data area near it)
+
+def gen_random(out, count, seed, translate=False, repeat=1, steady=False):
+    rnd = random.Random(seed)
+    p = Program()
+
+    for base in (DATA_A & ~3, DATA_B & ~3):
+        for a in range(base - DATA_SPAN, base + DATA_SPAN, 4):
+            p.data[a + (PHYS_OFFSET if translate else 0)] = rnd.getrandbits(32)
+
+    table = None
+    if translate:
+        srs = {n: 0x100 + n for n in range(16)}
+        sdr1 = 0x00100000
+        table = PageTable(p, sdr1, srs)
+        for base in (DATA_A & ~0xFFF, DATA_B & ~0xFFF):
+            for page in range(base - 0x1000, base + 0x20000, 0x1000):
+                if page in (base + 0x1000, base + 0x10000):
+                    continue                                              # the holes
+                ro = page in (base - 0x1000, base + 0x8000)
+                table.map(page, page + PHYS_OFFSET, 3 if ro else 2)
+
+    def interesting():
+        k = rnd.random()
+        if k < 0.25:
+            return rnd.choice((0, 1, 2, 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF, 0x80000001, 0xFFFF, 0x10000))
+        if k < 0.45:
+            return rnd.getrandbits(rnd.randrange(1, 33))
+        return rnd.getrandbits(32)
+
+    install_handlers(p)
+
+    # prologue: the translation state, MSR, then every register and CR, XER,
+    # LR, CTR defined
+    if translate:
+        for n, v in srs.items():
+            p.words += li32(3, v) + [mtsr(n, 3)]
+        for spr, v in ((IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
+                       (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)):
+            p.words += li32(3, v) + [mtspr(spr, 3)]
+    msr_base = (MSR_IR | MSR_DR) if translate else 0
+    p.words += caches_on(3)
+    p.words += set_msr(msr_base, 3)
+    p.words += li32(0, rnd.randrange(0, 40))
+    p.words += li32(1, DATA_A)
+    p.words += li32(2, DATA_B)
+    for r in range(3, 32):
+        p.words += li32(r, interesting())
+    p.words += li32(3, rnd.getrandbits(32)) + [mtcrf(0xFF, 3)]
+    p.words += li32(3, rnd.choice((0, 0x20000000, 0x80000000, 0xC0000000, 0xE0000000))) + [mtspr(XER, 3)]
+    p.words += li32(3, rnd.getrandbits(32)) + [mtspr(LR, 3)]
+    p.words += li32(3, rnd.getrandbits(32)) + [mtspr(CTR, 3)]
+    p.words += li32(3, interesting())
+
+    rd = lambda: rnd.randrange(3, 32)        # destination
+    rs = lambda: rnd.randrange(0, 32)        # source
+    base = lambda: rnd.choice((1, 2))
+    bit = lambda: rnd.getrandbits(1)
+
+    def simple(keep_ctr=False):
+        """One instruction with no memory access and no branch."""
+        k = rnd.randrange(16)
+        if k <= 2:
+            xo = rnd.choice((266, 10, 138, 40, 8, 136))          # add addc adde subf subfc subfe
+            return X(rd(), rs(), rs(), xo, bit()) | (bit() << 10)
+        if k == 3:
+            xo = rnd.choice((202, 234, 200, 232, 104))           # addze addme subfze subfme neg
+            return X(rd(), rs(), 0, xo, bit()) | (bit() << 10)
+        if k == 4:
+            xo = rnd.choice((28, 60, 124, 284, 316, 412, 444, 476))
+            return X(rs(), rd(), rs(), xo, bit())
+        if k == 5:
+            return X(rs(), rd(), rs(), rnd.choice((24, 536, 792)), bit())            # slw srw sraw
+        if k == 6:
+            return X(rs(), rd(), rnd.randrange(32), 824, bit())                       # srawi
+        if k == 7:
+            op = rnd.choice((20, 21, 23))
+            return M(op, rs(), rd(), rs() if op == 23 else rnd.randrange(32),
+                     rnd.randrange(32), rnd.randrange(32), bit())
+        if k == 8:
+            op = rnd.choice((14, 15, 12, 13, 8, 7))              # addi addis addic addic. subfic mulli
+            return D(op, rd(), rs(), rnd.getrandbits(16))
+        if k == 9:
+            return D(rnd.choice((24, 25, 26, 27, 28, 29)), rs(), rd(), rnd.getrandbits(16))
+        if k == 10:
+            crf = rnd.randrange(8) << 2
+            if bit():
+                return X(crf, rs(), rs(), rnd.choice((0, 32)))   # cmp cmpl
+            return D(rnd.choice((10, 11)), crf, rs(), rnd.getrandbits(16))
+        if k == 11:
+            return X(rs(), rd(), 0, rnd.choice((26, 922, 954)), bit())                # cntlzw extsh extsb
+        if k == 12:
+            xo = rnd.choice((235, 235, 75, 11, 491, 459))        # mullw mulhw mulhwu divw divwu
+            oe = bit() if xo in (235, 491, 459) else 0
+            return X(rd(), rs(), rs(), xo, bit()) | (oe << 10)
+        if k == 13:
+            j = rnd.randrange(5)
+            if j == 0:                                           # CR logic
+                xo = rnd.choice((33, 129, 193, 225, 257, 289, 417, 449))
+                return (19 << 26) | (rnd.randrange(32) << 21) | (rnd.randrange(32) << 16) | \
+                       (rnd.randrange(32) << 11) | (xo << 1)
+            if j == 1:
+                return (19 << 26) | (rnd.randrange(8) << 23) | (rnd.randrange(8) << 18)   # mcrf
+            if j == 2:
+                return X(rd(), 0, 0, 19)                         # mfcr
+            if j == 3:
+                return mtcrf(rnd.getrandbits(8), rs())
+            return X(rnd.randrange(8) << 2, 0, 0, 512)           # mcrxr
+        if k == 14:
+            j = rnd.randrange(5)
+            if j < 3:
+                return mfspr((XER, LR, CTR)[j], rd())
+            return mtspr(LR if (j == 3 or keep_ctr) else CTR, rs())
+        return D(14, rd(), 0, rnd.getrandbits(16))               # li
+
+    def system():
+        """Supervisor instructions and things that raise exceptions. In user
+        mode the privileged ones trap; the handlers step over them."""
+        k = rnd.randrange(12)
+        if k == 0:
+            return [0x44000002]                                   # sc: switch mode
+        if k == 1:
+            return [D(3, rnd.randrange(32), rs(), rnd.getrandbits(16))]       # twi
+        if k == 2:
+            # tw: only conditions that do not care which operand is which
+            return [X(rnd.choice((4, 31, 24, 3, 0)), rs(), rs(), 4)]
+        if k == 3:
+            return [(rnd.choice((0, 1, 5, 6)) << 26) | rnd.getrandbits(26)]   # not an instruction
+        if k == 4:
+            return [X(rd(), 0, 0, 83)]                            # mfmsr
+        if k == 5:
+            t = rd()
+            v = rnd.choice((0, MSR_FP, 0x1000, 0x3000, MSR_EE, MSR_EE | MSR_FP, MSR_PR, MSR_PR | MSR_FP))
+            return li32(t, v | msr_base) + [mtmsr(t)]
+        if k in (6, 7):
+            spr = rnd.choice((272, 273, 274, 275, 26, 27, 19, 18))
+            if k == 7:
+                return [mfspr(spr, rd())]
+            s = rs()
+            if spr == 26:
+                # a 604 keeps bits 0-29 of SRR0 and dingusppc all 32: clear the
+                # two low bits first, so that a later mfspr agrees
+                return [M(21, s, s, 0, 0, 29), mtspr(spr, s)]
+            return [mtspr(spr, s)]
+        if k == 8:
+            return [mfspr(287, rd())]                             # PVR
+        if k == 9:
+            return [(31 << 26) | (rd() << 21) | ((268 & 31) << 16) | ((268 >> 5) << 11) | (371 << 1)]  # mftb
+        if k == 10:
+            n = rnd.randrange(16)
+            if bit() and not steady:     # (steady: no new fold epoch, so the BTB keeps its folds)
+                if translate:
+                    return [tlbie(rs())]
+                return [mtsr(n, rs())]
+            return [(31 << 26) | (rd() << 21) | (n << 16) | (595 << 1)]       # mfsr
+        return [0xFC201090]                                       # fmr f1,f2: traps when MSR[FP] is off
+
+    def memory():
+        """A group that loads or stores."""
+        k = rnd.randrange(15)
+        d = rnd.randrange(-256, 256)
+        if k == 12:
+            # lwarx/stwcx. on a fixed, always mapped address: dingusppc sets
+            # its reservation before lwarx's load and clears CR0 before
+            # stwcx.'s store, so neither may take a DSI here
+            t = rd()
+            addr = (DATA_A if bit() else (DATA_B & ~3)) + 4 * rnd.randrange(64)
+            words = li32(t, addr)
+
+            def other():
+                u = rd()
+                while u == t:
+                    u = rd()
+                return u
+            if rnd.random() < 0.8:
+                words.append(X(other(), 0, t, 20))                                    # lwarx
+            for _ in range(rnd.randrange(3)):
+                words.append(D(14, other(), 0, rnd.getrandbits(16)))                  # li
+            if rnd.random() < 0.9:
+                words.append(X(rs(), 0, t, 150, 1))                                   # stwcx.
+            return words
+        if k == 13 or (k == 14 and translate):
+            # dcbz on the line the in-page copy of the base points at
+            t = rd()
+            return [M(21, base(), t, 0, 27, 19), X(0, 0, t, 1014)]
+        if k == 14:
+            # dcbst, dcbf, icbi: invisible to the program on both sides without
+            # translation (dingusppc does not translate them at all). Not dcbi:
+            # it throws away stores the data cache still holds, which dingusppc,
+            # having no cache, would keep.
+            t = rd()
+            return [M(21, base(), t, 0, 27, 19), X(0, 0, t, rnd.choice((54, 86) if steady else (54, 86, 982)))]
+        if k == 0:
+            return [D(rnd.choice((32, 34, 40, 42)), rd(), base(), d)]                 # lwz lbz lhz lha
+        if k == 1:
+            return [D(rnd.choice((36, 38, 44)), rs(), base(), d)]                     # stw stb sth
+        if k == 2:
+            return [D(rnd.choice((33, 35, 41, 43)), rd(), base(), rnd.randrange(-12, 13))]
+        if k == 3:
+            return [D(rnd.choice((37, 39, 45)), rs(), base(), rnd.randrange(-12, 13))]
+        if k == 4:
+            xo = rnd.choice((23, 87, 279, 343, 534, 790))        # lwzx lbzx lhzx lhax lwbrx lhbrx
+            return [X(rd(), base(), 0, xo) if bit() else X(rd(), 0, base(), xo)]
+        if k == 5:
+            xo = rnd.choice((151, 215, 407, 662, 918))           # stwx stbx sthx stwbrx sthbrx
+            return [X(rs(), base(), 0, xo) if bit() else X(rs(), 0, base(), xo)]
+        if k in (6, 7):
+            # update, indexed; half the time with rD (or rS) the same register
+            # as rB (lwzux r5,r1,r5: valid, and once wrong in the sequencer),
+            # which then holds a small index first, as r0 does
+            xo = rnd.choice((55, 119, 311, 375)) if k == 6 else rnd.choice((183, 247, 439))
+            if bit():
+                return [X(rd() if k == 6 else rs(), base(), 0, xo)]
+            t = rd()
+            return [D(14, t, 0, rnd.randrange(0, 40)), X(t, base(), t, xo)]
+        if k == 8:
+            # lmw stmw: the 604 takes an alignment exception unless the address is
+            # word-aligned, so go through a copy of the base with the low bits cleared
+            t = rnd.randrange(3, 20)
+            return [M(21, base(), t, 0, 0, 29),
+                    D(46 if bit() else 47, rnd.randrange(20, 32), t, 4 * rnd.randrange(-16, 16))]
+        # String operations: the 604 takes an alignment exception when one that
+        # is not word-aligned crosses a 4 KB boundary (dingusppc does not), so
+        # they go through a copy of the base with bits 5-11 cleared, which
+        # keeps the whole string inside the first 128 bytes of its page.
+        first, t = rnd.randrange(3, 28), rd()
+        while first <= t <= first + 4:
+            t = rd()
+        inpage = [M(21, base(), t, 0, 27, 19)]                   # t = base & FFFFF01F
+        if k == 9:
+            return inpage + [X(first, t, rnd.randrange(1, 17), 597 if bit() else 725)]   # lswi stswi
+        # lswx stswx: byte count from XER
+        u = rd()
+        while first <= u <= first + 4 or u == t:
+            u = rd()
+        count = rnd.randrange(0, 17)
+        flags = rnd.choice((0, 0x20000000, 0x80000000, 0xA0000000))
+        return inpage + li32(u, flags | count) + [mtspr(XER, u), X(first, t, 0, 533 if bit() else 661)]
+
+    # groups: ('code', words) or ('br', kind, skip)
+    groups = []
+    total = 0
+    while total < count:
+        k = rnd.random()
+        if k < 0.50:
+            g = ("code", [simple()])
+        elif k < 0.56:
+            g = ("code", system())
+        elif k < 0.80:
+            g = ("code", memory())
+        elif k < 0.90:
+            g = ("br", rnd.choice(("bc", "bc", "b", "bl", "bcctr_dec")), rnd.randrange(1, 6))
+        elif k < 0.95:
+            g = ("br", rnd.choice(("blr", "bctr")), rnd.randrange(1, 6))
+        else:
+            body = [simple(keep_ctr=True) for _ in range(rnd.randrange(1, 4))]
+            t = rd()
+            words = li32(t, rnd.randrange(1, 6)) + [mtspr(CTR, t)] + body
+            words.append((16 << 26) | (16 << 21) | ((-4 * len(body)) & 0xFFFC))       # bdnz back
+            g = ("code", words)
+        groups.append(g)
+        total += len(g[1]) if g[0] == "code" else 4
+
+    # lay out: branch groups have a fixed size, so targets are known
+    def size(g):
+        if g[0] == "code":
+            return len(g[1])
+        return {"bc": 1, "b": 1, "bl": 1, "bcctr_dec": 1, "blr": 4, "bctr": 4}[g[1]]
+
+    starts = []
+    at = len(p.words)
+    for g in groups:
+        starts.append(at)
+        at += size(g)
+    end = at
+
+    for i, g in enumerate(groups):
+        if g[0] == "code":
+            p.words += g[1]
+            continue
+        _, kind, skip = g
+        target = starts[i + skip] if i + skip < len(groups) else end
+        here = len(p.words)
+        if kind in ("bc", "bcctr_dec"):
+            if kind == "bc":
+                bo = rnd.choice((12, 4, 12, 4, 20))              # if set, if clear, always
+            else:
+                bo = rnd.choice((16, 18, 8, 10, 0, 2))           # count CTR down, maybe test a bit
+            p.words.append((16 << 26) | (bo << 21) | (rnd.randrange(32) << 16) | ((4 * (target - here)) & 0xFFFC))
+        elif kind in ("b", "bl"):
+            p.words.append((18 << 26) | ((4 * (target - here)) & 0x03FFFFFC) | (1 if kind == "bl" else 0))
+        else:
+            t = rd()
+            addr = CODE_BASE + 4 * target
+            spr, xo = (LR, 16) if kind == "blr" else (CTR, 528)
+            bo = rnd.choice((20, 12, 4))
+            p.words += [D(15, t, 0, addr >> 16), D(24, t, t, addr), mtspr(spr, t),
+                        (19 << 26) | (bo << 21) | (rnd.randrange(32) << 16) | (xo << 1) | bit()]
+    assert len(p.words) == end
+    if repeat > 1 and not translate:
+        # run the body again (the branch target buffer then knows its branches,
+        # and folds them): a pass counter in memory, then back through CTR
+        p.data[REPEAT_COUNT] = repeat - 1
+        p.words += [D(15, 4, 0, REPEAT_COUNT >> 16), D(32, 3, 4, 0), D(13, 3, 3, 0xFFFF), D(36, 3, 4, 0)]
+        p.words += li32(5, CODE_BASE + 4 * starts[0]) + [mtspr(CTR, 5)]
+        p.words.append((19 << 26) | (4 << 21) | (2 << 16) | (528 << 1))                # bnectr
+    p.words.append(B_SELF)
+    p.write(out)
+    print("%d instructions -> %s" % (len(p.words), out))
+
+
+# ---- the machine's memory-test boot program -------------------------------------
+# It runs from MacPPC7300_bootrom, which the machine puts in place of the ROM when
+# the OSD's Boot option says "Memory test", and reports through the machine's
+# debug registers (MacPPC7300_machine, F9000000):
+#   00  status: 1 writing, 2 reading; EE00xxxx: exception at vector xxxx
+#   04  passes completed       08  errors counted
+#   0C  address of the first error (FFFFFFFF: none)
+#   10  the word read there     14  the word expected
+#   20  (read only) the installed RAM, in bytes
+# Each pass writes every word of the installed RAM with its address XORed
+# with a per-pass seed (0 in the first pass, then multiples of 9E3779B9),
+# through the data cache, pushing every line out with dcbf; then reads it all
+# back (every line misses, the cache holding none of them) and compares.
+
+DBG = 0xF9000000
+BOOTROM_WORDS = 2048           # 8 KB, mirrored over the ROM's 4 MB
+MEMTEST_MAIN = 0x1000
+
+
+def cmplw(ra, rb, crf=0):
+    return (31 << 26) | (crf << 23) | (ra << 16) | (rb << 11) | (32 << 1)
+
+
+def cmpwi(ra, imm, crf=0):
+    return (11 << 26) | (crf << 23) | (ra << 16) | (imm & 0xFFFF)
+
+
+def assemble(items, base):
+    """items: words, ("label", name), ("b", name), ("bc", BO, BI, name) or
+    ("la", rD, name, offset) (lis, ori: the label's address plus offset).
+    Returns the words for an image starting at byte offset base."""
+    labels, pc = {}, base
+    for it in items:
+        if isinstance(it, tuple) and it[0] == "label":
+            labels[it[1]] = pc
+        else:
+            pc += 8 if isinstance(it, tuple) and it[0] == "la" else 4
+    out, pc = [], base
+    for it in items:
+        if isinstance(it, tuple):
+            if it[0] == "label":
+                continue
+            if it[0] == "la":
+                v = labels[it[2]] + it[3]
+                out += [D(15, it[1], 0, v >> 16), D(24, it[1], it[1], v)]
+                pc += 8
+                continue
+            if it[0] == "b":
+                out.append((18 << 26) | ((labels[it[1]] - pc) & 0x03FFFFFC))
+            else:
+                _, bo, bi, name = it
+                out.append((16 << 26) | (bo << 21) | (bi << 16) | ((labels[name] - pc) & 0xFFFC))
+        else:
+            out.append(it)
+        pc += 4
+    return out
+
+
+def memtest_image():
+    """The 8 KB boot ROM image as a list of words."""
+    img = [0] * BOOTROM_WORDS
+    BNE, BEQ, BLT = (4, 2), (12, 2), (12, 0)
+    # reset (FFF00100): to the program
+    img[0x100 // 4] = (18 << 26) | ((MEMTEST_MAIN - 0x100) & 0x03FFFFFC)
+    # every other vector: report it and stop. A store and dcbf work whether
+    # or not data translation is on yet (with it off the store goes through
+    # the cache and dcbf writes the line back)
+    for vec in list(range(0x200, 0x1000, 0x100)):
+        code = [D(15, 1, 0, DBG >> 16)] + li32(2, 0xEE000000 | vec) + \
+               [D(36, 2, 1, 0), X(0, 0, 1, 86), X(0, 0, 0, 598), B_SELF]
+        for i, w in enumerate(code):
+            img[vec // 4 + i] = w
+    p = []
+    p += li32(3, 0x0000CC04) + [mtspr(HID0, 3), 0x4C00012C]          # caches on, flash-invalidated, BHT
+    p += [D(14, 3, 0, 0), mtspr(540, 3), mtspr(542, 3)]               # DBAT2, DBAT3 off
+    p += li32(3, batu(0x00000000, 2048)) + [mtspr(536, 3)]            # DBAT0: RAM, 256 MB, cached
+    p += li32(3, batl(0x00000000, 2, wimg=0b0010)) + [mtspr(537, 3)]
+    p += li32(3, batu(0xF0000000, 2048)) + [mtspr(538, 3)]            # DBAT1: devices, inhibited, guarded
+    p += li32(3, batl(0xF0000000, 2, wimg=0b0101)) + [mtspr(539, 3)]
+    p += [0x4C00012C] + li32(3, 0x50) + [mtmsr(3), 0x4C00012C]        # data translation on
+    p += [D(15, 31, 0, DBG >> 16), D(32, 30, 31, 0x20)]                # r31 debug registers, r30 RAM size
+    p += [D(14, 29, 0, 0), D(14, 28, 0, 0), D(14, 27, 0, -1)]          # passes, errors, first error
+    p += [D(36, 29, 31, 4), D(36, 28, 31, 8), D(36, 27, 31, 0xC)]
+    p += li32(25, 0x9E3779B9)
+    p += [("label", "pass"),
+          (31 << 26) | (26 << 21) | (29 << 16) | (25 << 11) | (235 << 1),   # mullw r26, r29, r25: the seed
+          D(14, 3, 0, 1), D(36, 3, 31, 0), D(14, 4, 0, 0),
+          ("label", "wl"),
+          X(4, 5, 26, 316), D(36, 5, 4, 0), D(14, 4, 4, 4),               # xor, stw, addi
+          D(28, 4, 6, 31), ("bc",) + BNE + ("wl",),                      # andi. r6, r4, 31; bne
+          D(14, 7, 4, -32), X(0, 0, 7, 86),                              # dcbf the line just written
+          cmplw(4, 30), ("bc",) + BLT + ("wl",),
+          X(0, 0, 0, 598),                                               # sync
+          D(14, 3, 0, 2), D(36, 3, 31, 0), D(14, 4, 0, 0),
+          ("label", "rl"),
+          D(32, 5, 4, 0), X(4, 6, 26, 316), cmplw(5, 6), ("bc",) + BNE + ("bad",),
+          ("label", "next"),
+          D(14, 4, 4, 4), cmplw(4, 30), ("bc",) + BLT + ("rl",),
+          D(14, 29, 29, 1), D(36, 29, 31, 4), ("b", "pass"),
+          ("label", "bad"),
+          D(14, 28, 28, 1), D(36, 28, 31, 8),
+          cmpwi(27, -1), ("bc",) + BNE + ("next",),
+          X(4, 27, 4, 444),                                               # mr r27, r4
+          D(36, 27, 31, 0xC), D(36, 5, 31, 0x10), D(36, 6, 31, 0x14),
+          ("b", "next")]
+    words = assemble(p, MEMTEST_MAIN)
+    assert MEMTEST_MAIN // 4 + len(words) <= BOOTROM_WORDS
+    for i, w in enumerate(words):
+        img[MEMTEST_MAIN // 4 + i] = w
+    return img, len(words)
+
+
+def memtest(out):
+    """Writes the boot ROM as a SystemVerilog module (a ROM Quartus infers
+    from a case statement, with no file to find at build time)."""
+    img, n = memtest_image()
+    with open(out, "w", newline="\n") as fh:
+        fh.write("// Generated by verilator/progs.py memtest: do not edit.\n")
+        fh.write("//\n// MacPPC7300 - the machine's memory-test boot program, 8 KB, mirrored over the\n")
+        fh.write("// ROM's 4 MB when the OSD selects it (see progs.py for what it does and\n")
+        fh.write("// MacPPC7300_machine.sv for the debug registers it reports through).\n\n")
+        fh.write("module MacPPC7300_bootrom\n(\n\tinput  logic        clk,\n\tinput  logic [12:2] addr,\n")
+        fh.write("\toutput logic [31:0] q\n);\n\nalways_ff @(posedge clk) begin\n\tcase (addr)\n")
+        for i, w in enumerate(img):
+            if w:
+                fh.write("\t\t11'h%03X: q <= 32'h%08X;\n" % (i, w))
+        fh.write("\t\tdefault: q <= 32'h00000000;\n\tendcase\nend\n\nendmodule\n")
+    print("memory test: %d instructions, %d words in the image -> %s" % (n, sum(1 for w in img if w), out))
+
+
+def specfetchrom(out):
+    """Train a conditional call with IR on, then take its fallthrough with
+    IR off. The stale prediction reads an unmapped instruction line. Its
+    response must not enter the reference's data-device queue and block
+    the subsequent Hammerhead motherboard-ID load. Run machine_tb with
+    --machine --rom OUT.rom --lockstep --max-instr 100; require an observed
+    instruction fetch outside RAM/ROM and one compared device read.
+    """
+    rom = bytearray(4 << 20)
+
+    def put(pc, words):
+        for w in words:
+            off = pc - 0xFFC00000
+            rom[off:off + 4] = w.to_bytes(4, "big")
+            pc += 4
+        return pc
+
+    def branch(pc, target):
+        return 0x48000000 | ((target - pc) & 0x03FFFFFC)
+
+    call, done = 0xFFF00200, 0xFFF00280
+    words = caches_on(value=HID0_ICE)
+    # Four-MB IBATs: retain ROM's identity mapping and map 68000000 to ROM.
+    for spr, value in ((529, 0xFFC00002), (528, 0xFFC0007F),
+                       (531, 0xFFC00002), (530, 0x6800007F)):
+        words += li32(3, value) + [mtspr(spr, 3)]
+    words += set_msr(0x20, scratch=3) + li32(4, 1)
+    words += li32(3, 0x68000400) + [mtspr(LR, 3), cmpwi(4, 1)]
+    pc = put(0xFFF00100, words)
+    put(pc, [branch(pc, call)])
+    pc = put(call, [0x4D820021, cmpwi(4, 0)])  # bclrl 12,2; cmpwi r4,0
+    put(pc, [0x41820000 | ((done - pc) & 0xFFFC)])
+    pc = put(pc + 4, li32(4, 0) + set_msr(0, scratch=3) +
+             li32(3, 0x68000400) + [mtspr(LR, 3), cmpwi(4, 1)])
+    put(pc, [branch(pc, call)])
+    pc = put(done, li32(3, 0xF8000000) + [D(32, 4, 3, 32), D(14, 5, 0, 42)])
+    put(pc, [B_SELF])
+    put(0xFFC00400, [0x4E800020])             # blr: return from the trained call
+    with open(out, "wb") as fh:
+        fh.write(rom)
+    print("speculative I-fetch regression ROM ->", out)
+
+
+if __name__ == "__main__":
+    here = os.path.dirname(os.path.abspath(__file__))
+    a = sys.argv[1:]
+    default_csv = os.path.join(here, "..", "ppctest", "runs", "results_604_run2.csv")
+    if len(a) >= 2 and a[0] == "golden":
+        golden(a[1], a[2] if len(a) > 2 else default_csv)
+    elif len(a) >= 2 and a[0] == "goldenfp":
+        goldenfp(a[1], a[2] if len(a) > 2 else default_csv)
+    elif len(a) >= 2 and a[0] == "exctest":
+        exctest(a[1])
+    elif len(a) >= 2 and a[0] == "fpexctest":
+        fpexctest(a[1])
+    elif len(a) >= 2 and a[0] == "fpqtest":
+        fpqtest(a[1], int(a[2]) if len(a) > 2 else 2000)
+    elif len(a) >= 2 and a[0] == "mmutest":
+        mmutest(a[1])
+    elif len(a) >= 2 and a[0] == "resvtest":
+        resvtest(a[1])
+    elif len(a) >= 2 and a[0] == "cachetest":
+        cachetest(a[1])
+    elif len(a) >= 2 and a[0] == "widecachetest":
+        widecachetest(a[1])
+    elif len(a) >= 2 and a[0] == "updtest":
+        updtest(a[1])
+    elif len(a) >= 2 and a[0] == "irqtest":
+        irqtest(a[1], int(a[2]) if len(a) > 2 else 3000)
+    elif len(a) >= 2 and a[0] == "irqwalktest":
+        irqtest(a[1], int(a[2]) if len(a) > 2 else 3000, translated=True)
+    elif len(a) >= 2 and a[0] == "irqwalkfaulttest":
+        irqtest(a[1], int(a[2]) if len(a) > 2 else 3000, translated=True, faulting=True)
+    elif len(a) >= 2 and a[0] == "acktest":
+        acktest(a[1])
+    elif len(a) >= 2 and a[0] == "vecwalktest":
+        vecwalktest(a[1])
+    elif len(a) >= 2 and a[0] == "irqoverlaptest":
+        irqtest(a[1], int(a[2]) if len(a) > 2 else 3000, overlap=True)
+    elif len(a) >= 3 and a[0] == "fprandom":
+        fprandom(a[1], int(a[2]), int(a[3]) if len(a) > 3 else 1)
+    elif len(a) >= 3 and a[0] == "fpbench":
+        fpbench(a[1], a[2], int(a[3]) if len(a) > 3 else 2000)
+    elif len(a) >= 3 and a[0] == "random":
+        opts = a[4:]
+        rep = [int(o.split("=")[1]) for o in opts if o.startswith("repeat=")]
+        gen_random(a[1], int(a[2]), int(a[3]) if len(a) > 3 else 1, "xlate" in opts, rep[0] if rep else 1,
+                   "steady" in opts)
+    elif len(a) >= 2 and a[0] == "memtest":
+        memtest(a[1])
+    elif len(a) >= 2 and a[0] == "specfetchrom":
+        specfetchrom(a[1])
+    else:
+        print(__doc__)
+        sys.exit(2)

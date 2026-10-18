@@ -1,0 +1,1336 @@
+//============================================================================
+//
+//  DSPPC604 - PowerPC 604-class CPU core
+//  Floating-point unit
+//
+//  Holds no architectural state: operand values and FPSCR in, result and the
+//  new FPSCR out. verilator/fpmodel.py is the executable specification this
+//  module follows; both are checked against results from a real 604.
+//
+//  Handshake (same as the integer unit)
+//    The requester holds req_valid, ctl, the operands, their classes
+//    (cls_a/b/c, fp_classify of each operand, found by the requester beside
+//    the operand so that no conversion of it sits in front of the class)
+//    and fpscr_in steady until the response is taken. resp_valid stays high,
+//    with the results, until a cycle in which resp_ready is high too.
+//
+//    fmr fneg fabs fnabs fsel                same cycle (combinational)
+//    fcmpu fcmpo                            operand + response registers
+//    everything else                        several cycles, see the stages
+//
+//    result_we is low when an enabled invalid-operation or zero-divide
+//    exception keeps the target register unchanged. fex is the new
+//    FPSCR[FEX]; the requester decides with MSR[FE0,FE1] whether to trap.
+//
+//  One datapath serves every arithmetic instruction:
+//
+//    x * y + z   fadd (y = 1), fmul (z absent: the product goes straight to
+//                the back end, a cycle fewer), fmadd..., frsp and fctiw
+//                (product absent, z = operand)
+//    x / z       fdiv, fres (x = 1); two quotient bits per cycle
+//
+//  followed by a shared normalise - shift - round - pack back end.
+//
+//  Non-IEEE mode (FPSCR[NI]) does what a 604 does: a result that would be
+//  denormalised is delivered as a signed zero and reported as an inexact
+//  underflow; denormal operands are computed with as in IEEE mode.
+//
+//  OPERAND_REG = 1 takes the operands, control and FPSCR into registers in
+//  the request cycle and works from those a cycle later, so the requester's
+//  forwarding network ends at a register; arithmetic, moves and selects then
+//  take one cycle more. Compares always use the operand registers and then
+//  register their condition/FPSCR response, independently of OPERAND_REG.
+//
+//  The results that need no arithmetic (NaN operands, infinities, zeros, the
+//  invalid operations) are found in the cycle after the request, from the
+//  operand registers, while the first stage has already begun: only an
+//  operation with such operands takes a cycle more. Before 2026-10-10 they
+//  were found in the request cycle, and that select, behind the requester's
+//  forwarding, was the slowest path of the whole CPU.
+//
+//============================================================================
+
+module DSPPC604_fpu
+#(
+	parameter int OPERAND_REG = 0
+)
+(
+	input  logic        clk,
+	input  logic        reset,
+	input  logic        flush,
+	input  logic        no_early,     // MSR[FE0] | MSR[FE1]: answer from S_DONE only (see the response)
+
+	input  logic        req_valid,
+	output logic        req_ready,
+	output logic        req_simple,  // the request presented is answered in its own cycle, from no state: keep presenting it until the answer is taken
+	input  DSPPC604_pkg::fpu_ctl_t ctl,
+	input  logic [63:0] a,           // frA
+	input  logic [63:0] b,           // frB
+	input  logic [63:0] c,           // frC
+	input  DSPPC604_pkg::fp_cls_t cls_a,   // the operands' classes (fp_classify of each)
+	input  DSPPC604_pkg::fp_cls_t cls_b,
+	input  DSPPC604_pkg::fp_cls_t cls_c,
+	input  logic [31:0] fpscr_in,
+
+	output logic        resp_valid,
+	input  logic        resp_ready,
+	output logic [63:0] result,
+	output logic        result_we,
+	output logic [31:0] fpscr_out,
+	output logic [3:0]  cr_out,      // CR1 for Rc forms, the compare result for fcmp
+	output logic        fex,
+	// the result's FPSCR effects on their own (what fpscr_out applied to
+	// fpscr_in), for a requester that commits the operation later, in order,
+	// against the FPSCR of that time: the bits set, FR and FI, the class
+	output logic [31:0] set_out,
+	output logic        fr_out,
+	output logic        fi_out,
+	output logic        fprf_we_out,
+	output logic [4:0]  fprf_out,
+	output logic        cmp_out      // the answer is a compare's: fprf_out[3:0] is its condition (FPSCR's C bit stays)
+);
+
+import DSPPC604_pkg::*;
+
+// FPSCR bit numbers (bit 31 is FX, the architecture's bit 0)
+localparam int B_OX = 28, B_UX = 27, B_ZX = 26, B_XX = 25;
+localparam int B_VXSNAN = 24, B_VXISI = 23, B_VXIDI = 22, B_VXZDZ = 21;
+localparam int B_VXIMZ = 20, B_VXVC = 19, B_VXSQRT = 9, B_VXCVI = 8;
+localparam int B_VE = 7, B_OE = 6, B_UE = 5, B_ZE = 4;
+
+localparam logic [31:0] VX_ALL = 32'h01F80700;   // every invalid-operation cause
+localparam logic [31:0] STICKY = 32'h1FF80700;   // every exception bit that sets FX
+
+localparam logic [63:0] QNAN = 64'h7FF8000000000000;
+
+// ---- FPSCR helpers ---------------------------------------------------------
+// (fpscr_update is the package's: the pipeline applies a queued
+// operation's effects with it too)
+
+// result class, as FPSCR[FPRF]. A single-precision denormal is held as a
+// normalised double, so the rounding stage says whether the result was
+// denormalised (den_in); one that an enabled underflow scaled into range is a
+// normal number whatever its exponent, as a 604 reports it.
+function automatic logic [4:0] fprf_of(input logic [63:0] x, input logic den_in);
+	logic s, emax, ezero, fzero, den;
+	begin
+		s     = x[63];
+		emax  = (x[62:52] == 11'h7FF);
+		ezero = (x[62:52] == 11'd0);
+		fzero = (x[51:0] == 52'd0);
+		den   = ezero | den_in;
+		if (emax & ~fzero)      fprf_of = 5'b10001;
+		else if (emax)          fprf_of = s ? 5'b01001 : 5'b00101;
+		else if (ezero & fzero) fprf_of = s ? 5'b10010 : 5'b00010;
+		else if (den)           fprf_of = s ? 5'b11000 : 5'b10100;
+		else                    fprf_of = s ? 5'b01000 : 5'b00100;
+	end
+endfunction
+
+// ---- the request as the unit sees it ----------------------------------------
+// With OPERAND_REG everything below works from these registers, filled in
+// the request cycle; without it, from the ports.
+logic [63:0] a_q, b_q, c_q;
+fp_cls_t     ka_q, kb_q, kc_q;
+fpu_ctl_t    ctl_q;
+logic [31:0] fpscr_i_q;
+wire [63:0]  ia     = (OPERAND_REG != 0) ? a_q : a;
+wire [63:0]  ib     = (OPERAND_REG != 0) ? b_q : b;
+wire [63:0]  ic     = (OPERAND_REG != 0) ? c_q : c;
+wire [31:0]  ifpscr = (OPERAND_REG != 0) ? fpscr_i_q : fpscr_in;
+fpu_ctl_t    ictl;
+assign ictl = (OPERAND_REG != 0) ? ctl_q : ctl;
+
+// ---- operand classes -------------------------------------------------------
+// of the operands as presented (the requester's fp_classify): the moves,
+// select and compare, and the datapath's set-up in the request cycle
+fp_cls_t ka, kb, kc;
+assign ka = (OPERAND_REG != 0) ? ka_q : cls_a;
+assign kb = (OPERAND_REG != 0) ? kb_q : cls_b;
+assign kc = (OPERAND_REG != 0) ? kc_q : cls_c;
+
+wire        a_s = ka.s, b_s = kb.s, c_s = kc.s;
+wire        a_ez = ka.ez, b_ez = kb.ez, c_ez = kc.ez;
+wire        a_zero = ka.zero, b_zero = kb.zero, c_zero = kc.zero;
+wire        a_den = ka.den, b_den = kb.den, c_den = kc.den;
+wire        a_nan = ka.nan, b_nan = kb.nan;
+wire        a_snan = ka.snan, b_snan = kb.snan;
+
+// magnitude m * 2**e for a finite operand; a denormal has exponent field 1
+wire [52:0] a_m = {~a_ez, ia[51:0]};
+wire [52:0] b_m = {~b_ez, ib[51:0]};
+wire [52:0] c_m = {~c_ez, ic[51:0]};
+wire signed [13:0] a_e = $signed({3'b000, a_ez ? 11'd1 : ia[62:52]}) - 14'sd1075;
+wire signed [13:0] b_e = $signed({3'b000, b_ez ? 11'd1 : ib[62:52]}) - 14'sd1075;
+wire signed [13:0] c_e = $signed({3'b000, c_ez ? 11'd1 : ic[62:52]}) - 14'sd1075;
+
+// ---- what the instruction is ----------------------------------------------
+typedef struct packed {
+	logic simple;   // answered in the request cycle
+	logic div;      // fdiv, fres
+	logic rsq;
+	logic isint;    // fctiw, fctiwz
+	logic sub;      // the frB operand is subtracted
+	logic neg;      // the result is negated
+	logic use_a, use_b, use_c;
+	logic sgl;      // rounded to single precision: opcode 59, and frsp
+} opdec_t;
+
+function automatic opdec_t decode_op(input fpu_ctl_t fc);
+	begin
+		decode_op = '0;
+		case (fc.op)
+			FPU_ADD:    begin decode_op.use_a = 1; decode_op.use_b = 1; end
+			FPU_SUB:    begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.sub = 1; end
+			FPU_MUL:    begin decode_op.use_a = 1; decode_op.use_c = 1; end
+			FPU_DIV:    begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.div = 1; end
+			FPU_MADD:   begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.use_c = 1; end
+			FPU_MSUB:   begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.use_c = 1; decode_op.sub = 1; end
+			FPU_NMADD:  begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.use_c = 1; decode_op.neg = 1; end
+			FPU_NMSUB:  begin decode_op.use_a = 1; decode_op.use_b = 1; decode_op.use_c = 1; decode_op.sub = 1; decode_op.neg = 1; end
+			FPU_RSP:    begin decode_op.use_b = 1; end
+			FPU_CTIW,
+			FPU_CTIWZ:  begin decode_op.use_b = 1; decode_op.isint = 1; end
+			FPU_RES:    begin decode_op.use_b = 1; decode_op.div = 1; end
+			FPU_RSQRTE: begin decode_op.use_b = 1; decode_op.rsq = 1; end
+			default:    decode_op.simple = 1;   // moves, fsel, compares
+		endcase
+		decode_op.sgl = fc.single | (fc.op == FPU_RSP);
+	end
+endfunction
+
+opdec_t od;
+assign od = decode_op(ictl);
+
+wire op_simple = od.simple;
+wire op_div    = od.div;
+wire op_rsq    = od.rsq;
+wire op_int    = od.isint;
+wire op_sub    = od.sub;
+wire op_neg    = od.neg;
+wire use_a     = od.use_a, use_b = od.use_b, use_c = od.use_c;
+wire op_sgl    = od.sgl;
+
+// ---- moves and select: combinational; compare: registered operands ----------
+logic [63:0] simple_result;
+logic [31:0] simple_fpscr;
+logic [3:0]  simple_cr;
+
+// Compare always uses the captured request. This separates forwarded LFS
+// normalization from the magnitude comparison, including OPERAND_REG=0.
+wire cmp_un = ka_q.nan | kb_q.nan;
+wire cmp_bz = ka_q.zero & kb_q.zero;
+wire cmp_lt = ~cmp_un & ~cmp_bz & ((ka_q.s & ~kb_q.s) |
+              (~ka_q.s & ~kb_q.s & (a_q[62:0] < b_q[62:0])) |
+              (ka_q.s & kb_q.s & (a_q[62:0] > b_q[62:0])));
+wire cmp_eq = ~cmp_un & (cmp_bz | (a_q == b_q));
+wire cmp_gt = ~cmp_un & ~cmp_lt & ~cmp_eq;
+wire [3:0] cmp_cc = {cmp_lt, cmp_gt, cmp_eq, cmp_un};
+logic [31:0] cmp_fpscr, cmp_set;
+
+always_comb begin : compare_fpscr
+	logic cmp_snan;
+	cmp_set = 32'd0;
+	cmp_snan = ka_q.snan | kb_q.snan;
+	cmp_set[B_VXSNAN] = cmp_snan;
+	if (ctl_q.op == FPU_CMPO)
+		cmp_set[B_VXVC] = cmp_snan ? ~fpscr_i_q[B_VE] : cmp_un;
+	cmp_fpscr = fpscr_update(fpscr_i_q, cmp_set, 1'b0, 1'b0, 1'b0,
+	                         1'b1, {fpscr_i_q[16], cmp_cc});
+end
+
+always_comb begin : simple_ops
+	simple_result = ib;
+	simple_fpscr  = ifpscr;
+	simple_cr     = ifpscr[31:28];
+
+	case (ictl.op)
+		FPU_NEG:  simple_result = {~ib[63], ib[62:0]};
+		FPU_ABS:  simple_result = {1'b0, ib[62:0]};
+		FPU_NABS: simple_result = {1'b1, ib[62:0]};
+		FPU_SEL:  simple_result = (~a_nan & (a_zero | ~a_s)) ? ic : ib;
+		default: ;
+	endcase
+end
+
+// ---- results that need no arithmetic ---------------------------------------
+// NaN operands, infinities, zeros and the invalid operations: found in the
+// cycle after the request (sp_check), from the operand registers.
+logic        sp_valid;
+logic [63:0] sp_result;
+logic [31:0] sp_set;        // exception bits
+logic        sp_fprf_we;
+
+fp_cls_t qa, qb, qc;
+opdec_t  qd;
+assign qa = ka_q;
+assign qb = kb_q;
+assign qc = kc_q;
+assign qd = decode_op(ctl_q);
+
+wire        q_sb_eff  = qb.s ^ qd.sub;         // sign frB contributes with
+wire        q_s_prod  = qa.s ^ qc.s;
+wire        q_rn_down = (fpscr_i_q[1:0] == 2'b11);
+wire        q_imz     = (qa.inf & qc.zero) | (qa.zero & qc.inf);
+wire        q_nan_any  = (qd.use_a & qa.nan)  | (qd.use_b & qb.nan)  | (qd.use_c & qc.nan);
+wire        q_snan_any = (qd.use_a & qa.snan) | (qd.use_b & qb.snan) | (qd.use_c & qc.snan);
+
+// the NaN operand that propagates: frA first, then frB, then frC; made
+// quiet, and for single precision without the bits a single cannot hold
+wire [63:0] nan_pick = (qd.use_a & qa.nan) ? a_q : (qd.use_b & qb.nan) ? b_q : c_q;
+wire [63:0] nan_res  = {nan_pick[63:52], 1'b1, nan_pick[50:29], qd.sgl ? 29'd0 : nan_pick[28:0]};
+
+always_comb begin : special_results
+	logic is_nan;   // the special result is a NaN (never negated)
+
+	sp_valid   = 1'b0;
+	sp_result  = 64'd0;
+	sp_set     = 32'd0;
+	sp_fprf_we = 1'b1;
+	is_nan     = 1'b0;
+
+	case (ctl_q.op)
+	FPU_ADD, FPU_SUB: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (qa.inf & qb.inf) begin
+			sp_valid = 1;
+			if (qa.s != q_sb_eff) begin sp_set[B_VXISI] = 1; sp_result = QNAN; is_nan = 1; end
+			else sp_result = {qa.s, 11'h7FF, 52'd0};
+		end
+		else if (qa.inf) begin sp_valid = 1; sp_result = {qa.s, 11'h7FF, 52'd0}; end
+		else if (qb.inf) begin sp_valid = 1; sp_result = {q_sb_eff, 11'h7FF, 52'd0}; end
+		else if (qa.zero & qb.zero) begin
+			sp_valid = 1; sp_result = {(qa.s == q_sb_eff) ? qa.s : q_rn_down, 63'd0};
+		end
+	end
+
+	FPU_MUL: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (q_imz) begin
+			sp_valid = 1; sp_set[B_VXIMZ] = 1; sp_result = QNAN; is_nan = 1;
+		end
+		else if (qa.inf | qc.inf) begin sp_valid = 1; sp_result = {q_s_prod, 11'h7FF, 52'd0}; end
+		else if (qa.zero | qc.zero) begin sp_valid = 1; sp_result = {q_s_prod, 63'd0}; end
+	end
+
+	FPU_MADD, FPU_MSUB, FPU_NMADD, FPU_NMSUB: begin
+		// infinity times zero is flagged even beside a NaN operand
+		if (q_imz) sp_set[B_VXIMZ] = 1;
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (q_imz) begin
+			sp_valid = 1; sp_result = QNAN; is_nan = 1;
+		end
+		else if (qa.inf | qc.inf) begin
+			sp_valid = 1;
+			if (qb.inf & (q_sb_eff != q_s_prod)) begin sp_set[B_VXISI] = 1; sp_result = QNAN; is_nan = 1; end
+			else sp_result = {q_s_prod, 11'h7FF, 52'd0};
+		end
+		else if (qb.inf) begin sp_valid = 1; sp_result = {q_sb_eff, 11'h7FF, 52'd0}; end
+		else if ((qa.zero | qc.zero) & qb.zero) begin
+			sp_valid = 1; sp_result = {(q_s_prod == q_sb_eff) ? q_s_prod : q_rn_down, 63'd0};
+		end
+	end
+
+	FPU_DIV: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (qa.inf & qb.inf) begin
+			sp_valid = 1; sp_set[B_VXIDI] = 1; sp_result = QNAN; is_nan = 1;
+		end
+		else if (qa.zero & qb.zero) begin
+			sp_valid = 1; sp_set[B_VXZDZ] = 1; sp_result = QNAN; is_nan = 1;
+		end
+		else if (qa.inf) begin sp_valid = 1; sp_result = {qa.s ^ qb.s, 11'h7FF, 52'd0}; end
+		else if (qb.inf) begin sp_valid = 1; sp_result = {qa.s ^ qb.s, 63'd0}; end
+		else if (qb.zero) begin
+			sp_valid = 1; sp_set[B_ZX] = 1; sp_result = {qa.s ^ qb.s, 11'h7FF, 52'd0};
+		end
+		else if (qa.zero) begin sp_valid = 1; sp_result = {qa.s ^ qb.s, 63'd0}; end
+	end
+
+	FPU_RES: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (qb.inf) begin sp_valid = 1; sp_result = {qb.s, 63'd0}; end
+		else if (qb.zero) begin
+			sp_valid = 1; sp_set[B_ZX] = 1; sp_result = {qb.s, 11'h7FF, 52'd0};
+		end
+	end
+
+	FPU_RSP: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (qb.inf | qb.zero) begin sp_valid = 1; sp_result = b_q; end
+	end
+
+	FPU_CTIW, FPU_CTIWZ: begin
+		// The upper word of the result is undefined; the 604 writes FFF80000,
+		// with the lowest bit set when a negative operand converts to zero.
+		sp_fprf_we = 1'b0;
+		if (q_nan_any) begin
+			sp_valid = 1; sp_set[B_VXCVI] = 1; sp_result = 64'hFFF8000080000000;
+		end
+		else if (qb.inf) begin
+			sp_valid = 1; sp_set[B_VXCVI] = 1;
+			sp_result = qb.s ? 64'hFFF8000080000000 : 64'hFFF800007FFFFFFF;
+		end
+		else if (qb.zero) begin
+			sp_valid = 1; sp_result = {31'h7FFC0000, qb.s, 32'd0};
+		end
+	end
+
+	FPU_RSQRTE: begin
+		if (q_nan_any) begin
+			sp_valid = 1; sp_result = nan_res; is_nan = 1;
+		end
+		else if (qb.zero) begin
+			sp_valid = 1; sp_set[B_ZX] = 1; sp_result = {qb.s, 11'h7FF, 52'd0};
+		end
+		else if (qb.s) begin
+			sp_valid = 1; sp_set[B_VXSQRT] = 1; sp_result = QNAN; is_nan = 1;
+		end
+		else if (qb.inf) begin sp_valid = 1; sp_result = 64'd0; end
+	end
+
+	default: ;
+	endcase
+
+	if (q_snan_any) sp_set[B_VXSNAN] = 1'b1;
+	if (qd.neg & sp_valid & ~is_nan) sp_result[63] = ~sp_result[63];
+end
+
+// ---- state -----------------------------------------------------------------
+typedef enum logic [4:0] {
+	S_IDLE,
+	S_OPND,     // OPERAND_REG: the operands are in their registers
+	S_PREA,     // normalise denormal operands, two cycles each
+	S_PREB,
+	S_PREC,
+	S_MUL1,     // partial products; alignment distance
+	S_ALGN,     // fadd, fsub: no product to form; alignment distance and aligned addend at once
+	S_MUL2,     // product; aligned addend
+	S_ADD,      // magnitude of product +/- addend
+	S_LZC,      // leading zeros counted: a sum that may have cancelled (the rest know theirs)
+	S_NORM,     // normalise; where to round
+	S_SHIFT,    // bring the rounding point to bit 0 (integers and denormals; the rest round from S_NORM)
+	S_ROUND,    // round, range checks, pack
+	S_DIV0,     // divide set-up
+	S_DIV,      // two quotient bits per cycle
+	S_RSQ,      // reciprocal square root estimate
+	S_DONE      // results presented
+} state_t;
+
+// The unit is two halves with their own state, so that a second operation
+// can be in the front (the request, the normaliser, the multiplier or
+// fadd's alignment, the divider, the estimate) while the first is in the
+// back (the adder, the count, normalise, shift, round, done). state is the
+// back's; the front hands over when the back is free (hand_now, below).
+state_t state;
+typedef enum logic [3:0] {
+	F_IDLE,
+	F_OPND,     // OPERAND_REG: the operands are in their registers; a compare waits for the back here
+	F_PREA,
+	F_PREB,
+	F_PREC,
+	F_MUL1,
+	F_ALGN,
+	F_MUL2,
+	F_DIV0,
+	F_DIV,
+	F_RSQ,
+	F_SPEC      // a special result (no arithmetic) waiting for the back
+} fstate_t;
+fstate_t fstate;
+
+// request, as latched: the front's copy (f_*) while the operation is in
+// the front, the back's (the names the stages always had) after the handoff
+logic        f_sgl, f_int, f_div, f_rsq, f_neg, f_rc;
+logic [1:0]  f_rn;
+logic [31:0] f_fpscr;
+logic        sgl_q;        // round to single precision
+logic        int_q;        // convert to integer
+logic        div_q;
+logic        rsq_q;
+logic        neg_q;
+logic        rc_q;
+logic [1:0]  rn_q;         // rounding mode in effect
+logic [31:0] fpscr_q;
+
+// x * y + z, or x / z
+logic [52:0] mx, my, mz;
+logic signed [13:0] ex, ey, ez;
+logic        s_p_f, s_z_f; // the signs below, while in the front
+logic        s_p;          // sign of the product or quotient
+logic        s_z;          // sign the addend contributes with
+logic        p_zero;       // no product
+logic        z_zero;       // no addend
+
+// what S_DONE presents
+logic [63:0] fin_result;
+logic [31:0] fin_set;
+logic        fin_fr;
+logic        fin_fi;
+logic        fin_fprf_we;
+logic        fin_den;      // the result was denormalised in its own format
+logic        fin_compare;
+logic [31:0] fin_cmp_fpscr, fin_cmp_set;
+logic [3:0]  fin_cmp_cr;
+
+wire ue = fpscr_q[B_UE];
+wire oe = fpscr_q[B_OE];
+
+// ---- operand normaliser (denormal inputs only) -----------------------------
+logic [52:0] pre_in;
+logic [5:0]  pre_lz;
+
+always_comb begin
+	case (fstate)
+		F_PREA:  pre_in = mx;
+		F_PREB:  pre_in = mz;
+		default: pre_in = my;
+	endcase
+end
+
+DSPPC604_lzc #(.WIDTH(53)) pre_lzc
+(
+	.in    (pre_in),
+	.count (pre_lz)
+);
+
+// count in one cycle, shift in the next: denormals are rare and this path
+// would otherwise set the clock
+logic        pre_phase;
+logic [5:0]  pre_lz_q;
+
+wire [52:0]        pre_out = pre_in << pre_lz_q;
+wire signed [13:0] pre_adj = $signed({8'd0, pre_lz_q});
+
+// ---- multiply --------------------------------------------------------------
+// 53 x 53 as four products of at most 27 x 27, one DSP block each.
+logic [53:0]  pp_ll;
+logic [52:0]  pp_lh;
+logic [52:0]  pp_hl;
+logic [51:0]  pp_hh;
+logic [105:0] p_q;
+
+wire [53:0]  pp_mid = {1'b0, pp_lh} + {1'b0, pp_hl};
+wire [105:0] p_sum  = {pp_hh, 54'd0} + {25'd0, pp_mid, 27'd0} + {52'd0, pp_ll};
+
+// ---- align the addend ------------------------------------------------------
+// The sum is formed in a 162-bit window. The product sits in bits 105..0. The
+// addend starts with its last place at bit 108 and moves right by the
+// distance between the exponents; what leaves the bottom becomes sticky. If
+// the addend is larger than that, it stays at the top and the window follows
+// it: the product is then entirely below the rounding point.
+logic signed [13:0] e_win_f;    // the two below, as the front makes them
+logic [7:0]         sr_f;
+logic signed [13:0] e_win;      // weight of window bit 0
+logic [7:0]         sr;
+logic [160:0]       zal;
+logic               zst;
+
+wire signed [13:0] e_prod = ex + ey;
+wire signed [13:0] e_dist = e_prod - ez + 14'sd108;
+wire               pin_z  = p_zero | (~z_zero & e_dist[13]);
+// the back is free for a handoff: idle, or answering this cycle
+wire               in_round  = (state == S_ROUND) & ~no_early;
+wire               back_free = (state == S_IDLE) | ((in_round | (state == S_DONE)) & resp_ready);
+
+function automatic logic [161:0] align_z(input logic [52:0] m, input logic [7:0] amount);
+	logic [160:0] v;
+	logic         s;
+	begin
+		v = {m, 108'd0};
+		s = 1'b0;
+		for (int i = 0; i < 8; i++) begin
+			if (amount[i]) begin
+				s = s | (|(v & ((161'd1 << (1 << i)) - 161'd1)));
+				v = v >> (1 << i);
+			end
+		end
+		align_z = {v, s};
+	end
+endfunction
+
+// ---- add -------------------------------------------------------------------
+logic [161:0] r_q;         // magnitude of the sum, or the quotient
+logic         r_sign;
+logic         r_sticky;
+
+wire [162:0] add_p   = {57'd0, p_q};
+wire [162:0] add_z   = {2'd0, zal};
+wire [162:0] add_sum = add_p + add_z;
+wire [162:0] add_pz  = add_p - add_z - {162'd0, zst};   // negative: addend is larger
+wire [162:0] add_zp  = add_z - add_p;
+wire         eff_sub = s_p ^ s_z;
+
+// the magnitude of the sum, and its sign
+logic [161:0] r_next;
+logic         r_next_sign;
+
+always_comb begin
+	if (~eff_sub)        begin r_next = add_sum[161:0]; r_next_sign = s_p; end
+	else if (add_pz[162]) begin r_next = add_zp[161:0];  r_next_sign = s_z; end
+	else                 begin r_next = add_pz[161:0];  r_next_sign = s_p; end
+end
+
+// Where the sum's leading one is, without counting: the addend's leading one
+// is at bit 160 - sr and the product's at 105 or 104. When one is at least
+// two places above the other the sum's top is within one place of it (no
+// cancellation past that). For the addend pinned at the top (sr = 0: frsp,
+// fctiw, an addend far larger than the product) and for a product at least
+// four times the addend (sr >= 58) the place is fixed, so five bits there
+// give the leading-zero count and S_LZC is skipped. The rest (an addend
+// larger than the product by up to 2**55: a window at a variable place,
+// which did not fit the cycle after the adder) count the whole sum in S_LZC
+// as before; so does a window with no one in it (not expected: a guard).
+wire        add_pin  = (sr == 8'd0);
+wire        add_fast = add_pin | (sr >= 8'd58);
+wire [4:0]  add_win  = add_pin ? r_next[161:157] : r_next[107:103];
+wire [7:0]  add_lz   = (add_pin ? 8'd0 : 8'd54) + (add_win[4] ? 8'd0 : add_win[3] ? 8'd1 :
+                                                   add_win[2] ? 8'd2 : add_win[1] ? 8'd3 : 8'd4);
+// An effective addition's larger term has its top at 160 - sr (the addend)
+// or at 105 or 104 (the product); the sum's leading one is there or one
+// place above. The count for the place above, from registers alone:
+wire [7:0]  add_plz    = p_q[105] ? 8'd55 : 8'd56;
+// S_ALGN's distance: fadd's y is 1.0 (ey = -52), so e_dist is ex - ez + 56,
+// one subtraction. The shifter starts from its low byte at once; whether
+// the addend is pinned at the top (a negative distance) or wholly shifted
+// out (beyond 163) is decided beside it and only selects at the end.
+wire signed [13:0] a_dist = ex - ez + 14'sd56;
+wire        a_pin      = p_zero | (~z_zero & a_dist[13]);
+wire        a_big      = ~a_dist[13] & (a_dist > 14'sd163);
+wire [7:0]  algn_sr    = a_pin ? 8'd0 : a_big ? 8'd163 : a_dist[7:0];
+// S_ALGN's sticky bit without OR-ing through the shifter: the addend's bit i
+// sits at 108 + i and is shifted out when that is below the distance, so
+// some one is lost exactly when the distance exceeds 108 plus its trailing
+// zero count (from mz, a register, beside the distance).
+logic [52:0] mz_rev;
+always_comb for (int i = 0; i < 53; i++) mz_rev[i] = mz[52 - i];
+logic [5:0]  mz_tz;
+DSPPC604_lzc #(.WIDTH(53)) mz_tzc (.in(mz_rev), .count(mz_tz));
+wire [160:0] a_sh      = {mz, 108'd0} >> a_dist[7:0];
+wire        algn_st    = ~a_pin & (a_big ? (mz != 53'd0) : ({1'b0, a_dist[7:0]} > (9'd108 + {3'd0, mz_tz})));
+wire [160:0] algn_zal  = a_pin ? {mz, 108'd0} : a_big ? 161'd0 : a_sh;
+wire [7:0]  add_lz_eff = (sr < add_plz) ? sr : add_plz;
+// An effective subtraction of terms at least two places apart loses at most
+// one place: count for the larger term's top (S_NORM corrects the one).
+// The addend's top 160 - sr is two above the product's when sr <= plz - 2;
+// the product's two above the addend's when sr >= plz + 2.
+wire        sub_z_big  = (sr <= add_plz - 8'd2);
+wire        sub_p_big  = (sr >= add_plz + 8'd2);
+wire [7:0]  sub_lz     = sub_z_big ? (sr + 8'd1) : (add_plz + 8'd1);
+
+// ---- normalise -------------------------------------------------------------
+logic [7:0]  lz_cnt;
+logic [7:0]  lz_q;
+logic        rzero_q;      // exactly zero
+
+DSPPC604_lzc #(.WIDTH(162)) r_lzc
+(
+	.in    (r_q),
+	.count (lz_cnt)
+);
+
+wire [161:0] norm_raw = r_q << lz_q;
+// An effective addition's count assumed a carry into the place above, an
+// effective subtraction's no lost place: one more place when the top is
+// zero (every other count is exact).
+wire         n_fix = ~norm_raw[161] & ~rzero_q;
+wire [161:0] norm  = n_fix ? {norm_raw[160:0], 1'b0} : norm_raw;
+// the sticky bits for both n_fix values, ORed from the shift beside n_fix
+// (which then only selects) rather than behind it
+wire st_w0 = |norm_raw[97:0],  st_w1 = |norm_raw[96:0];
+wire st_s0 = |norm_raw[136:0], st_s1 = |norm_raw[135:0];
+wire st_d0 = |norm_raw[107:0], st_d1 = |norm_raw[106:0];
+
+// exponent of the leading one, and where rounding happens: made for
+// both n_fix values beside the shifter, n_fix (the shifted top bit) then
+// only selecting, so that no adder or compare follows the shift
+wire signed [13:0] emin    = sgl_q ? -14'sd126 : -14'sd1022;
+wire signed [13:0] top0    = e_win + 14'sd161 - $signed({6'd0, lz_q});
+wire signed [13:0] top1    = top0 - 14'sd1;
+wire               tiny0   = (top0 < emin);
+wire               tiny1   = (top1 < emin);
+wire signed [13:0] under0  = emin - top0;
+wire signed [13:0] under1  = under0 + 14'sd1;
+wire signed [13:0] ipos0   = 14'sd63 - top0;
+wire signed [13:0] ipos1   = ipos0 + 14'sd1;
+wire signed [13:0] top     = n_fix ? top1 : top0;
+wire               tiny    = n_fix ? tiny1 : tiny0;
+wire signed [13:0] under   = n_fix ? under1 : under0;           // how far below
+wire signed [13:0] int_pos = n_fix ? ipos1 : ipos0;
+
+logic [63:0]        w_q;       // normalised, leading one at bit 63
+logic               w_sticky;
+logic signed [13:0] top_q;
+logic               tiny_q;    // below the normal range before rounding
+logic               den_q;     // delivered denormalised
+logic [6:0]         l_q;       // bits dropped below the rounding point
+logic [4:0]         tc_q;      // single precision: places denormalised, 24 at most
+
+// ---- shift so the last kept bit is bit 0 -----------------------------------
+wire [128:0] sh_x = {w_q, 65'd0} >> l_q;
+
+logic [63:0] k_q;          // kept bits
+logic        rb_q;         // first dropped bit
+logic        sk_q;         // any later bit
+
+// ---- divide ----------------------------------------------------------------
+// Restoring, radix 4, two steps a cycle in cascade. The operands are
+// normalised, so the first quotient bit is 0 or 1; every cycle after that
+// produces four more (28 steps for a double, 14 for a single: whole pairs).
+logic [52:0] d_rem;
+logic [54:0] d_three;      // 3 * divisor
+logic [56:0] d_quo;
+logic [4:0]  d_cnt;
+
+wire [55:0] d_r4 = {1'b0, d_rem, 2'b00};
+wire [55:0] d_t1 = d_r4 - {3'd0, mz};
+wire [55:0] d_t2 = d_r4 - {2'd0, mz, 1'b0};
+wire [55:0] d_t3 = d_r4 - {1'b0, d_three};
+
+logic [1:0]  d_digit;
+logic [52:0] d_next;
+
+always_comb begin
+	if (~d_t3[55])      begin d_digit = 2'd3; d_next = d_t3[52:0]; end
+	else if (~d_t2[55]) begin d_digit = 2'd2; d_next = d_t2[52:0]; end
+	else if (~d_t1[55]) begin d_digit = 2'd1; d_next = d_t1[52:0]; end
+	else                begin d_digit = 2'd0; d_next = d_r4[52:0]; end
+end
+
+// the second step, behind the first in the same cycle
+wire [55:0] d_r4_b = {1'b0, d_next, 2'b00};
+wire [55:0] d_t1_b = d_r4_b - {3'd0, mz};
+wire [55:0] d_t2_b = d_r4_b - {2'd0, mz, 1'b0};
+wire [55:0] d_t3_b = d_r4_b - {1'b0, d_three};
+
+logic [1:0]  d_digit_b;
+logic [52:0] d_next_b;
+
+always_comb begin
+	if (~d_t3_b[55])      begin d_digit_b = 2'd3; d_next_b = d_t3_b[52:0]; end
+	else if (~d_t2_b[55]) begin d_digit_b = 2'd2; d_next_b = d_t2_b[52:0]; end
+	else if (~d_t1_b[55]) begin d_digit_b = 2'd1; d_next_b = d_t1_b[52:0]; end
+	else                  begin d_digit_b = 2'd0; d_next_b = d_r4_b[52:0]; end
+end
+
+wire [56:0] d_quo_next = {d_quo[52:0], d_digit, d_digit_b};
+
+// ---- reciprocal square root estimate ---------------------------------------
+// Seven fraction bits, by the low bit of the exponent and the top four
+// fraction bits: 1/sqrt at the middle of each interval, rounded to nearest.
+// Eight entries are confirmed by a real 604; see fpmodel.py.
+function automatic logic [6:0] rsqrte_table(input logic [4:0] index);
+	begin
+		case (index)
+			5'd0:  rsqrte_table = 7'h7C;  5'd1:  rsqrte_table = 7'h75;
+			5'd2:  rsqrte_table = 7'h6E;  5'd3:  rsqrte_table = 7'h68;
+			5'd4:  rsqrte_table = 7'h62;  5'd5:  rsqrte_table = 7'h5D;
+			5'd6:  rsqrte_table = 7'h58;  5'd7:  rsqrte_table = 7'h53;
+			5'd8:  rsqrte_table = 7'h4F;  5'd9:  rsqrte_table = 7'h4B;
+			5'd10: rsqrte_table = 7'h47;  5'd11: rsqrte_table = 7'h43;
+			5'd12: rsqrte_table = 7'h40;  5'd13: rsqrte_table = 7'h3D;
+			5'd14: rsqrte_table = 7'h39;  5'd15: rsqrte_table = 7'h36;
+			5'd16: rsqrte_table = 7'h32;  5'd17: rsqrte_table = 7'h2D;
+			5'd18: rsqrte_table = 7'h28;  5'd19: rsqrte_table = 7'h24;
+			5'd20: rsqrte_table = 7'h20;  5'd21: rsqrte_table = 7'h1C;
+			5'd22: rsqrte_table = 7'h19;  5'd23: rsqrte_table = 7'h15;
+			5'd24: rsqrte_table = 7'h12;  5'd25: rsqrte_table = 7'h0F;
+			5'd26: rsqrte_table = 7'h0D;  5'd27: rsqrte_table = 7'h0A;
+			5'd28: rsqrte_table = 7'h08;  5'd29: rsqrte_table = 7'h05;
+			5'd30: rsqrte_table = 7'h03;  default: rsqrte_table = 7'h01;
+		endcase
+	end
+endfunction
+
+wire signed [13:0] rsq_top  = ez + 14'sd52;                   // operand is 1.f * 2**rsq_top
+wire signed [13:0] rsq_half = rsq_top >>> 1;
+wire signed [13:0] rsq_exp  = -rsq_half - 14'sd1;             // odd and even alike
+wire [10:0]        rsq_bexp = rsq_exp[10:0] + 11'd1023;
+
+// ---- round and pack --------------------------------------------------------
+logic [63:0] rnd_result;
+logic [31:0] rnd_set;
+logic        rnd_fr;
+logic        rnd_fi;
+logic        rnd_den;
+
+// non-IEEE mode: a result that would be denormalised becomes a signed zero
+wire ni_flush = den_q & fpscr_q[2] & ~rzero_q;
+
+always_comb begin : round_pack
+	logic        sign;
+	logic        inexact;
+	logic        up;
+	logic [64:0] kr;
+	logic        to_inf;
+	logic        ovf;
+	logic        carry;
+	logic signed [13:0] e_res;
+	logic signed [13:0] b14;      // biased exponent, in the wider internal range
+	logic [10:0] bexp;
+	logic [51:0] frac;
+	logic [24:0] snorm;
+	logic        is_zero;
+	logic [31:0] ival;
+	logic        iovf;
+
+	sign    = r_sign;
+	inexact = rb_q | sk_q;
+	case (rn_q)
+		2'b00:   up = rb_q & (sk_q | k_q[0]);
+		2'b01:   up = 1'b0;
+		2'b10:   up = inexact & ~sign;
+		default: up = inexact & sign;
+	endcase
+	kr = {1'b0, k_q} + {64'd0, up};
+
+	to_inf = (rn_q == 2'b00) | ((rn_q == 2'b10) & ~sign) | ((rn_q == 2'b11) & sign);
+
+	rnd_set = 32'd0;
+	rnd_fr  = up;
+	rnd_fi  = inexact;
+	rnd_den = 1'b0;
+	ovf     = 1'b0;
+	carry   = 1'b0;
+	e_res   = top_q;
+	b14     = 14'sd0;
+	bexp    = 11'd0;
+	frac    = 52'd0;
+	snorm   = 25'd0;
+	is_zero = 1'b0;
+	ival    = 32'd0;
+	iovf    = 1'b0;
+
+	if (int_q) begin
+		// magnitude above 2**31 - 1, or above 2**31 for a negative value
+		iovf = sign ? ((|kr[64:32]) | (kr[31] & (|kr[30:0]))) : (|kr[64:31]);
+		if (iovf)      ival = sign ? 32'h80000000 : 32'h7FFFFFFF;
+		else if (sign) ival = 32'd0 - kr[31:0];
+		else           ival = kr[31:0];
+		rnd_result = {31'h7FFC0000, sign & (ival == 32'd0), ival};
+		rnd_set[B_VXCVI] = iovf;
+		rnd_fr = up & ~iovf;
+		rnd_fi = inexact & ~iovf;
+		rnd_set[B_XX] = rnd_fi;
+	end
+	else begin
+		// The exponent field, from the biased exponent in the wider internal
+		// range: bits 9-0 as they are and bit 10 as bit 11 XOR bit 10. The
+		// identity for every exponent in range; outside it (an enabled
+		// underflow or overflow in single precision whose adjusted exponent
+		// still does not fit a double) it is what a 604 delivers (measured).
+		if (sgl_q) begin
+			// A single-precision denormal is delivered as a normalised
+			// double: shift the rounded bits back up to find it.
+			snorm   = kr[24:0] << (den_q ? tc_q : 5'd0);
+			carry   = snorm[24];
+			e_res   = (den_q ? (-14'sd126 - $signed({9'd0, tc_q})) : top_q) + $signed({13'd0, carry});
+			frac    = {carry ? 23'd0 : snorm[22:0], 29'd0};
+			is_zero = (kr[24:0] == 25'd0);
+			ovf     = ~den_q & (e_res > 14'sd127);
+			if (ovf & oe) e_res = e_res - 14'sd192;
+			b14     = e_res + 14'sd1023;
+			bexp    = {b14[11] ^ b14[10], b14[9:0]};
+			rnd_den = den_q & (e_res < -14'sd126);    // (rounding can carry into the smallest normal)
+		end
+		else if (den_q) begin
+			// double-precision denormal: held as it is
+			frac    = kr[51:0];
+			bexp    = {10'd0, kr[52]};
+			is_zero = (kr[52:0] == 53'd0);
+			rnd_den = ~kr[52];
+		end
+		else begin
+			carry   = kr[53];
+			e_res   = top_q + $signed({13'd0, carry});
+			frac    = carry ? 52'd0 : kr[51:0];
+			ovf     = (e_res > 14'sd1023);
+			if (ovf & oe) e_res = e_res - 14'sd1536;
+			b14     = e_res + 14'sd1023;
+			bexp    = {b14[11] ^ b14[10], b14[9:0]};
+		end
+
+		if (rzero_q)
+			// an exact zero sum: positive, except when rounding down
+			rnd_result = {(fpscr_q[1:0] == 2'b11) ^ neg_q, 63'd0};
+		else if (is_zero | ni_flush)
+			rnd_result = {sign ^ neg_q, 63'd0};
+		else if (ovf & ~oe) begin
+			if (to_inf)     rnd_result = {sign ^ neg_q, 11'h7FF, 52'd0};
+			else if (sgl_q) rnd_result = {sign ^ neg_q, 63'h47EFFFFFE0000000};
+			else            rnd_result = {sign ^ neg_q, 63'h7FEFFFFFFFFFFFFF};
+		end
+		else
+			rnd_result = {sign ^ neg_q, bexp, frac};
+
+		// A disabled overflow is always inexact. FR is left as the rounding
+		// of the significand set it, which is what the 604 does. A result
+		// flushed in non-IEEE mode is an inexact underflow, exact or not.
+		rnd_fi = inexact | (ovf & ~oe) | ni_flush;
+		rnd_set[B_OX] = ovf;
+		rnd_set[B_XX] = rnd_fi;
+		rnd_set[B_UX] = tiny_q & (ue | inexact | ni_flush);
+
+		if (ni_flush) begin
+			rnd_fr  = 1'b0;
+			rnd_den = 1'b0;
+		end
+		if (rzero_q) begin
+			rnd_set = 32'd0;
+			rnd_fr  = 1'b0;
+			rnd_fi  = 1'b0;
+			rnd_den = 1'b0;
+		end
+	end
+end
+
+// ---- sequencing ------------------------------------------------------------
+wire op_compare = (ictl.op == FPU_CMPU) | (ictl.op == FPU_CMPO);
+// a request arrives: the front is free, and for a move or select
+// (answered in the request cycle) the back holds no answer it would meet
+wire take     = req_valid & (fstate == F_IDLE) & (~op_simple | (state == S_IDLE));
+wire go       = (OPERAND_REG != 0) ? (fstate == F_OPND) : take;           // ... and its operands are in hand
+wire start    = go & ~op_simple;
+wire cmp_q    = (ctl_q.op == FPU_CMPU) | (ctl_q.op == FPU_CMPO);
+wire need_pre = (use_a & a_den) | (use_b & b_den) | (use_c & c_den);
+wire sb_eff   = b_s ^ op_sub;                                             // sign frB contributes with
+wire s_prod   = a_s ^ c_s;
+
+logic sp_check;   // the cycle after start: a special result overrides the stage begun
+
+// the front's handoff to the back: a compare's result, a special result
+// (the cycle after the start, or held in F_SPEC), or the arithmetic's
+// product and addend (the divider's quotient, the estimate), when the back
+// is free; the operation's control goes with it
+wire hand_cmp  = (fstate == F_OPND) & cmp_q;
+wire hand_spec = (fstate == F_SPEC) | (sp_check & sp_valid);
+wire hand_data = (fstate == F_ALGN) | (fstate == F_MUL2) | ((fstate == F_DIV) & (d_cnt == 5'd0)) | (fstate == F_RSQ);
+wire hand_now  = back_free & (hand_cmp | hand_spec | hand_data);
+
+always_ff @(posedge clk) begin
+	// ---- the front -----------------------------------------------------------
+	case (fstate)
+	F_IDLE: begin
+		// (taken every idle cycle: the request, behind EX's stall, is then
+		// not the enable of these flops, only of the state)
+		a_q       <= a;
+		b_q       <= b;
+		c_q       <= c;
+		ka_q      <= cls_a;
+		kb_q      <= cls_b;
+		kc_q      <= cls_c;
+		ctl_q     <= ctl;
+		fpscr_i_q <= fpscr_in;
+		if (take) begin
+			if ((OPERAND_REG != 0) | (ctl.op == FPU_CMPU) | (ctl.op == FPU_CMPO))
+				fstate <= F_OPND;
+		end
+	end
+
+	F_OPND: begin
+		// Moves and selects answer here (OPERAND_REG); a compare's result goes
+		// to the back when it is free (hand_now, below).
+		if (op_simple & ~cmp_q & resp_ready) fstate <= F_IDLE;
+	end
+
+	F_PREA: begin
+		pre_lz_q  <= pre_lz;
+		pre_phase <= ~pre_phase;
+		if (pre_phase) begin
+			mx <= pre_out;
+			ex <= ex - pre_adj;
+			fstate <= F_PREB;
+		end
+	end
+
+	F_PREB: begin
+		pre_lz_q  <= pre_lz;
+		pre_phase <= ~pre_phase;
+		if (pre_phase) begin
+			mz <= pre_out;
+			ez <= ez - pre_adj;
+			fstate <= F_PREC;
+		end
+	end
+
+	F_PREC: begin
+		pre_lz_q  <= pre_lz;
+		pre_phase <= ~pre_phase;
+		if (pre_phase) begin
+			my <= pre_out;
+			ey <= ey - pre_adj;
+			fstate <= f_div ? F_DIV0 : f_rsq ? F_RSQ : F_MUL1;
+		end
+	end
+
+	F_MUL1: begin
+		pp_ll <= {27'd0, mx[26:0]}  * {27'd0, my[26:0]};
+		pp_lh <= {26'd0, mx[26:0]}  * {27'd0, my[52:27]};
+		pp_hl <= {27'd0, mx[52:27]} * {26'd0, my[26:0]};
+		pp_hh <= {26'd0, mx[52:27]} * {26'd0, my[52:27]};
+		e_win_f <= pin_z ? (ez - 14'sd108) : e_prod;
+		sr_f    <= pin_z ? 8'd0 : (e_dist > 14'sd163) ? 8'd163 : e_dist[7:0];
+		fstate  <= F_MUL2;
+	end
+
+	F_ALGN: if (back_free) begin
+		// The product is a * 1.0 exactly: the operand at bits 104-52, as
+		// F_MUL2 would sum it. The distance and the aligned addend in one
+		// cycle (the exponents are registers here).
+		e_win <= a_pin ? (ez - 14'sd108) : e_prod;
+		sr    <= algn_sr;
+		p_q   <= {1'b0, mx, 52'd0};
+		zal   <= algn_zal;
+		zst   <= algn_st;
+		state <= S_ADD;
+		if (z_zero & ~p_zero) begin                  // no addend: the operand is the sum
+			r_q      <= {57'd0, mx, 52'd0};
+			r_sign   <= s_p_f;
+			r_sticky <= 1'b0;
+			lz_q     <= 8'd57;
+			rzero_q  <= 1'b0;
+			state    <= S_NORM;
+		end
+	end
+
+	F_MUL2: if (back_free) begin
+		p_q <= p_sum;
+		{zal, zst} <= align_z(mz, sr_f);
+		e_win <= e_win_f;
+		sr    <= sr_f;
+		state <= S_ADD;
+		if (z_zero & ~p_zero) begin                  // no addend (fmul): the product is the sum,
+			r_q      <= {56'd0, p_sum};              // its top at bit 105 or 104 (normalised operands)
+			r_sign   <= s_p_f;
+			r_sticky <= 1'b0;
+			lz_q     <= p_sum[105] ? 8'd56 : 8'd57;
+			rzero_q  <= 1'b0;
+			state    <= S_NORM;
+		end
+	end
+
+	F_DIV0: begin
+		// operands are normalised: the quotient is in (1/2, 2)
+		if (mx >= mz) begin
+			d_rem <= mx - mz;
+			d_quo <= 57'd1;
+		end
+		else begin
+			d_rem <= mx;
+			d_quo <= 57'd0;
+		end
+		d_three <= {2'b00, mz} + {1'b0, mz, 1'b0};
+		d_cnt   <= f_sgl ? 5'd6 : 5'd13;          // pairs of steps, less one
+		fstate  <= F_DIV;
+	end
+
+	F_DIV: begin
+		// (the last step waits for the back)
+		if ((d_cnt != 5'd0) | back_free) begin
+			d_rem <= d_next_b;
+			d_quo <= d_quo_next;
+			d_cnt <= d_cnt - 5'd1;
+		end
+		if ((d_cnt == 5'd0) & back_free) begin
+			// the first quotient bit lands on window bit 161; the quotient of
+			// normalised operands is in (1/2, 2), so it or the next is the top
+			r_q      <= f_sgl ? {d_quo_next[28:0], 133'd0} : {d_quo_next, 105'd0};
+			r_sign   <= s_p_f;
+			r_sticky <= (d_next_b != 53'd0);
+			e_win    <= ex - ez - 14'sd161;
+			lz_q     <= {7'd0, ~(f_sgl ? d_quo_next[28] : d_quo_next[56])};
+			rzero_q  <= 1'b0;
+			state    <= S_NORM;
+		end
+	end
+
+	F_RSQ: if (back_free) begin
+		fin_result  <= {1'b0, rsq_bexp, rsqrte_table({rsq_top[0], mz[51:48]}), 45'd0};
+		fin_set     <= 32'd0;
+		fin_fr      <= 1'b0;
+		fin_fi      <= 1'b0;
+		fin_fprf_we <= 1'b1;
+		fin_den     <= 1'b0;
+		state       <= S_DONE;
+	end
+
+	default: ;         // F_SPEC: waits for the back (hand_now)
+	endcase
+
+	// ---- the back ------------------------------------------------------------
+	case (state)
+	S_ADD: begin
+		r_q      <= r_next;
+		r_sign   <= r_next_sign;
+		r_sticky <= zst;
+		if (add_fast & (|add_win)) begin
+			lz_q    <= add_lz;
+			rzero_q <= 1'b0;
+			state   <= S_NORM;
+		end
+		else if (~eff_sub) begin
+			// an effective addition cannot cancel: the sum's leading one is
+			// at the larger term's top place or one above; count for the
+			// place above, and S_NORM shifts once more if that is zero
+			lz_q    <= add_lz_eff;
+			rzero_q <= 1'b0;
+			state   <= S_NORM;
+		end
+		else if (sub_z_big | sub_p_big) begin
+			lz_q    <= sub_lz;
+			rzero_q <= 1'b0;
+			state   <= S_NORM;
+		end
+		else state <= S_LZC;
+	end
+
+	S_LZC: begin
+		lz_q    <= lz_cnt;
+		rzero_q <= (r_q == 162'd0) & ~r_sticky;
+		state   <= S_NORM;
+	end
+
+	S_NORM: begin
+		w_q      <= norm[161:98];
+		w_sticky <= r_sticky | (n_fix ? st_w1 : st_w0);
+		tiny_q   <= ~int_q & tiny;
+		den_q    <= 1'b0;
+		top_q    <= top;
+		tc_q     <= 5'd0;
+		if (int_q) begin
+			// integer: the units place goes to bit 0
+			l_q <= int_pos[13] ? 7'd0 : (int_pos > 14'sd65) ? 7'd65 : int_pos[6:0];
+		end
+		else if (tiny & ~ue) begin
+			// denormalise: round at the format's smallest place
+			den_q <= 1'b1;
+			if (sgl_q) l_q <= (under > 14'sd25) ? 7'd65 : (7'd40 + under[6:0]);
+			else       l_q <= (under > 14'sd54) ? 7'd65 : (7'd11 + under[6:0]);
+			tc_q  <= (under > 14'sd24) ? 5'd24 : under[4:0];
+		end
+		else begin
+			// an enabled underflow delivers the result with a biased exponent
+			l_q   <= sgl_q ? 7'd40 : 7'd11;
+			if (tiny) top_q <= top + (sgl_q ? 14'sd192 : 14'sd1536);
+		end
+		// The rounding point fixed (a normal result, or an enabled
+		// underflow's): what S_SHIFT would find is a fixed slice of norm,
+		// so round next. Integers and denormals take S_SHIFT.
+		k_q   <= sgl_q ? {40'd0, norm[161:138]} : {11'd0, norm[161:109]};
+		rb_q  <= sgl_q ? norm[137] : norm[108];
+		sk_q  <= r_sticky | (sgl_q ? (n_fix ? st_s1 : st_s0) : (n_fix ? st_d1 : st_d0));
+		state <= (int_q | (tiny & ~ue)) ? S_SHIFT : S_ROUND;
+	end
+
+	S_SHIFT: begin
+		k_q   <= sh_x[128:65];
+		rb_q  <= sh_x[64];
+		sk_q  <= w_sticky | (|sh_x[63:0]);
+		state <= S_ROUND;
+	end
+
+	S_ROUND: if (~hand_now) begin
+		// answered from here (below); held in S_DONE if not taken. A handoff
+		// in the answer's cycle has set the state and the registers above:
+		// those writes stand (the answer is taken from rnd_* this cycle).
+		fin_result  <= rnd_result;
+		fin_set     <= rnd_set;
+		fin_fr      <= rnd_fr;
+		fin_fi      <= rnd_fi;
+		fin_fprf_we <= ~int_q;
+		fin_den     <= rnd_den;
+		state       <= (resp_ready & ~no_early) ? S_IDLE : S_DONE;
+	end
+
+	S_DONE: if (resp_ready & ~hand_now) state <= S_IDLE;
+	default: ;         // S_IDLE: the front's handoff sets the state
+	endcase
+
+	// ---- the request ---------------------------------------------------------
+	if (start) begin
+		f_sgl   <= op_sgl;
+		f_int   <= op_int;
+		f_div   <= op_div;
+		f_rsq   <= op_rsq;
+		f_neg   <= op_neg;
+		f_rc    <= ictl.rc;
+		f_rn    <= (ictl.op == FPU_CTIWZ) ? 2'b01 : ifpscr[1:0];
+		f_fpscr <= ifpscr;
+		if (need_pre)    fstate <= F_PREA;
+		else if (op_div) fstate <= F_DIV0;
+		else if (op_rsq) fstate <= F_RSQ;
+		else if ((ictl.op == FPU_ADD) | (ictl.op == FPU_SUB)) fstate <= F_ALGN;
+		else             fstate <= F_MUL1;
+	end
+	// the operands into the first stage's registers: every idle cycle
+	// (the request, behind EX's stall, was the enable of these 190 flops)
+	if (start | ((OPERAND_REG == 0) & (fstate == F_IDLE))) begin
+		// x * y + z
+		mx <= a_m;  ex <= a_e;
+		my <= c_m;  ey <= c_e;
+		mz <= b_m;  ez <= b_e;
+		s_p_f  <= s_prod;
+		s_z_f  <= sb_eff;
+		p_zero <= a_zero | c_zero;
+		z_zero <= b_zero;
+
+		case (ictl.op)
+		FPU_ADD, FPU_SUB: begin        // a * 1 + b
+			my <= 53'h10000000000000;  ey <= -14'sd52;
+			s_p_f  <= a_s;
+			p_zero <= a_zero;
+		end
+		FPU_MUL: begin                 // a * c, no addend
+			mz     <= 53'd0;
+			s_z_f  <= s_prod;
+			z_zero <= 1'b1;
+		end
+		FPU_DIV: begin                 // a / b
+			s_p_f <= a_s ^ b_s;
+		end
+		FPU_RES: begin                 // 1 / b
+			mx    <= 53'h10000000000000;  ex <= -14'sd52;
+			s_p_f <= b_s;
+		end
+		FPU_RSP, FPU_CTIW, FPU_CTIWZ: begin   // b alone
+			mx     <= 53'd0;
+			s_p_f  <= b_s;
+			s_z_f  <= b_s;
+			p_zero <= 1'b1;
+		end
+		default: ;
+		endcase
+	end
+
+	// ---- the handoff ---------------------------------------------------------
+	// (after the stages: it decides the states where both have a say)
+	sp_check <= start;
+	if (hand_now) begin
+		sgl_q   <= f_sgl;
+		int_q   <= f_int;
+		div_q   <= f_div;
+		rsq_q   <= f_rsq;
+		neg_q   <= f_neg;
+		rc_q    <= f_rc;
+		rn_q    <= f_rn;
+		fpscr_q <= f_fpscr;
+		s_p     <= s_p_f;
+		s_z     <= s_z_f;
+		fin_compare <= hand_cmp;
+		fstate  <= F_IDLE;
+		if (hand_cmp) begin
+			fin_result    <= b_q;
+			fin_cmp_fpscr <= cmp_fpscr;
+			fin_cmp_set   <= cmp_set;
+			fin_cmp_cr    <= cmp_cc;
+			state         <= S_DONE;
+		end
+		// the stage begun is abandoned for a result that needs no arithmetic
+		if (hand_spec) begin
+			fin_result  <= sp_result;
+			fin_set     <= sp_set;
+			fin_fr      <= 1'b0;
+			fin_fi      <= 1'b0;
+			fin_fprf_we <= sp_fprf_we;
+			fin_den     <= 1'b0;
+			state       <= S_DONE;
+		end
+	end
+	else if (sp_check & sp_valid) fstate <= F_SPEC;   // ... when the back is free
+
+	if (fstate == F_IDLE) pre_phase <= 1'b0;
+	if (reset | flush) begin
+		state    <= S_IDLE;
+		fstate   <= F_IDLE;
+		sp_check <= 1'b0;
+		fin_compare <= 1'b0;
+	end
+end
+
+assign req_ready  = (fstate == F_IDLE) & (~op_simple | (state == S_IDLE));
+assign req_simple = op_simple & ~op_compare;
+
+// ---- response --------------------------------------------------------------
+// An enabled invalid operation or zero divide leaves the target register and
+// the result class alone.
+// The rounded result is answered in S_ROUND itself (a cycle sooner than
+// from S_DONE's registers) when FP exceptions cannot trap (no_early low);
+// it then goes only into the requester's registers (the FPSCR, the CR, the
+// next stage's result). With traps enabled the answer comes from S_DONE,
+// and fex, which the requester's trap decision uses, is taken from S_DONE's
+// registers alone (never from the rounding logic).
+wire [63:0] f_result   = in_round ? rnd_result : fin_result;
+wire [31:0] f_set      = in_round ? rnd_set : fin_set;
+wire        f_fr       = in_round ? rnd_fr : fin_fr;
+wire        f_fi       = in_round ? rnd_fi : fin_fi;
+wire        f_fprf_we  = in_round ? ~int_q : fin_fprf_we;
+wire        f_den      = in_round ? rnd_den : fin_den;
+wire        f_compare  = ~in_round & fin_compare;
+// S_DONE's FPSCR from its registers alone, for fex
+wire done_suppress_r = ((|(fin_set & VX_ALL)) & fpscr_q[B_VE]) | (fin_set[B_ZX] & fpscr_q[B_ZE]);
+wire [31:0] done_fpscr_r = fpscr_update(fpscr_q, fin_set, 1'b1,
+                                        fin_fr & ~done_suppress_r, fin_fi & ~done_suppress_r,
+                                        fin_fprf_we & ~done_suppress_r, fprf_of(fin_result, fin_den));
+wire done_vx       = |(f_set & VX_ALL);
+wire done_suppress = (done_vx & fpscr_q[B_VE]) | (f_set[B_ZX] & fpscr_q[B_ZE]);
+wire [31:0] done_fpscr = fpscr_update(fpscr_q, f_set, 1'b1,
+                                      f_fr & ~done_suppress, f_fi & ~done_suppress,
+                                      f_fprf_we & ~done_suppress, fprf_of(f_result, f_den));
+
+always_comb begin
+	// the FPSCR effects on their own (what fpscr_out applies to fpscr_q),
+	// for a requester committing the answer against a later FPSCR
+	set_out     = 32'd0;
+	fr_out      = 1'b0;
+	fi_out      = 1'b0;
+	fprf_we_out = 1'b0;
+	fprf_out    = fprf_of(f_result, f_den);
+	cmp_out     = 1'b0;
+	if ((state == S_DONE) | in_round) begin
+		// (the answer is the back's, for whoever asked first: the requester
+		// keeps the order)
+		resp_valid = 1'b1;
+		result     = f_result;
+		result_we  = f_compare | ~done_suppress;
+		fpscr_out  = f_compare ? fin_cmp_fpscr : done_fpscr;
+		cr_out     = f_compare ? fin_cmp_cr : done_fpscr[31:28];
+		cmp_out    = f_compare;
+		if (f_compare) begin
+			set_out     = fin_cmp_set;
+			fprf_we_out = 1'b1;
+			fprf_out    = {1'b0, fin_cmp_cr};
+		end
+		else begin
+			set_out     = f_set;
+			fr_out      = f_fr & ~done_suppress;
+			fi_out      = f_fi & ~done_suppress;
+			fprf_we_out = f_fprf_we & ~done_suppress;
+		end
+	end
+	else begin
+		resp_valid = req_valid & go & op_simple & ~op_compare;
+		result     = simple_result;
+		result_we  = 1'b1;
+		// Compare has no response until S_DONE. Keep its speculative condition
+		// and exception update off the requester's commit/redirect network;
+		// the registered fields above carry the valid response.
+		fpscr_out  = op_compare ? ifpscr : simple_fpscr;
+		cr_out     = op_compare ? ifpscr[31:28] : simple_cr;
+	end
+	fex = (state == S_DONE) ? (fin_compare ? fin_cmp_fpscr[30] : done_fpscr_r[30]) :
+	      (state == S_ROUND) ? 1'b0 : fpscr_out[30];
+end
+
+endmodule
