@@ -58,7 +58,9 @@ endfunction
 
 // the bytes kept inverted, so that the block RAM's power-up zeros are an erased part (FF)
 // without an initialisation file
-logic [7:0] mem [0:131071];
+// (two ports, the CPU's and the image's: true dual-port block RAM; neither port reads a byte in
+// the clock the other writes it, so read-during-write is left to the RAM)
+(* ramstyle = "no_rw_check, M10K" *) logic [7:0] mem [0:131071];
 
 wire [16:0] fa   = addr[18:2];
 wire [14:0] u    = fa[14:0];                 // the unlock decode: A14-A0
