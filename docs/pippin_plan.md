@@ -20,8 +20,9 @@ Done when, on the board:
 5. Saves survive a restart (the 128 KB flash, kept on the SD card).
 
 Left for after the two weeks (section 9): the 603's software TLB reload,
-NTSC/PAL output with Taos's flicker filter, the floppy dock, the modem port
-beyond what Mac OS needs, and the real-hardware run of the supervisor tests.
+NTSC/PAL output with Taos's flicker filter, the floppy dock, and the real-hardware run of the supervisor tests. The modem
+port is in: Grand Central's ESCC is MacPPC7300's, with its UART, MIDI and
+CTS/RTS wiring to the MiSTer.
 
 ## 2. What we know now (2026-10-18)
 
@@ -76,7 +77,7 @@ beyond what Mac OS needs, and the real-hardware run of the supervisor tests.
 | The machine RTL is copied from MacPPC7300 21ba191 into `rtl/machine/`, renamed `Pippin_*`, recorded in `cpu_import.md` | The rule of 2026-10-17: each core owns its copy | A submodule (the old plan's Phase 0 idea) |
 | Kinka 1.0 is the bring-up ROM | It is the one we have with a retail identity; 1.3 replaces it as the default as soon as it arrives | |
 | 5 MB RAM by default (the retail machine), OSD option 13 MB | DingusPPC's and MAME's retail setting | |
-| Video: Taos's frame buffer in DDR3, scanned out by MacPPC7300's video path at 640 x 480, about 60 Hz; Taos reports monitor ID 6 (VGA) | Reuses the proven scan-out and write combiner; one resolution | `MISTER_FB` (no analog out) |
+| Video: Taos reports **NTSC (monitor ID 5) by default**, the OSD offers VGA (ID 6) and PAL (ID 3); the scan-out follows Taos's own timing registers (480i at 15.7 kHz for NTSC, 640 x 480 at 31 kHz for VGA), from the frame buffer in DDR3 through MacPPC7300's video path; HDMI through ascal either way | The real @WORLD's default output, and DingusPPC's default (the reference run is NTSC); 15 kHz analog out for CRTs comes with it | VGA default (simpler timing, no interlace) |
 | Clocks: CPU 66 MHz, memory 100 MHz (as MacPPC7300) | The real Pippin's 66 MHz; MacPPC7300's board runs at 70 | 70 MHz if titles need speed |
 | Core name `ApplePippin`, CD on block slot 4, Main_MiSTer's Mac CD path | The same contract as MacPPC7300, so its CD target RTL is reused unchanged | |
 | Flash saves in a `.sav` on block slot 2, written back like MacPPC7300's NVRAM | The same mechanism, already proven | |
@@ -204,5 +205,5 @@ release, not the board tests.
    tests in `cputest/super/super603.py`, the hardware walk kept as an option.
 3. The supervisor run on the 6300 through the MkLinux Booter (answers the
    `q603` and `tlb603` questions on real silicon).
-4. NTSC/PAL output and Taos's convolution, at 15 kHz for CRTs.
-5. The floppy dock (SWIM3 is already there), the modem port.
+4. Taos's flicker convolution for interlaced output on CRTs.
+5. The floppy dock (SWIM3 is already there).
