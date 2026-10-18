@@ -145,7 +145,7 @@ EA_B = 0x10001000            # maps to PAGE_B (set 1)
 EA_A2 = 0x10020000           # same TLB set as EA_A (EA bits 15-19 equal), other page
 EA_A3 = 0x10040000           # a third page in that set
 TEST_EAS = (EA_A, EA_B, EA_A2, EA_A3, 0x00100000)
-PTE_I = 0x20                 # WIMG = cache-inhibited
+PTE_I = 0x20                 # WIMG = cache-inhibited, in place in PTE word 1 (W 0x40, I 0x20, M 0x10, G 0x08)
 
 
 # --- encoders ---------------------------------------------------------------
@@ -166,7 +166,7 @@ def addr(a, reg, off):
 def pte(ea, pa, h=0, wimg=PTE_I, pp=2, r=0, c=0, vsid=VSID):
     api = (ea >> 22) & 0x3F
     hi = 0x80000000 | (vsid << 7) | (h << 6) | api
-    lo = (pa & 0xFFFFF000) | (r << 8) | (c << 7) | (wimg << 3) | pp
+    lo = (pa & 0xFFFFF000) | (r << 8) | (c << 7) | wimg | pp
     return hi, lo
 
 
@@ -235,6 +235,12 @@ def tlb_sequences(base):
         [(EA_A, PAGE_A, 0, {}), (EA_B, PAGE_B, 0, {})])
     add("dcbz-cacheable", ea(9, EA_A) + [dcbz(0, 9), lwz(3, 0, 9), lwz(4, 28, 9), lwz(5, 32, 9)],
         [(EA_A, PAGE_A, 0, dict(wimg=0))])
+    # dcbz on a write-through or cache-inhibited page: an alignment exception on the 603e;
+    # the EA misaligned within its line, so DAR shows whether it is the EA or the line's
+    add("dcbz-wt", ea(9, EA_A) + [addi(10, 0, 0x14), dcbz(10, 9), lwz(3, 0x14, 9), addi(5, 5, 1)],
+        [(EA_A, PAGE_A, 0, dict(wimg=0x40))])
+    add("dcbz-ci", ea(9, EA_A) + [addi(10, 0, 0x14), dcbz(10, 9), lwz(3, 0x14, 9), addi(5, 5, 1)],
+        [(EA_A, PAGE_A, 0, dict(wimg=0x20))])
     add("load-cacheable", ea(9, EA_A) + [lwz(3, 0, 9), stw(4, 4, 9), lwz(5, 4, 9), dcbf(0, 9), sync()],
         [(EA_A, PAGE_A, 0, dict(wimg=0))], r=[0, 0x4444, 0, 0, 0, 0])
     add("guarded", ea(9, EA_A) + [lwz(3, 0, 9), lwz(4, 4, 9)], [(EA_A, PAGE_A, 0, dict(wimg=0x28))])

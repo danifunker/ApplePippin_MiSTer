@@ -24,6 +24,8 @@ Newest last.
 | 9 | Bench scripts' Windows paths and cache directories | bench | Yes, for the Linux machine |
 | 10 | The L2 cache | (none made) | See the note |
 | 11 | Quartus 17: a net declared with a typedef | (603 only) | No: only in DSPPC603's changed cache |
+| 12 | The lockstep bench: `dcbz`'s alignment exception handed to the reference | bench | Latent (no divergence seen there) |
+| 13 | ppctest's supervisor PTEs: WIMG shifted twice (`super603.py`'s copy fixed) | test generator | Check MacPPC7300's own PTE helpers |
 
 ## The items
 
@@ -138,6 +140,30 @@ Newest last.
   exists only in DSPPC603's cache (its ways a parameter); DSPPC604's cache
   has `wire [1:0] wsel`.
 - MacPPC7300: nothing to do.
+
+### 12. The lockstep bench and `dcbz`'s alignment exception
+
+- Here: `verilator/core_main.cpp` (machine bench), 2026-10-18.
+- What: the core takes an alignment exception at `dcbz` on a write-through
+  or cache-inhibited page, or with the data cache off (the 603e's and the
+  604's rule); dingusppc zeroes the line instead. Super Marathon's boot
+  diverged there at 735,041,248 instructions (`dcbz` at FFD6B770, a ROM
+  block move). The bench now makes the reference take the exception with
+  the core's SRR1, DAR and DSISR, as it already does for the cache
+  instructions' DSIs.
+- MacPPC7300: latent; Mac OS on the 7300 has not hit it in its runs. The
+  block is under `PIPPIN_MACHINE` here (it reads the machine's CPU
+  signals); MacPPC7300's machine bench would need its own hierarchy names.
+
+### 13. The supervisor tier's PTEs set R instead of I
+
+- Here: `cputest/super/super603.py`, `pte()`: `wimg` was shifted left 3
+  although `PTE_I` (0x20) and the sequences' values are already the WIMG
+  field in place, so "cache-inhibited" PTEs set R (0x100) with WIMG 0, and
+  `guarded` (0x28) set R and W. Fixed here; the `tlb603` group's MAME run
+  shows the PTEs as meant (00120022 for an I page).
+- MacPPC7300: only if its own ppctest builds PTEs the same way (the helper
+  here is the Pippin's; `svectors.py` there was not changed).
 
 ## Not for MacPPC7300
 

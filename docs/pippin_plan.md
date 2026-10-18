@@ -242,3 +242,24 @@ release, not the board tests.
 - The reference for discs: dingusppc's Pippin (Kinka 1.3) boots Super
   Marathon to its title screen at 1.4 billion instructions. The bench now
   serves a CD (`--cd FILE.cue`, the Main's own response code).
+
+**2026-10-18 (evening): the first picture.**
+
+- **The Pippin logo in the RTL, pixel for pixel DingusPPC's** (Kinka 1.3,
+  5 MB, NTSC interlaced, the frame woven from its two fields): the bench's
+  frame after 384 million instructions equals dingusppc's at 260 million,
+  cursor included. The scan-out, Taos's colour table, the 16-bit pixels
+  and the interlace are right.
+- Why later than DingusPPC: the boot chime. Mac OS waits for its sound DMA
+  (Grand Central's audio-out channel, polled at 68065E98); the RTL plays it
+  in real time (about 2 seconds, some 100 million instructions), dingusppc's
+  null sound host finishes it at once. The 301 M frame of the first run was
+  simply taken before the logo was drawn (`--vram-dump` showed the frame
+  buffer untouched). On the board: about 7.5 s from reset to the logo.
+- Super Marathon from the bench's CD (the Main's own CD responses): 807
+  blocks read, lockstep identical to 735 million instructions, where the
+  core took `dcbz`'s alignment exception (a ROM block move onto a W or I
+  page, or with the cache off) and dingusppc does not model it. The bench
+  now hands it to the reference; rerunning to the title screen (dingusppc
+  shows it at 1.4 billion). DSPPC603's DAR for it is an open 603e question
+  (two new `tlb603` sequences; the generator's PTE WIMG bug fixed).

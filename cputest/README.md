@@ -162,14 +162,14 @@ miss with no PTE abandons the sequence (`ABANDONED(no PTE)` in the CSV).
 After the sequence the page table is flushed and the PTEs and the first 16
 words of page A are copied into the log.
 
-The 37 sequences cover: load, store, load-then-store (a store to a page the
+The 39 sequences cover: load, store, load-then-store (a store to a page the
 TLB holds with C = 0 should miss again on a real 603), a PTE with C already
 set, a read-only page, the secondary hash, a PTE in way 7 of its PTEG, no
 PTE, a wrong VSID, two pages, two and three pages in one TLB set (to see
 `SRR1[WAY]` and the replacement order), `tlbie` of the page and of another
 set, instruction fetches through the TLB in supervisor and user mode, a
 fetch with no PTE, misaligned and page-crossing loads, `lmw` across pages,
-`dcbz` and loads on a cacheable page, a guarded page, user-mode key and PP
+`dcbz` and loads on a cacheable page, `dcbz` on a write-through and on a cache-inhibited page (the 603e takes an alignment exception; MAME does not), a guarded page, user-mode key and PP
 checks, a page under a BAT (the BAT wins), the miss SPRs read and written
 directly, `tlbld`/`tlbli` in user mode, HID0/HID1/IABR, and DEC against
 the time base.

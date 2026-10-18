@@ -170,6 +170,7 @@ the MkLinux Booter route, `cputest/README.md` section 3):
 | HID0 keeps the defined bits only (`BFF8F011`) | `q603 hid0-reserved` |
 | MSR keeps `0007FF73` (no reserved bits, no PM) | `msr` (every bit), `q603 mtmsr-00010000`, `mtmsr-tgpr` |
 | the revision half of PVR (no ROM behaviour depends on it, above) | `probe mfmsr` |
+| `dcbz`'s alignment exception (a W or I page, or HID0[DCE] off / [DLOCK] on): DSISR as the 604's (the RT field 8); DAR the line's address on a W/I page (decided in MEM from the MMU's address) but the unaligned EA with the cache off (decided in EX). Mac OS's NanoKernel emulates `dcbz` in its handler; neither dingusppc nor MAME takes the exception | `tlb603 dcbz-wt`, `dcbz-ci` (EA 0x14 into its line) |
 ## How it is checked
 
 ```

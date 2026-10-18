@@ -1054,6 +1054,7 @@ int main(int argc, char** argv) {
 	long checked = 0, failed = 0;
 	bool done = false, diverged = false;
 	int cacheop_dsi_notes = 0;      // DSIs at cache instructions handed to the reference (both benches)
+	int dcbz_align_notes = 0;       // alignment exceptions at dcbz handed to the reference (the machine)
 	int rc_notes = 0;               // PTE R/C bits taken from the core
 
 #ifdef PIPPIN_MACHINE
@@ -1964,6 +1965,50 @@ int main(int argc, char** argv) {
 									(unsigned long long)retired, mapped ? "a protection violation" : "no translation");
 						}
 					}
+					// An alignment exception at dcbz: the core takes it on a
+					// write-through or cache-inhibited page, or with the data
+					// cache off or locked (the 603e's and the 604's rule); dingusppc
+					// zeroes the line. Mac OS's NanoKernel emulates dcbz in its
+					// handler (Super Marathon's boot, 735 million instructions in).
+					// The reference is made to take it with the core's SRR1, DAR
+					// and DSISR: the handler reads them, the comparison goes on.
+#ifdef PIPPIN_MACHINE
+					if (before.pc != pc && (pc & 0xFFFFF) == 0x600) {
+						uint32_t ipa = 0, w = 0;
+						bool known = false;
+						if (ref_translate_dbg(before.pc, &ipa) == 0 || !(before.msr & 0x20)) {
+							if (!(before.msr & 0x20)) ipa = before.pc;
+							if (ipa + 4 <= RAM_SIZE) {
+								const uint8_t* rm = ref_ram();
+								w = (uint32_t)rm[ipa] << 24 | (uint32_t)rm[ipa + 1] << 16 | (uint32_t)rm[ipa + 2] << 8 | rm[ipa + 3];
+								known = true;
+							}
+#ifdef PIPPIN_MACHINE
+							else if (ipa >= ROM_BASE) {
+								uint32_t o = ipa - ROM_BASE;
+								w = (uint32_t)rom[o] << 24 | (uint32_t)rom[o + 1] << 16 | (uint32_t)rom[o + 2] << 8 | rom[o + 3];
+								known = true;
+							}
+#endif
+						}
+						if (known && (w >> 26) == 31 && ((w >> 1) & 0x3FF) == 1014) {
+							uint32_t dar = (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dar;
+							ref_set_spr(26, before.pc);
+							ref_set_spr(27, (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr1);
+							ref_set_spr(19, dar);
+							ref_set_spr(18, (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dsisr);
+							ref_state_t t = before;
+							t.msr = (before.msr & 0x00001040u) | ((before.msr >> 16) & 1u);
+							t.pc = pc;
+							ref_set_state(&t);
+							ref_get_state(&before);
+							if (dcbz_align_notes++ < 10)
+								std::printf("note: alignment exception at dcbz of %08X (DAR %08X, HID0 %08X) at %08X after %llu instructions: "
+									"the reference takes it too\n", (w >> 16 & 31 ? before.gpr[w >> 16 & 31] : 0) + before.gpr[w >> 11 & 31],
+									dar, (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__hid0, before.pc, (unsigned long long)retired);
+						}
+					}
+#endif
 					// The core retires nothing for an instruction that takes an
 					// exception; the reference has to take it now to catch up.
 					for (int tries = 0; tries < 3 && before.pc != pc; tries++) {
