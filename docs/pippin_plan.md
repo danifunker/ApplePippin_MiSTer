@@ -188,7 +188,7 @@ release, not the board tests.
    and 8) need about 30 minutes of you each.
 3. **Main_MiSTer:** done 2026-10-18 on a new branch `pippin-cdrom` off
    your fork's `master` (00bdff0, which already has MacPPC7300's CD support),
-   in the worktree `~/repos/Main_MiSTer-pippin`: `bandaipippin` added to
+   in the worktree `~/repos/Main_MiSTer-pippin`: `pippin` added to
    `is_mac_scsi_family()` and `is_mac_scsi_optimized()` (commit 0e25569, not
    pushed). It builds with `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf`
    on the PATH (`bin/MiSTer`); it goes on the board with the first disc test

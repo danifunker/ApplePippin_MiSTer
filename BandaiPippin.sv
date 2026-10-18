@@ -98,7 +98,7 @@ wire [1:0] ar = status[122:121];         // the aspect ratio (video_freak, below
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"BandaiPippin;UART115200:57600:38400:19200:9600,MIDI;",
+	"Pippin;UART115200:57600:38400:19200:9600,MIDI;",
 	"-;",
 	"F1,ROM,Load ROM;",
 	// the CD-ROM on slot 4, as the Mac SCSI family has it (the Main's Mac CD layer:
