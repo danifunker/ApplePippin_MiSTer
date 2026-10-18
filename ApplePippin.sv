@@ -792,14 +792,10 @@ sdramclk_ddr
 
 ///////////////////////   THE LED   ///////////////////////////////
 
-// the CPU's heartbeat: it toggles every 2^20 instructions retired (the debug
-// readout, Pippin_debug, left the core 2026-10-08; it stays for the bench)
-reg [20:0] retired = 0;
-always @(posedge clk_cpu) begin
-	if (trace_valid & trace_last) retired <= retired + 1'd1;
-	if (cpu_reset) retired <= 0;
-end
-wire led_user = retired[20];
+// The user LED follows the disk LED (a block moving to or from the CD or the save flash's image);
+// otherwise it stays dark. (MacPPC7300's showed the CPU's heartbeat, bit 20 of the instructions
+// retired: a flicker at about 35 Hz.)
+wire led_user = disk_led_s[1];
 
 ///////////////////////   THE PICTURE   ///////////////////////////////
 
