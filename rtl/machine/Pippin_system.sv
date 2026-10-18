@@ -90,6 +90,14 @@ module Pippin_system
 	output logic         nv_wr_cpu,
 
 	// the monitor: its AppleSense codes
+	// the save flash's image, loaded and saved from outside (in the CPU's clock)
+	input  logic         fl_ld_we,
+	input  logic         fl_ld_re,
+	input  logic [16:0]  fl_ld_addr,
+	input  logic [7:0]   fl_ld_data,
+	output logic [7:0]   fl_ld_q,
+	output logic         fl_changed,
+
 	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 6 VGA, 3 PAL
 	input  logic         tray_closed,
 
@@ -285,6 +293,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.net_link, .net_tx_we, .net_tx_wa, .net_tx_wd, .net_tx_go, .net_tx_len, .net_tx_done,
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
+	.fl_ld_we, .fl_ld_re, .fl_ld_addr, .fl_ld_data, .fl_ld_q, .fl_changed,
 	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
 	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .vbl,

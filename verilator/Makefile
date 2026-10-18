@@ -4,6 +4,7 @@
 #
 #   make [CPU=603]  build $(BUILD)/vector_tb   single-instruction golden vectors
 #   make core       build $(BUILD)/core/core_tb   programs on the pipeline
+#   make flash      build $(BUILD)/flash/flash_tb   the save flash against the Am29F010's commands
 #   make cdc        build $(BUILD)/cdc/cdc_tb   the memory port across two clocks
 #   make machine    build $(BUILD)/machine/machine_tb   the whole Pippin (Pippin_system, always
 #                   DSPPC603) running a ROM
@@ -41,7 +42,11 @@ MACH_CPU  := $(addprefix $(MACH_RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(MACH
 # which 5.020 accepted (IBMRS6K7248 suppressed it the same way).
 WARN := -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-SYMRSVDWORD
 
-VFLAGS := --cc --exe --build -j 0 $(WARN)
+# Parallel C++ compiles: each of the machine's takes about 2 GB, and this
+# machine has 14 GB shared with Quartus (-j 0, all cores, ran it out of
+# memory on 2026-10-18).
+VJOBS  ?= 3
+VFLAGS := --cc --exe --build -j $(VJOBS) $(WARN)
 
 ifneq ($(REF_LIB),)
 REF_CFLAGS  := -DWITH_REF -I$(HERE)ref
@@ -86,6 +91,14 @@ $(MACH_DIR)/machine_tb: $(MACH_CPU) $(MACH_SRCS) $(HERE)core_main.cpp $(MACH_RTL
 		> $(MACH_DIR)/build.log 2>&1 || (cat $(MACH_DIR)/build.log; false)
 	@grep -E '^%Warning' $(MACH_DIR)/build.log || true
 
+flash: $(BUILD)/flash/flash_tb
+
+$(BUILD)/flash/flash_tb: $(MACH)/Pippin_flash.sv $(HERE)flash/flash_main.cpp $(HERE)Makefile
+	@mkdir -p $(BUILD)/flash
+	@$(VERILATOR) $(VFLAGS) --top-module Pippin_flash -Mdir $(BUILD)/flash -o flash_tb \
+		-CFLAGS "-O2 -std=c++17" $(MACH)/Pippin_flash.sv $(HERE)flash/flash_main.cpp \
+		> $(BUILD)/flash/build.log 2>&1 || (cat $(BUILD)/flash/build.log; false)
+
 cdc: $(BUILD)/cdc/cdc_tb
 
 $(BUILD)/cdc/cdc_tb: $(RTL)/$(CPU_NAME)_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Makefile
@@ -110,4 +123,4 @@ lint-machine:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all core machine cdc lint clean
+.PHONY: all core machine flash cdc lint clean

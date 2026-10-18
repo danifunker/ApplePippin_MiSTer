@@ -1103,6 +1103,10 @@ int main(int argc, char** argv) {
 		// the console's video switch (Taos's GPIO): 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
 		dut->mon_id = opt.monitor == 6 ? 6 : opt.monitor == 3 ? 3 : 5;
 		dut->tray_closed = 1;
+		dut->fl_ld_we = 0;           // the save flash starts erased (no image loaded)
+		dut->fl_ld_re = 0;
+		dut->fl_ld_addr = 0;
+		dut->fl_ld_data = 0;
 		dut->clock_ok = opt.clock_secs != 0;
 		dut->clock_secs = opt.clock_secs;
 		dut->ddr_busy = ddr.busy;

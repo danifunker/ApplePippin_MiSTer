@@ -21,6 +21,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) P
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_radacal.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_athens.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_control.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_flash.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_taos.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_taosvideo.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_video.sv]

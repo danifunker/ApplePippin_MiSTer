@@ -28,7 +28,7 @@
 //                                     5 MB fits a 32 MB module, 13 and 21 MB
 //                                     need 64 MB
 //    40000000  save flash             Am29F010, 128 KB, a byte per word
-//                                     (pippin.cpp:145, 158-166) -> stub for now
+//                                     (pippin.cpp:145, 158-166) -> Pippin_flash
 //    F0000000  Taos's VRAM            1 MB: memory, through its own crossing
 //                                     to the picture side (Pippin_video, the
 //                                     VRAM in DDR3), big-endian
@@ -209,6 +209,14 @@ module Pippin_machine
 	output logic         nv_ld_rack,
 	output logic [7:0]   nv_ld_q,
 	output logic         nv_wr_cpu,                 // the CPU wrote the NVRAM
+
+	// the save flash's image, loaded and saved from outside (Pippin_flash)
+	input  logic         fl_ld_we,
+	input  logic         fl_ld_re,
+	input  logic [16:0]  fl_ld_addr,
+	input  logic [7:0]   fl_ld_data,
+	output logic [7:0]   fl_ld_q,
+	output logic         fl_changed,
 
 	// the console's video switch (Taos's GPIO: 5 NTSC, 6 VGA, 3 PAL) and the CD tray
 	input  logic [2:0]   mon_id,
@@ -772,9 +780,14 @@ always_ff @(posedge clk) begin
 	end
 end
 
-// ---- the save flash: not yet (Am29F010 at 40000000); reads all ones, as an erased part ---------
+// ---- the save flash (Am29F010 at 40000000) ------------------------------------------------------
 logic [31:0] fl_rdata;
-always_ff @(posedge clk) if (p_sel & p_dev[7]) fl_rdata <= 32'hFFFF_FFFF;
+Pippin_flash flash (
+	.clk, .reset(board_reset),
+	.sel(p_sel & p_dev[7]), .we(p_we), .addr(p_a[18:2]), .be(p_be), .wdata(p_wd), .rdata(fl_rdata),
+	.ld_we(fl_ld_we), .ld_re(fl_ld_re), .ld_addr(fl_ld_addr), .ld_data(fl_ld_data), .ld_q(fl_ld_q),
+	.changed(fl_changed)
+);
 
 // ---- the memory-test boot program, in place of the ROM when the OSD asks ------------------
 logic [31:0] boot_rdata;
