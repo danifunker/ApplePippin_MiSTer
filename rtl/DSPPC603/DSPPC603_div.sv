@@ -1,20 +1,22 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Integer divider: 32 / 32, signed or unsigned, four quotient bits per
 //  clock (two radix-4 steps in cascade), the dividend's leading zero pairs
 //  skipped, and the quotient's leading zero digits that the divisor's size
 //  guarantees (3-11 clocks from start to done)
 //
 //  The architecture leaves the quotient undefined for a zero divisor and for
-//  0x80000000 / -1. This divider returns what a real PowerPC 604 (PVR
-//  00040303) returns in those cases:
+//  0x80000000 / -1. This divider returns what a real PowerPC 603e (Performa
+//  6300, PVR family 6; cputest/runs/results_603e_6300_run1.csv, 132 rows, all
+//  eight forms of divw and divwu) returns in those cases:
 //
-//    divisor zero        : dividend shifted left four bits, low four bits
-//                          0000 for a negative signed dividend, else 1111
-//    0x80000000 / -1     : 1
+//    divisor zero, divw  : FFFFFFFF for a negative dividend, else 0
+//    divisor zero, divwu : 1 when the dividend's bit 31 is set, else 0
+//    0x80000000 / -1     : 80000000
 //
-//  Both set overflow.
+//  that is, bit 31 of the dividend, sign-extended for divw. Both set overflow.
+//  (The 604's values differ: docs/DSPPC603_notes.md.)
 //
 //============================================================================
 
@@ -50,7 +52,7 @@ logic [31:0] dvs;
 logic [33:0] dvs3;       // three times the divisor
 logic        neg;
 logic        by_zero_q, too_big_q;   // the cases without a division, decided in S_PRE
-logic [31:0] a_lo_q;                 // ... the 604's quotient for a divisor of zero
+logic [31:0] a_lo_q;                 // ... the 603's quotient for a divisor of zero
 
 wire        a_neg = is_signed & a[31];
 wire        b_neg = is_signed & b[31];
@@ -115,7 +117,7 @@ always_ff @(posedge clk) begin
 			overflow <= by_zero | too_big;
 			by_zero_q <= by_zero;
 			too_big_q <= too_big;
-			a_lo_q   <= {a[27:0], a_neg ? 4'h0 : 4'hF};
+			a_lo_q   <= is_signed ? {32{a[31]}} : {31'd0, a[31]};
 			state    <= S_PRE;
 		end
 	end
@@ -130,7 +132,7 @@ always_ff @(posedge clk) begin
 			state    <= S_DONE;
 		end
 		else if (too_big_q) begin
-			quotient <= 32'd1;
+			quotient <= 32'h80000000;
 			state    <= S_DONE;
 		end
 		else state <= (quo_zero | (skip == steps)) ? S_FIX : S_RUN;

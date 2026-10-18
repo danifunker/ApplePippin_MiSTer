@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Half of one way of a cache's data: four of each line's eight words (the
 //  even ones, or the odd ones), written a line's half at a time, read a
 //  word at a time

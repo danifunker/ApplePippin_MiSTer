@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Performance counters: one 32-bit counter per event, free running, for the
 //  cycle accounting (DSPPC603's PERF parameter names the events)
 //

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Sequencer for multi-operation instructions (decode stage)
 //
 //  Expands the instructions that are several operations in one into simple

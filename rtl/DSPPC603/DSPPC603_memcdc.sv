@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  The memory port across a clock boundary
 //
 //  Carries the CPU's memory port (one line or word, request held until

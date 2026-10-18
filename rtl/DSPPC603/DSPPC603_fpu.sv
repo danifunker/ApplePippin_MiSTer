@@ -1,11 +1,13 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Floating-point unit
 //
 //  Holds no architectural state: operand values and FPSCR in, result and the
 //  new FPSCR out. verilator/fpmodel.py is the executable specification this
-//  module follows; both are checked against results from a real 604.
+//  module follows (its 603 mode); both are checked against results from a
+//  real 603e. The one difference from DSPPC604_fpu: frC of a single-precision
+//  multiply is rounded to 25 bits first (see the multiply).
 //
 //  Handshake (same as the integer unit)
 //    The requester holds req_valid, ctl, the operands, their classes
@@ -516,6 +518,22 @@ wire signed [13:0] pre_adj = $signed({8'd0, pre_lz_q});
 
 // ---- multiply --------------------------------------------------------------
 // 53 x 53 as four products of at most 27 x 27, one DSP block each.
+//
+// The 603's single-precision multiplier operand. For an operation rounded to
+// single precision (fmuls, fmadds, fmsubs, fnmadds, fnmsubs), a 603e uses
+// frC's significand rounded to 25 bits, a half rounded up: its top 25 bits
+// plus the 26th (as a radix-4 Booth recoding of the top 26 bits would). The
+// product with frA, the addend frB and the rounding to single are then exact
+// as for any other operation. Measured on the Performa 6300's 603e: all 630
+// single-precision rows where the 604 differs (frC not representable in
+// single precision) and none of the 14,010 others (docs/DSPPC603_notes.md).
+// Here: frC's high field (bits 52-27) is kept as it is, its low field
+// (bits 26-0) replaced by bit 27 alone, so that the two products with the
+// low field become frA shifted (or nothing) and c counts as
+// (c[52:28] + c[27]) * 2**28. The product is then at most frA * 2**53: it
+// still fits bits 105..0 with its leading one at 105 or 104. (frB alone,
+// fadd's 1.0, frsp's absent product: bit 27 and the low field are zero.)
+wire c_round = f_sgl;
 logic [53:0]  pp_ll;
 logic [52:0]  pp_lh;
 logic [52:0]  pp_hl;
@@ -976,9 +994,11 @@ always_ff @(posedge clk) begin
 	end
 
 	F_MUL1: begin
-		pp_ll <= {27'd0, mx[26:0]}  * {27'd0, my[26:0]};
+		pp_ll <= c_round ? (my[27] ? {mx[26:0], 27'd0} : 54'd0) :
+		                   {27'd0, mx[26:0]}  * {27'd0, my[26:0]};
 		pp_lh <= {26'd0, mx[26:0]}  * {27'd0, my[52:27]};
-		pp_hl <= {27'd0, mx[52:27]} * {26'd0, my[26:0]};
+		pp_hl <= c_round ? (my[27] ? {mx[52:27], 27'd0} : 53'd0) :
+		                   {27'd0, mx[52:27]} * {26'd0, my[26:0]};
 		pp_hh <= {26'd0, mx[52:27]} * {26'd0, my[52:27]};
 		e_win_f <= pin_z ? (ez - 14'sd108) : e_prod;
 		sr_f    <= pin_z ? 8'd0 : (e_dist > 14'sd163) ? 8'd163 : e_dist[7:0];

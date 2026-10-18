@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Integer ALU (combinational)
 //
 //  Adder, compare, logic, count leading zeros, sign extension, and one

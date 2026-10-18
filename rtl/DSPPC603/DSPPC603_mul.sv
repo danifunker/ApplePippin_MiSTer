@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Integer multiplier: 32 x 32 -> 64, signed or unsigned
 //
 //  Two register stages so the multiply maps onto the FPGA's DSP blocks with

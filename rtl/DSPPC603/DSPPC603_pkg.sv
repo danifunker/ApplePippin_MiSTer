@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Shared types
 //
 //  This program is free software; you can redistribute it and/or modify it
@@ -319,22 +319,25 @@ package DSPPC603_pkg;
 	endfunction
 
 	// stfs: double to single. No rounding: a value a single cannot hold stores
-	// its top bits. An exponent of 896 or less is denormalised, the 24-bit
-	// significand shifted right by 897 - exponent places and truncated, so
-	// below the single denormal range (exponent 873 and under, double
-	// denormals included) a signed zero is stored. The architecture leaves
-	// exponents below 874 undefined; the shift to zero is what a real 604
-	// does (measured, 7300 run).
+	// its top bits. An exponent of 874 to 896 is denormalised, the 24-bit
+	// significand shifted right by 897 - exponent places and truncated. The
+	// architecture leaves exponents below 874 undefined; there a 603e stores
+	// the bits as for a normal number (sign, the exponent's top bit and its
+	// low seven bits, the fraction's top 23), a double denormal as though its
+	// exponent field were 1 (measured, the Performa 6300's 603e: 378 stfs
+	// rows, 93 of them where a 604 stores a signed zero instead).
 	function automatic logic [31:0] fp_double_to_single(input logic [63:0] d);
 		logic [52:0] m;
 		logic [10:0] shift;
+		logic        den;
 		begin
 			shift = 11'd897 - d[62:52];
-			m     = (shift >= 11'd24) ? 53'd0 : ({1'b1, d[51:0]} >> shift[4:0]);
-			if (d[62:52] <= 11'd896)
-				fp_double_to_single = {d[63], 8'd0, m[51:29]};                           // denormalised, or zero
+			m     = ({1'b1, d[51:0]} >> shift[4:0]);
+			den   = (d[62:52] == 11'd0) & (d[51:0] != 52'd0);
+			if ((d[62:52] <= 11'd896) & (d[62:52] >= 11'd874))
+				fp_double_to_single = {d[63], 8'd0, m[51:29]};                           // denormalised
 			else
-				fp_double_to_single = {d[63:62], d[58:29]};
+				fp_double_to_single = {d[63:62], d[58:53], d[52] | den, d[51:29]};
 		end
 	endfunction
 

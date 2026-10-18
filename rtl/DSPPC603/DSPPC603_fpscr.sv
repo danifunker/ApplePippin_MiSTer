@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  The instructions that write FPSCR directly (combinational)
 //
 //    mtfsf    fields selected by FM <- the same fields of frB's low word

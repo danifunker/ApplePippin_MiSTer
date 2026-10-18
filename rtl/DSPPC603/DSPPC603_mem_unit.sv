@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Data memory access unit
 //
 //  Turns one load or store into one or two word-aligned bus accesses, and
