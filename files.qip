@@ -1,0 +1,5 @@
+set_global_assignment -name SDC_FILE ApplePippin.sdc
+set_global_assignment -name QIP_FILE rtl/DSPPC603/DSPPC603.qip
+set_global_assignment -name QIP_FILE rtl/machine/Pippin_machine.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/machine/Pippin_sdram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ApplePippin.sv

@@ -56,8 +56,9 @@ function automatic logic [7:0] rev8(input logic [7:0] x);
 	for (int i = 0; i < 8; i++) rev8[i] = x[7 - i];
 endfunction
 
+// the bytes kept inverted, so that the block RAM's power-up zeros are an erased part (FF)
+// without an initialisation file
 logic [7:0] mem [0:131071];
-initial for (int i = 0; i < 131072; i++) mem[i] = 8'hFF;   // a new part: erased
 
 wire [16:0] fa   = addr[18:2];
 wire [14:0] u    = fa[14:0];                 // the unlock decode: A14-A0
@@ -76,7 +77,7 @@ logic [16:0] er_a, er_end;
 // the one memory port the CPU and the sweep share; the outside port is the other
 logic        m_we;
 logic [16:0] m_a;
-logic [7:0]  m_d, m_q;
+logic [7:0]  m_d, m_q, m_q_n, ld_q_n;
 logic        prog_q;                          // a program: the old byte read last cycle, written now
 logic [16:0] prog_a;
 logic [7:0]  prog_d;
@@ -87,16 +88,19 @@ always_comb begin
 	m_d  = 8'hFF;
 	if (er_on)       begin m_we = 1'b1; m_a = er_a; end
 	else if (prog_q) begin m_we = 1'b1; m_a = prog_a; m_d = m_q & prog_d; end
+	m_d = ~m_d;
 end
 
 always_ff @(posedge clk) begin
 	if (m_we) mem[m_a] <= m_d;
-	m_q <= mem[m_a];
+	m_q_n <= mem[m_a];
 end
+assign m_q = ~m_q_n;
 always_ff @(posedge clk) begin
-	if (ld_we) mem[ld_addr] <= ld_data;
-	ld_q <= mem[ld_addr];
+	if (ld_we) mem[ld_addr] <= ~ld_data;
+	ld_q_n <= mem[ld_addr];
 end
+assign ld_q = ~ld_q_n;
 
 logic       rd_id, rd_er;
 logic [7:0] id_q;
