@@ -1,5 +1,6 @@
 // Replays single-instruction golden vectors from a real PowerPC against the
 // DSPPC604 execute units (through vector_dut) and reports every difference.
+// (The Makefile builds it for DSPPC603 the same way, with the names changed.)
 //
 // The vectors are the CSV written by `ppctest.py results`: the out_* columns
 // are what the real chip produced.
@@ -373,7 +374,9 @@ int main(int argc, char** argv) {
 	// Vectors the execute units cannot run on their own (loads, stores, the
 	// moves to and from XER and FPSCR) are reported, not counted as failures:
 	// run_core.py runs every vector file as a program through the pipeline.
-	long bad = total_int.fail + total_fp.fail;
+	// The undefined divides follow the real chip too (each model its own),
+	// so a difference there fails the run.
+	long bad = total_int.fail + total_fp.fail + undef.fail;
 	long ran = total_int.vectors + total_fp.vectors + undef.vectors;
 	if (ran == 0) {
 		std::printf("no vectors selected\n");

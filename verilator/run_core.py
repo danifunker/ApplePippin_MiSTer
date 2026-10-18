@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Build and run the DSPPC604 pipeline tests.
+"""Build and run the pipeline tests of a CPU model.
 
-    python verilator\\run_core.py              everything below
-    python verilator\\run_core.py --seeds 100  more random programs
-    python verilator\\run_core.py --quick      a short run
+    python verilator/run_core.py              everything below, DSPPC603
+    python verilator/run_core.py --cpu 604    the same for DSPPC604
+    python verilator/run_core.py --seeds 100  more random programs
+    python verilator/run_core.py --quick      a short run
 
-1. The real-604 integer vectors, assembled into one program and executed by
-   the pipeline, without and with random bus wait states.
-2. The real-604 floating-point vectors, the same way.
+1. The real chip's integer vectors (the 603e run for DSPPC603, the 604 run
+   for DSPPC604), assembled into one program and executed by the pipeline,
+   without and with random bus wait states.
+2. Its floating-point vectors, the same way.
 3. Random floating-point programs (arithmetic, loads, stores, FPSCR
    instructions) with the state fpmodel.py expects after every instruction.
 4. Each exception once, with what its handler must find in SRR0, SRR1, DAR
@@ -21,10 +23,9 @@
    Then the same with address translation on.
 6. The memory port carried across a clock boundary, at several clock
    ratios, with random requests checked against a software memory.
-7. The SDRAM controller behind the crossing, against models of the 128, 64
-   and 32 MB boards that check every command and timing (sdram_main.cpp).
 
-Runs from Windows (through WSL) or directly under Linux.
+DINGUS=<dingusppc tree> (default ~/.cache/applepippin/dingusppc) is the
+lockstep reference's source; MacPPC7300 used dingusppc 3f070249.
 """
 
 import argparse
@@ -34,9 +35,14 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# whether the CPU is built with its completion queue (DSPPC604.sv's default)
-COMPLETION_QUEUE = int(re.search(r"parameter int\s+COMPLETION_ALU\s*=\s*(\d+)",
-    open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rtl", "DSPPC604", "DSPPC604.sv")).read()).group(1))
+sys.path.insert(0, HERE)
+from run import DEFAULT_CSV, build_dir   # noqa: E402
+
+
+def completion_queue(cpu):
+    """Whether the CPU is built with its completion queue (its top's default)."""
+    top = os.path.join(HERE, "..", "rtl", "DSPPC" + cpu, "DSPPC" + cpu + ".sv")
+    return int(re.search(r"parameter int\s+COMPLETION_ALU\s*=\s*(\d+)", open(top).read()).group(1))
 
 
 def run(cmd, **kw):
@@ -44,10 +50,8 @@ def run(cmd, **kw):
 
 
 def main():
-    if os.name == "nt":
-        return subprocess.call(["wsl", "--cd", HERE, "--", "python3", "run_core.py"] + sys.argv[1:])
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--cpu", choices=("603", "604"), default="603", help="the CPU model (default 603)")
     ap.add_argument("--seeds", type=int, default=20, help="random programs to run (default 20)")
     ap.add_argument("--count", type=int, default=20000, help="instructions per random program")
     ap.add_argument("--first-seed", type=int, default=1)
@@ -56,8 +60,13 @@ def main():
     if args.quick:
         args.seeds = 4
 
-    cache = os.environ.get("MACPPC7300_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "macppc7300")
-    build = os.environ.get("MACPPC7300_BUILD") or os.path.join(cache, "verilator")
+    COMPLETION_QUEUE = completion_queue(args.cpu)
+    os.environ["FPMODEL_CPU"] = args.cpu        # progs.py's programs expect this CPU's FPU (fpmodel.py)
+    cache = os.path.join(os.path.expanduser("~"), ".cache", "applepippin")
+    build = build_dir(args.cpu)
+    dingus = os.environ.get("DINGUS") or os.path.join(cache, "dingusppc")
+    csv = os.path.abspath(DEFAULT_CSV[args.cpu])
+    chip = {"603": "603e", "604": "604"}[args.cpu]
     # the compilers' temporary files go in a directory of this build's own:
     # other WSL sessions working at the same time have deleted files in /tmp
     # under a running g++
@@ -69,13 +78,13 @@ def main():
     os.makedirs(progs, exist_ok=True)
 
     # the reference model, then the test bench linked with it
-    r = run(["make", "-s", "-C", os.path.join(HERE, "ref"), "BUILD=" + refdir])
+    r = run(["make", "-s", "-C", os.path.join(HERE, "ref"), "BUILD=" + refdir, "DINGUS=" + dingus])
     if r.returncode:
         print(r.stdout)
         print("building the dingusppc reference failed")
         return 1
     lib = os.path.join(refdir, "libdingusref.a")
-    r = run(["make", "-s", "-C", HERE, "core", "BUILD=" + build, "REF_LIB=" + lib])
+    r = run(["make", "-s", "-C", HERE, "core", "BUILD=" + build, "REF_LIB=" + lib, "CPU=" + args.cpu])
     if r.returncode:
         print(r.stdout)
         print("building the test bench failed")
@@ -103,11 +112,11 @@ def main():
 
     # 1. golden vectors as a program
     golden = os.path.join(progs, "golden.prog")
-    r = run([sys.executable, os.path.join(HERE, "progs.py"), "golden", golden])
+    r = run([sys.executable, os.path.join(HERE, "progs.py"), "golden", golden, csv])
     if r.returncode:
         print(r.stdout)
         return 1
-    print("real-604 integer vectors through the pipeline (11,576 checks each):")
+    print("real-%s integer vectors through the pipeline:" % chip)
     for stall, seed in ((0, 1),) if args.quick else ((0, 1), (25, 2), (60, 3)):
         r = run([tb, "--prog", golden, "--stall", str(stall), "--seed", str(seed)])
         report("  wait states %d%%" % stall, r)
@@ -120,32 +129,14 @@ def main():
 
     # 2. the floating-point vectors the same way
     goldenfp = os.path.join(progs, "goldenfp.prog")
-    r = run([sys.executable, os.path.join(HERE, "progs.py"), "goldenfp", goldenfp])
+    r = run([sys.executable, os.path.join(HERE, "progs.py"), "goldenfp", goldenfp, csv])
     if r.returncode:
         print(r.stdout)
         return 1
-    print("real-604 floating-point vectors through the pipeline (25,598 checks each):")
+    print("real-%s floating-point vectors through the pipeline:" % chip)
     for stall, seed in ((0, 1),) if args.quick else ((0, 1), (30, 2)):
         r = run([tb, "--prog", goldenfp, "--stall", str(stall), "--seed", str(seed)])
         report("  wait states %d%%" % stall, r)
-
-    # ... and the 7300 run's version-4 set: the same vectors plus non-IEEE
-    # mode, the enabled exceptions, XER, the FPSCR instructions, and integer
-    # and floating-point loads and stores through a buffer
-    v4 = os.path.join(HERE, "..", "ppctest", "runs", "results_604_7300_of_run1.csv")
-    if os.path.exists(v4):
-        print("the 7300 run's vectors through the pipeline (12,053 integer, 67,571 floating-point checks):")
-        for kind, stall in (("golden", 20), ("goldenfp", 20)):
-            prog = os.path.join(progs, kind + "_7300.prog")
-            r = run([sys.executable, os.path.join(HERE, "progs.py"), kind, prog, v4])
-            if r.returncode:
-                print(r.stdout)
-                return 1
-            r = run([tb, "--prog", prog, "--stall", str(stall), "--seed", "4"])
-            report("  %s, wait states %d%%" % ("integer" if kind == "golden" else "floating point", stall), r)
-            if kind == "golden":                   # the load/store set under the snoop storm too
-                r = run([tb, "--prog", prog, "--stall", str(stall), "--seed", "7", "--snoop-every", "2"])
-                report("  integer, wait states %d%%, a snoop every 2 cycles" % stall, r)
 
     # 3. random floating-point programs, every instruction checked against fpmodel.py
     print("random floating-point programs against the software model:")
@@ -260,7 +251,7 @@ def main():
     report("checked execution-overlap mixes", r)
 
     # 6. the memory port across two clocks
-    r = run(["make", "-s", "-C", HERE, "cdc", "BUILD=" + build])
+    r = run(["make", "-s", "-C", HERE, "cdc", "BUILD=" + build, "CPU=" + args.cpu])
     if r.returncode:
         print(r.stdout)
         print("building the clock-crossing bench failed")
@@ -270,20 +261,6 @@ def main():
                           (15152, 15152, "66 against 66 MHz"), (10000, 15152, "100 against 66 MHz")):
         r = run([os.path.join(build, "cdc", "cdc_tb"), "--count", "5000", "--pa", str(pa), "--pb", str(pb),
                  "--stall", "30", "--seed", "3"])
-        report("  " + label, r)
-
-    # 7. the SDRAM controller against a model of the board, through the crossing
-    r = run(["make", "-s", "-C", HERE, "sdram", "BUILD=" + build])
-    if r.returncode:
-        print(r.stdout)
-        print("building the SDRAM bench failed")
-        return 1
-    print("the SDRAM controller against a model of the board (100 MHz):")
-    for seed, pa, mb, label in ((1, 15385, 128, "128 MB, CPU at 65 MHz"), (2, 20000, 128, "128 MB, CPU at 50 MHz"),
-                                (3, 10000, 128, "128 MB, CPU at 100 MHz"), (4, 14286, 64, "64 MB, CPU at 70 MHz"),
-                                (5, 14286, 32, "32 MB, CPU at 70 MHz")):
-        r = run([os.path.join(build, "sdram", "sdram_tb"), "--count", "20000", "--seed", str(seed), "--pa", str(pa),
-                 "--module", str(mb)])
         report("  " + label, r)
 
     print("\nRESULT: %s" % ("PASS" if failures == 0 else "FAIL (%d runs)" % failures))

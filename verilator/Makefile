@@ -1,40 +1,37 @@
-# Verilator builds of the DSPPC604 test benches (run under WSL/Linux).
+# Verilator builds of the CPU test benches (run under Linux), for either CPU
+# model: CPU=603 (rtl/DSPPC603, the Pippin's) or CPU=604 (rtl/DSPPC604, as
+# imported from MacPPC7300).
 #
-#   make            build $(BUILD)/vector_tb   single-instruction golden vectors
+#   make [CPU=603]  build $(BUILD)/vector_tb   single-instruction golden vectors
 #   make core       build $(BUILD)/core/core_tb   programs on the pipeline
 #   make cdc        build $(BUILD)/cdc/cdc_tb   the memory port across two clocks
-#   make vramwc     build $(BUILD)/vramwc/vramwc_tb   the VRAM's write combiner against a model
-#   make machine    build $(BUILD)/machine/machine_tb   the whole machine (MacPPC7300_system) running a ROM
-#   make gui        build $(BUILD)/gui/macppc7300_gui   the whole machine in a window (ImGui, SDL2, OpenGL)
-#   make sdram      build $(BUILD)/sdram/sdram_tb   the SDRAM controller against a model of the board
-#   make cuda       build $(BUILD)/cuda/cuda_tb   Cuda (the 68HC05 and its firmware) alone
-#   make escc       build $(BUILD)/escc/escc_tb   the ESCC alone (its bit rates, MIDI, CTS, RTS)
-#   make enet       build $(BUILD)/enet/enet_tb   the Ethernet bridge alone (its rings, restarts)
 #   make lint       Verilator lint only
 #   make clean
 #
+# The benches name the 604's modules; for another model their sources are
+# copied into the build directory with the names changed. Give each model its
+# own BUILD (run.py and run_core.py do).
+#
 # REF_LIB=<path to libdingusref.a> links the dingusppc reference into core_tb
-# for lockstep runs. HC05_LIB=<path to libhc05ref.a> links MAME's 6805 core
-# into cuda_tb. Normally driven by run.py, run_core.py and run_cuda.py.
+# for lockstep runs. Normally driven by run.py and run_core.py.
 
 VERILATOR ?= verilator
 BUILD     ?= build
 REF_LIB   ?=
-HC05_LIB  ?=
+CPU       ?= 604
 
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-RTL  := $(HERE)../rtl/DSPPC604
+CPU_NAME := DSPPC$(CPU)
+RTL  := $(HERE)../rtl/$(CPU_NAME)
 
 # the CPU's file list lives in its .qip, shared with Quartus
-RTL_SRCS := $(addprefix $(RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(RTL)/DSPPC604.qip))
-
-# the machine around it, likewise from its .qip
-MACH     := $(HERE)../rtl/machine
-MACH_SRCS := $(addprefix $(MACH)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(MACH)/MacPPC7300_machine.qip))
+RTL_SRCS := $(addprefix $(RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(RTL)/$(CPU_NAME).qip))
 
 # The RTL is kept clean under -Wall. Unused-signal warnings are off because a
 # unit legitimately ignores most of the decode bundle it is handed.
-WARN := -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM
+# SYMRSVDWORD: Verilator 5.028 (this machine's) flags the top's `logic set`,
+# which 5.020 accepted (IBMRS6K7248 suppressed it the same way).
+WARN := -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-SYMRSVDWORD
 
 VFLAGS := --cc --exe --build -j 0 $(WARN)
 
@@ -42,160 +39,51 @@ ifneq ($(REF_LIB),)
 REF_CFLAGS  := -DWITH_REF -I$(HERE)ref
 REF_LDFLAGS := -LDFLAGS "$(REF_LIB)"
 CORE_DIR    := $(BUILD)/core_ref
-MACH_DIR    := $(BUILD)/machine_ref
 else
 CORE_DIR    := $(BUILD)/core
-MACH_DIR    := $(BUILD)/machine
 endif
 
 all: $(BUILD)/vector_tb
 
-$(BUILD)/vector_tb: $(RTL_SRCS) $(HERE)vector_dut.sv $(HERE)sim_main.cpp $(RTL)/DSPPC604.qip $(HERE)Makefile
+$(BUILD)/vector_tb: $(RTL_SRCS) $(HERE)vector_dut.sv $(HERE)sim_main.cpp $(RTL)/$(CPU_NAME).qip $(HERE)Makefile
 	@mkdir -p $(BUILD)
+	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)vector_dut.sv > $(BUILD)/vector_dut.sv
 	@$(VERILATOR) $(VFLAGS) --top-module vector_dut -Mdir $(BUILD) -o vector_tb \
 		-CFLAGS "-O2 -std=c++17" \
-		$(RTL_SRCS) $(HERE)vector_dut.sv $(HERE)sim_main.cpp \
+		$(RTL_SRCS) $(BUILD)/vector_dut.sv $(HERE)sim_main.cpp \
 		> $(BUILD)/build.log 2>&1 || (cat $(BUILD)/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/build.log || true
 
 core: $(CORE_DIR)/core_tb
 
-$(CORE_DIR)/core_tb: $(RTL_SRCS) $(HERE)core_main.cpp $(RTL)/DSPPC604.qip $(HERE)Makefile $(REF_LIB)
+$(CORE_DIR)/core_tb: $(RTL_SRCS) $(HERE)core_main.cpp $(RTL)/$(CPU_NAME).qip $(HERE)Makefile $(REF_LIB)
 	@mkdir -p $(CORE_DIR)
-	@$(VERILATOR) $(VFLAGS) --top-module DSPPC604 -Mdir $(CORE_DIR) -o core_tb \
+	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)core_main.cpp > $(CORE_DIR)/core_main.cpp
+	@$(VERILATOR) $(VFLAGS) --top-module $(CPU_NAME) -Mdir $(CORE_DIR) -o core_tb \
 		-CFLAGS "-O2 -std=c++17 $(REF_CFLAGS)" $(REF_LDFLAGS) \
-		$(RTL_SRCS) $(HERE)core_main.cpp \
+		$(RTL_SRCS) $(CORE_DIR)/core_main.cpp \
 		> $(CORE_DIR)/build.log 2>&1 || (cat $(CORE_DIR)/build.log; false)
 	@grep -E '^%Warning' $(CORE_DIR)/build.log || true
 
-machine: $(MACH_DIR)/machine_tb
-
-$(MACH_DIR)/machine_tb: $(RTL_SRCS) $(MACH_SRCS) $(HERE)core_main.cpp $(RTL)/DSPPC604.qip $(MACH)/MacPPC7300_machine.qip $(HERE)Makefile $(REF_LIB)
-	@mkdir -p $(MACH_DIR)
-	@$(VERILATOR) $(VFLAGS) --top-module MacPPC7300_system -GCUDA_FAST_BOOT=1 -Mdir $(MACH_DIR) -o machine_tb \
-		-CFLAGS "-O2 -std=c++17 -DMACPPC7300_MACHINE $(REF_CFLAGS)" $(REF_LDFLAGS) \
-		$(RTL_SRCS) $(MACH_SRCS) $(HERE)core_main.cpp \
-		> $(MACH_DIR)/build.log 2>&1 || (cat $(MACH_DIR)/build.log; false)
-	@grep -E '^%Warning' $(MACH_DIR)/build.log || true
-
-# the machine in a window, with the framework the other cores' benches use
-# (sim/: sim_video, sim_console and Dear ImGui with its SDL2 and OpenGL 2
-# back ends, the template's files as they are); the machine built as
-# machine_tb builds it
-GUI_SRCS := $(HERE)gui_main.cpp $(HERE)sim/sim_video.cpp $(HERE)sim/sim_console.cpp \
-	$(addprefix $(HERE)sim/imgui/,imgui.cpp imgui_draw.cpp imgui_widgets.cpp imgui_tables.cpp imgui_impl_sdl.cpp imgui_impl_opengl2.cpp)
-
-gui: $(BUILD)/gui/macppc7300_gui
-
-$(BUILD)/gui/macppc7300_gui: $(RTL_SRCS) $(MACH_SRCS) $(GUI_SRCS) $(RTL)/DSPPC604.qip $(MACH)/MacPPC7300_machine.qip $(HERE)Makefile
-	@mkdir -p $(BUILD)/gui
-	@$(VERILATOR) $(VFLAGS) --top-module MacPPC7300_system -GCUDA_FAST_BOOT=1 -Mdir $(BUILD)/gui -o macppc7300_gui \
-		-CFLAGS "-O2 -std=c++17 -I$(HERE)sim -I$(HERE)sim/imgui $(shell sdl2-config --cflags)" \
-		-LDFLAGS "$(shell sdl2-config --libs) -lGL" \
-		$(RTL_SRCS) $(MACH_SRCS) $(GUI_SRCS) \
-		> $(BUILD)/gui/build.log 2>&1 || (cat $(BUILD)/gui/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/gui/build.log || true
-
-sdram: $(BUILD)/sdram/sdram_tb
-
-$(BUILD)/sdram/sdram_tb: $(RTL)/DSPPC604_memcdc.sv $(MACH)/MacPPC7300_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
-	@mkdir -p $(BUILD)/sdram
-	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -Mdir $(BUILD)/sdram -o sdram_tb \
-		-CFLAGS "-O2 -std=c++17" \
-		$(RTL)/DSPPC604_memcdc.sv $(MACH)/MacPPC7300_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
-		> $(BUILD)/sdram/build.log 2>&1 || (cat $(BUILD)/sdram/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/sdram/build.log || true
-
-# Cuda with the ADB devices on its line (cuda_tb_top), its clock at
-# 2 x 4,194,304 Hz (the least MacPPC7300_cuda takes) to run fast
-CUDA_SRCS := $(MACH)/MacPPC7300_hc05.sv $(MACH)/MacPPC7300_cudarom.sv $(MACH)/MacPPC7300_cuda.sv $(MACH)/MacPPC7300_adb.sv $(HERE)cuda_tb_top.sv
-ifneq ($(HC05_LIB),)
-CUDA_DIR    := $(BUILD)/cuda_ref
-CUDA_CFLAGS := -DWITH_HC05REF -I$(HERE)hc05ref
-CUDA_LDFLAGS := -LDFLAGS "$(HC05_LIB)"
-else
-CUDA_DIR    := $(BUILD)/cuda
-endif
-
-cuda: $(CUDA_DIR)/cuda_tb
-
-$(CUDA_DIR)/cuda_tb: $(CUDA_SRCS) $(HERE)cuda_main.cpp $(HERE)Makefile $(HC05_LIB)
-	@mkdir -p $(CUDA_DIR)
-	@$(VERILATOR) $(VFLAGS) --top-module cuda_tb_top -GCLK_HZ=16777216 -Mdir $(CUDA_DIR) -o cuda_tb \
-		-CFLAGS "-O2 -std=c++17 $(CUDA_CFLAGS)" $(CUDA_LDFLAGS) \
-		$(CUDA_SRCS) $(HERE)cuda_main.cpp \
-		> $(CUDA_DIR)/build.log 2>&1 || (cat $(CUDA_DIR)/build.log; false)
-	@grep -E '^%Warning' $(CUDA_DIR)/build.log || true
-
-# MESH, its DBDMA channel and the disks (scsi_tb_top), driven as the ROM and
-# Mac OS drive them
-SCSI_SRCS := $(MACH)/MacPPC7300_pkg.sv $(filter-out %MacPPC7300_pkg.sv %MacPPC7300_machine.sv %MacPPC7300_system.sv,$(MACH_SRCS)) $(HERE)scsi_tb_top.sv
-
-scsi: $(BUILD)/scsi/scsi_tb
-
-$(BUILD)/scsi/scsi_tb: $(SCSI_SRCS) $(HERE)scsi_main.cpp $(MACH)/MacPPC7300_machine.qip $(HERE)Makefile
-	@mkdir -p $(BUILD)/scsi
-	@$(VERILATOR) $(VFLAGS) --top-module scsi_tb_top -Mdir $(BUILD)/scsi -o scsi_tb \
-		-CFLAGS "-O2 -std=c++17" \
-		$(SCSI_SRCS) $(HERE)scsi_main.cpp \
-		> $(BUILD)/scsi/build.log 2>&1 || (cat $(BUILD)/scsi/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/scsi/build.log || true
-
-# the ESCC alone: the modem port's bit rates, MIDI in, CTS and RTS
-escc: $(BUILD)/escc/escc_tb
-
-$(BUILD)/escc/escc_tb: $(MACH)/MacPPC7300_escc.sv $(HERE)escc_main.cpp $(HERE)Makefile
-	@mkdir -p $(BUILD)/escc
-	@$(VERILATOR) $(VFLAGS) --top-module MacPPC7300_escc --prefix Vescc_tb -Mdir $(BUILD)/escc -o escc_tb \
-		-CFLAGS "-O2 -std=c++17" \
-		$(MACH)/MacPPC7300_escc.sv $(HERE)escc_main.cpp \
-		> $(BUILD)/escc/build.log 2>&1 || (cat $(BUILD)/escc/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/escc/build.log || true
-
-# the Ethernet bridge alone: its rings against the Main's ring_poll, MACE's toggles across restarts
-enet: $(BUILD)/enet/enet_tb
-
-$(BUILD)/enet/enet_tb: $(MACH)/MacPPC7300_enet.sv $(HERE)enet_main.cpp $(HERE)Makefile
-	@mkdir -p $(BUILD)/enet
-	@$(VERILATOR) $(VFLAGS) --top-module MacPPC7300_enet --prefix Venet_tb -Mdir $(BUILD)/enet -o enet_tb \
-		-CFLAGS "-O2 -std=c++17" \
-		$(MACH)/MacPPC7300_enet.sv $(HERE)enet_main.cpp \
-		> $(BUILD)/enet/build.log 2>&1 || (cat $(BUILD)/enet/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/enet/build.log || true
-
-vramwc: $(BUILD)/vramwc/vramwc_tb
-
-$(BUILD)/vramwc/vramwc_tb: $(MACH)/MacPPC7300_vramwc.sv $(HERE)vramwc_main.cpp $(HERE)Makefile
-	@mkdir -p $(BUILD)/vramwc
-	@$(VERILATOR) $(VFLAGS) --top-module MacPPC7300_vramwc -Mdir $(BUILD)/vramwc -o vramwc_tb \
-		-CFLAGS "-O2 -std=c++17" \
-		$(MACH)/MacPPC7300_vramwc.sv $(HERE)vramwc_main.cpp \
-		> $(BUILD)/vramwc/build.log 2>&1 || (cat $(BUILD)/vramwc/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/vramwc/build.log || true
-
 cdc: $(BUILD)/cdc/cdc_tb
 
-$(BUILD)/cdc/cdc_tb: $(RTL)/DSPPC604_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Makefile
+$(BUILD)/cdc/cdc_tb: $(RTL)/$(CPU_NAME)_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Makefile
 	@mkdir -p $(BUILD)/cdc
-	@$(VERILATOR) $(VFLAGS) --top-module DSPPC604_memcdc -Mdir $(BUILD)/cdc -o cdc_tb \
+	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)cdc_main.cpp > $(BUILD)/cdc/cdc_main.cpp
+	@$(VERILATOR) $(VFLAGS) --top-module $(CPU_NAME)_memcdc -Mdir $(BUILD)/cdc -o cdc_tb \
 		-CFLAGS "-O2 -std=c++17" \
-		$(RTL)/DSPPC604_memcdc.sv $(HERE)cdc_main.cpp \
+		$(RTL)/$(CPU_NAME)_memcdc.sv $(BUILD)/cdc/cdc_main.cpp \
 		> $(BUILD)/cdc/build.log 2>&1 || (cat $(BUILD)/cdc/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/cdc/build.log || true
 
 lint:
-	$(VERILATOR) --lint-only $(WARN) --top-module vector_dut $(RTL_SRCS) $(HERE)vector_dut.sv
-	$(VERILATOR) --lint-only $(WARN) --top-module DSPPC604 $(RTL_SRCS)
-	$(VERILATOR) --lint-only $(WARN) --top-module DSPPC604_memcdc $(RTL)/DSPPC604_memcdc.sv
-	$(VERILATOR) --lint-only $(WARN) --top-module MacPPC7300_system $(RTL_SRCS) $(MACH_SRCS)
-	$(VERILATOR) --lint-only $(WARN) --top-module MacPPC7300_system -GTRACE=0 -GSOUND_IN_DMA=0 $(RTL_SRCS) $(MACH_SRCS)
-	$(VERILATOR) --lint-only $(WARN) --top-module sdram_tb_top $(RTL)/DSPPC604_memcdc.sv $(MACH)/MacPPC7300_sdram.sv $(HERE)sdram_tb_top.sv
-	$(VERILATOR) --lint-only $(WARN) --top-module MacPPC7300_debug $(MACH)/MacPPC7300_debug.sv
-	$(VERILATOR) --lint-only $(WARN) --top-module MacPPC7300_nvsave $(MACH)/MacPPC7300_nvsave.sv
-	$(VERILATOR) --lint-only $(WARN) --top-module cuda_tb_top $(CUDA_SRCS)
-	$(VERILATOR) --lint-only $(WARN) --top-module scsi_tb_top $(SCSI_SRCS)
+	@mkdir -p $(BUILD)
+	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)vector_dut.sv > $(BUILD)/vector_dut.sv
+	$(VERILATOR) --lint-only $(WARN) --top-module vector_dut $(RTL_SRCS) $(BUILD)/vector_dut.sv
+	$(VERILATOR) --lint-only $(WARN) --top-module $(CPU_NAME) $(RTL_SRCS)
+	$(VERILATOR) --lint-only $(WARN) --top-module $(CPU_NAME)_memcdc $(RTL)/$(CPU_NAME)_memcdc.sv
 
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all core machine gui sdram cdc cuda scsi escc enet lint clean
+.PHONY: all core cdc lint clean
