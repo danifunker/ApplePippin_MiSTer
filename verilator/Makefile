@@ -5,6 +5,8 @@
 #   make [CPU=603]  build $(BUILD)/vector_tb   single-instruction golden vectors
 #   make core       build $(BUILD)/core/core_tb   programs on the pipeline
 #   make cdc        build $(BUILD)/cdc/cdc_tb   the memory port across two clocks
+#   make machine    build $(BUILD)/machine/machine_tb   the whole Pippin (Pippin_system, always
+#                   DSPPC603) running a ROM
 #   make lint       Verilator lint only
 #   make clean
 #
@@ -27,6 +29,12 @@ RTL  := $(HERE)../rtl/$(CPU_NAME)
 # the CPU's file list lives in its .qip, shared with Quartus
 RTL_SRCS := $(addprefix $(RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(RTL)/$(CPU_NAME).qip))
 
+# the machine around it, likewise from its .qip
+MACH      := $(HERE)../rtl/machine
+MACH_SRCS := $(addprefix $(MACH)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(MACH)/Pippin_machine.qip))
+MACH_RTL  := $(HERE)../rtl/DSPPC603
+MACH_CPU  := $(addprefix $(MACH_RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(MACH_RTL)/DSPPC603.qip))
+
 # The RTL is kept clean under -Wall. Unused-signal warnings are off because a
 # unit legitimately ignores most of the decode bundle it is handed.
 # SYMRSVDWORD: Verilator 5.028 (this machine's) flags the top's `logic set`,
@@ -39,8 +47,10 @@ ifneq ($(REF_LIB),)
 REF_CFLAGS  := -DWITH_REF -I$(HERE)ref
 REF_LDFLAGS := -LDFLAGS "$(REF_LIB)"
 CORE_DIR    := $(BUILD)/core_ref
+MACH_DIR    := $(BUILD)/machine_ref
 else
 CORE_DIR    := $(BUILD)/core
+MACH_DIR    := $(BUILD)/machine
 endif
 
 all: $(BUILD)/vector_tb
@@ -65,6 +75,17 @@ $(CORE_DIR)/core_tb: $(RTL_SRCS) $(HERE)core_main.cpp $(RTL)/$(CPU_NAME).qip $(H
 		> $(CORE_DIR)/build.log 2>&1 || (cat $(CORE_DIR)/build.log; false)
 	@grep -E '^%Warning' $(CORE_DIR)/build.log || true
 
+machine: $(MACH_DIR)/machine_tb
+
+$(MACH_DIR)/machine_tb: $(MACH_CPU) $(MACH_SRCS) $(HERE)core_main.cpp $(MACH_RTL)/DSPPC603.qip $(MACH)/Pippin_machine.qip $(HERE)Makefile $(REF_LIB)
+	@mkdir -p $(MACH_DIR)
+	@sed 's/DSPPC604/DSPPC603/g' $(HERE)core_main.cpp > $(MACH_DIR)/core_main.cpp
+	@$(VERILATOR) $(VFLAGS) --top-module Pippin_system -GCUDA_FAST_BOOT=1 -Mdir $(MACH_DIR) -o machine_tb \
+		-CFLAGS "-O2 -std=c++17 -DPIPPIN_MACHINE -DCPU_MODEL=603 $(REF_CFLAGS)" $(REF_LDFLAGS) \
+		$(MACH_CPU) $(MACH_SRCS) $(MACH_DIR)/core_main.cpp \
+		> $(MACH_DIR)/build.log 2>&1 || (cat $(MACH_DIR)/build.log; false)
+	@grep -E '^%Warning' $(MACH_DIR)/build.log || true
+
 cdc: $(BUILD)/cdc/cdc_tb
 
 $(BUILD)/cdc/cdc_tb: $(RTL)/$(CPU_NAME)_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Makefile
@@ -83,7 +104,10 @@ lint:
 	$(VERILATOR) --lint-only $(WARN) --top-module $(CPU_NAME) $(RTL_SRCS)
 	$(VERILATOR) --lint-only $(WARN) --top-module $(CPU_NAME)_memcdc $(RTL)/$(CPU_NAME)_memcdc.sv
 
+lint-machine:
+	$(VERILATOR) --lint-only $(WARN) --top-module Pippin_system $(MACH_CPU) $(MACH_SRCS)
+
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all core cdc lint clean
+.PHONY: all core machine cdc lint clean

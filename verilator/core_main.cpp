@@ -13,8 +13,8 @@
 //               line port (random wait states; at the end every line the
 //               data cache may hold dirty is written back through the snoop
 //               port), running a program file.
-//   machine_tb  the whole machine (top MacPPC7300_system, MACPPC7300_MACHINE
-//               defined): the CPU, MacPPC7300_machine with its device stubs, the
+//   machine_tb  the whole machine (top Pippin_system, PIPPIN_MACHINE
+//               defined): the CPU, Pippin_machine with its device stubs, the
 //               clock crossing, and this bench's software memory standing in
 //               for the SDRAM controller on the far side, in its own clock.
 //               It runs a ROM from the reset vector: --machine --rom FILE
@@ -34,10 +34,10 @@
 //   E pc              stop after the instruction at pc
 
 #include <verilated.h>
-#ifdef MACPPC7300_MACHINE
-#include "VMacPPC7300_system.h"
-#include "VMacPPC7300_system___024root.h"
-typedef VMacPPC7300_system Top;
+#ifdef PIPPIN_MACHINE
+#include "VPippin_system.h"
+#include "VPippin_system___024root.h"
+typedef VPippin_system Top;
 #else
 #include "VDSPPC604.h"
 #include "VDSPPC604___024root.h"
@@ -77,7 +77,7 @@ const uint32_t PVR_604  = 0x00030100;
 const uint32_t PVR_604  = 0x00040303;
 #endif
 
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 // the machine's SDRAM board (--module), the ROM in its top 4 MB (rom_at)
 uint32_t SDRAM_SIZE = 128u << 20;
 const uint32_t ROM_BASE   = 0xFFC00000u;
@@ -318,13 +318,13 @@ void wr32(std::vector<uint8_t>& m, uint32_t a, uint32_t v, uint32_t be) {
 
 void usage() {
 	std::printf(
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 		"usage: machine_tb --machine --rom FILE [options]\n"
 		"  --prog FILE      a program file (as core_tb's: R, M, E records) in RAM, the\n"
 		"                   ROM's reset vector a branch to its reset address\n"
 		"  --ram MB         installed RAM (default 16)\n"
 		"  --module MB      the SDRAM board: 32, 64 or 128 (default), the ROM in its top 4 MB\n"
-		"  --no-l2         the L2 cache off (MacPPC7300_l2; on by default)\n"
+		"  --no-l2         the L2 cache off (Pippin_l2; on by default)\n"
 		"  --cpu-mhz F      the CPU's clock (default 70)\n"
 		"  --mem-mhz F      the memory's clock (default 100)\n"
 		"  --max-instr N    stop after N instructions\n"
@@ -395,7 +395,7 @@ void usage() {
 		"  --profile        count pipeline events and exclusive cycle buckets\n");
 }
 
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 // A device access the core's machine answered, as seen on the CPU's port.
 struct DevAccess {
 	bool we, line;
@@ -764,7 +764,7 @@ int main(int argc, char** argv) {
 		}
 		else { usage(); return a == "--help" ? 0 : 2; }
 	}
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 	if (!opt.machine || opt.rom.empty() == !opt.memtest || (!opt.prog.empty() && opt.memtest)) { usage(); return 2; }
 	if (opt.memtest && opt.lockstep) {
 		std::fprintf(stderr, "the memory test runs without the reference (it has no copy of the boot program)\n");
@@ -798,7 +798,7 @@ int main(int argc, char** argv) {
 	std::map<uint32_t, Check> checks;
 	std::vector<std::pair<uint32_t, uint32_t>> expect_mem;
 	uint32_t reset_pc = 0x100, end_pc = 0xFFFFFFFF;
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 	std::vector<uint8_t> mem(SDRAM_SIZE, 0);
 	std::vector<uint8_t> rom(ROM_SIZE, 0);
 	if (!opt.memtest) {
@@ -908,7 +908,7 @@ int main(int argc, char** argv) {
 #ifdef WITH_REF
 	if (opt.lockstep) {
 		if (ref_init(RAM_SIZE, PVR_604) != 0) { std::fprintf(stderr, "reference model failed to start\n"); return 2; }
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 		// RAM, the ROM, and everything else answered by the core's machine
 		if (ref_add_rom(ROM_BASE, rom.data(), ROM_SIZE) != 0 ||
 		    ref_add_mmio(RAM_SIZE, ROM_BASE - RAM_SIZE, dev_read, dev_write, &devq) != 0) {
@@ -934,7 +934,7 @@ int main(int argc, char** argv) {
 	auto stalled = [&]() { return opt.stall > 0 && (int)(rng() % 100) < opt.stall; };
 
 	Mem mm;
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 	Ddr ddr;
 	Frame fr;
 	fr.next = opt.frame_at;
@@ -957,9 +957,9 @@ int main(int argc, char** argv) {
 	bool profile_running = false;
 	auto profile_cycle = [&]() {
 		if (!opt.profile || !profile_running) return;
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 		if (dut->cpu_in_reset) return;
-		uint32_t e = dut->rootp->MacPPC7300_system__DOT__cpu__DOT__perf_events;
+		uint32_t e = dut->rootp->Pippin_system__DOT__cpu__DOT__perf_events;
 #else
 		uint32_t e = dut->rootp->DSPPC604__DOT__perf_events;
 #endif
@@ -986,7 +986,7 @@ int main(int argc, char** argv) {
 	int cacheop_dsi_notes = 0;      // DSIs at cache instructions handed to the reference (both benches)
 	int rc_notes = 0;               // PTE R/C bits taken from the core
 
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 	// ---- two clocks: the CPU's (and the machine's), and the memory's ----
 	const double pa = 1e6 / opt.cpu_mhz / 2, pb = 1e6 / opt.mem_mhz / 2;   // half periods, ps
 	double ta = pa, tb = pb;                                              // next edge of each
@@ -1301,10 +1301,10 @@ int main(int argc, char** argv) {
 						std::printf("bus after %llu instructions: req %u ack %u %s %s %08X data %08X busy %u dcstate %u ci %u hit %u\n",
 						    (unsigned long long)retired, (unsigned)dut->cpu_req, (unsigned)dut->cpu_ack,
 						    dut->cpu_we ? "write" : "read", dut->cpu_line ? "line" : "word", addr,
-						    (uint32_t)dut->cpu_rdata[0], (unsigned)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__mem_busy,
-						    (unsigned)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dcache__DOT__state,
-						    (unsigned)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dcache__DOT__r_ci,
-						    (unsigned)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dcache__DOT__hit);
+						    (uint32_t)dut->cpu_rdata[0], (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__mem_busy,
+						    (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__dcache__DOT__state,
+						    (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__dcache__DOT__r_ci,
+						    (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__dcache__DOT__hit);
 					bool rom_read = addr >= ROM_BASE && !dut->cpu_we;
 					cpu_access = dut->cpu_ack && dut->cpu_req && addr >= RAM_SIZE && !rom_read;
 					if (cpu_access) {
@@ -1314,7 +1314,7 @@ int main(int argc, char** argv) {
 							accepted_cpu.lw[k] = dut->cpu_wdata[7 - k];
 							accepted_cpu.lr[k] = dut->cpu_rdata[7 - k];
 						}
-						accepted_cpu.instruction = dut->rootp->MacPPC7300_system__DOT__cpu__DOT__mem_owner_i;
+						accepted_cpu.instruction = dut->rootp->Pippin_system__DOT__cpu__DOT__mem_owner_i;
 					}
 					dma_write = opt.lockstep && dut->dma_wr;
 					if (dma_write) {
@@ -1582,7 +1582,7 @@ int main(int argc, char** argv) {
 	while (!done && cycles < opt.max_cycles) {
 		tick();
 
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 		term.clock(dut->modem_txd);
 		if (opt.serial_stop && term.finished) {
 			std::printf("serial: the last line typed has been answered with a prompt\n");
@@ -1646,7 +1646,7 @@ int main(int argc, char** argv) {
 				uint32_t insn = fk ? (uint32_t)dut->trace_fold_insn : (uint32_t)dut->trace_insn;
 				if (fk) beats_n = 0;
 				retired++;
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 				last_retire_cycle = cycles;
 				{
 					uint32_t off = pc & 0xFFFFF, hi = pc & 0xFFF00000u;
@@ -1655,15 +1655,15 @@ int main(int argc, char** argv) {
 						exc_count[off >> 8]++;
 						if (xlog)
 							std::fprintf(xlog, "E %llu %X %08X %08X %08X %08X %08X\n", (unsigned long long)retired, off, prev_pc,
-								(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr0,
-								(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr1,
-								(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dar,
-								(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dsisr);
+								(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr0,
+								(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr1,
+								(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dar,
+								(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dsisr);
 					}
 					if (xlog && insn == 0x4C000064u)
 						std::fprintf(xlog, "R %llu %08X %08X %08X\n", (unsigned long long)retired, pc,
-							(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr0,
-							(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr1);
+							(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr0,
+							(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr1);
 					prev_pc = pc;
 				}
 				// the registers (the bench's copy of the GPRs, kept from the
@@ -1673,10 +1673,10 @@ int main(int argc, char** argv) {
 						(unsigned long long)retired, pc, insn, (uint32_t)dut->trace_msr, (uint32_t)dut->trace_cr,
 						(uint32_t)dut->trace_xer, (uint32_t)dut->trace_lr, (uint32_t)dut->trace_ctr);
 					std::printf("  srr0 %08X srr1 %08X dar %08X dsisr %08X\n",
-						(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr0,
-						(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__srr1,
-						(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dar,
-						(uint32_t)dut->rootp->MacPPC7300_system__DOT__cpu__DOT__dsisr);
+						(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr0,
+						(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr1,
+						(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dar,
+						(uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dsisr);
 					for (int r = 0; r < 32; r += 8)
 						std::printf("  r%-2d %08X %08X %08X %08X %08X %08X %08X %08X\n", r, gpr[r], gpr[r + 1], gpr[r + 2],
 							gpr[r + 3], gpr[r + 4], gpr[r + 5], gpr[r + 6], gpr[r + 7]);
@@ -1718,11 +1718,11 @@ int main(int argc, char** argv) {
 						(unsigned long long)retired, (unsigned long long)cycles, pc, dut->trace_msr);
 					if (!opt.disk[0].empty())
 						std::printf("disks: valid %u (memory clock's side %u, toggle %u), blocks %u, target state %u\n",
-							(unsigned)dut->rootp->MacPPC7300_system__DOT__machine__DOT__disks__DOT__m_valid,
-							(unsigned)dut->rootp->MacPPC7300_system__DOT__machine__DOT__disks__DOT__h_valid,
-							(unsigned)dut->rootp->MacPPC7300_system__DOT__machine__DOT__disks__DOT__h_mtog,
-							(unsigned)dut->rootp->MacPPC7300_system__DOT__machine__DOT__disks__DOT__m_blocks[0],
-							(unsigned)dut->rootp->MacPPC7300_system__DOT__machine__DOT__disks__DOT__ts);
+							(unsigned)dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__m_valid,
+							(unsigned)dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__h_valid,
+							(unsigned)dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__h_mtog,
+							(unsigned)dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__m_blocks[0],
+							(unsigned)dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__ts);
 					if (xlog) { exc_summary("exceptions:"); std::fflush(xlog); }
 					std::fflush(stdout);
 				}
@@ -1778,7 +1778,7 @@ int main(int argc, char** argv) {
 						if (before.msr & 4u) ref_set_spr(27, ref_get_spr(27) | 4u);     // PM into SRR1, as below
 						ref_get_state(&before);
 					}
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 					// mtspr or mfspr of an SPR the real 604 does not have: a program
 					// exception (illegal) on the chip and in the core, while dingusppc
 					// accepts the 604e's (MMCR1, PMC3, PMC4: the NanoKernel probes
@@ -1834,7 +1834,7 @@ int main(int argc, char** argv) {
 								w = (uint32_t)rm[ipa] << 24 | (uint32_t)rm[ipa + 1] << 16 | (uint32_t)rm[ipa + 2] << 8 | rm[ipa + 3];
 								known = true;
 							}
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 							else if (ipa >= ROM_BASE) {
 								uint32_t o = ipa - ROM_BASE;
 								w = (uint32_t)rom[o] << 24 | (uint32_t)rom[o + 1] << 16 | (uint32_t)rom[o + 2] << 8 | rom[o + 3];
@@ -1867,7 +1867,7 @@ int main(int argc, char** argv) {
 					// The core retires nothing for an instruction that takes an
 					// exception; the reference has to take it now to catch up.
 					for (int tries = 0; tries < 3 && before.pc != pc; tries++) {
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 						devq.icount = retired - 1;
 						devq.pc = before.pc;
 #endif
@@ -1912,7 +1912,7 @@ int main(int argc, char** argv) {
 						diverged = true;
 						break;
 					}
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 					devq.icount = retired - 1;
 					devq.pc = pc;
 #endif
@@ -1950,7 +1950,7 @@ int main(int argc, char** argv) {
 						s.msr = (s.msr & ~4u) | (CPU_MODEL == 603 ? 0u : (ref_get_spr(27) & 4u));
 						ref_set_state(&s);
 					}
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 					// time is the core's: mftb and mfspr of the time base or the
 					// decrementer read what the core's counters held
 					uint32_t xo10 = (insn >> 1) & 0x3FF;
@@ -2041,7 +2041,7 @@ int main(int argc, char** argv) {
 
 	profile_running = false;
 	bool mem_ok = true;
-#ifdef MACPPC7300_MACHINE
+#ifdef PIPPIN_MACHINE
 	dut->final();
 	if (devq.log) std::fclose(devq.log);
 	if (wav) {

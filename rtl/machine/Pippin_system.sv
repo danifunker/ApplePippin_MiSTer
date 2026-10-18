@@ -1,0 +1,525 @@
+//============================================================================
+//
+//  MacPPC7300 - the machine around the CPU
+//  The CPU, the machine and the clock crossing to memory, as one block
+//
+//    DSPPC603 --(memory port)--> Pippin_machine --(RAM, ROM)--> Pippin_l2 --> DSPPC603_memcdc --> b_*
+//
+//  Everything left of the crossing runs in the CPU's clock; b_* is the same
+//  port protocol in the memory's clock, addressed by SDRAM offset, for the
+//  SDRAM controller (or the test bench's memory). The MiSTer top and the
+//  test bench both instantiate this block, so the bench runs the machine
+//  exactly as the FPGA does.
+//
+//  The CPU's retirement trace and its memory port are brought out for the
+//  test bench and the debug readout; a build that does not use them leaves
+//  them unconnected.
+//
+//============================================================================
+
+module Pippin_system
+#(
+	parameter int unsigned CPU_HZ   = 65_000_000,
+	parameter int unsigned CPU_HZ_FAST = CPU_HZ,    // the clock with cpu_fast (the OSD's CPU speed)
+	parameter int unsigned TB_HZ    = 12_500_000,
+	parameter int unsigned L2_KB    = 128,          // the L2 cache (Pippin_l2)
+	parameter int unsigned CUDA_FAST_BOOT = 0,      // 1: the test bench's (Pippin_cuda FAST_BOOT)
+	parameter int unsigned TRACE = 1,               // 0: no DDR3 trace (Pippin_trace)
+	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned PERF = 1,                // 0: no performance counters in the CPU (with TRACE, they go into the trace)
+	parameter int unsigned SND_TRACE = 0            // 1: the codec's output frames into the trace (kind 13; needs TRACE)
+)
+(
+	input  logic         clk,             // the CPU's clock
+	input  logic         cpu_fast,        // clk is CPU_HZ_FAST, else CPU_HZ (changes only in reset)
+	input  logic         reset,           // in the CPU's clock: the machine's reset
+	output logic         cpu_in_reset,    // the CPU is held in reset (by reset or by Cuda)
+	output logic         power_wake,      // shut down, then the power key: the machine wants a reset
+	input  logic [31:0]  reset_pc,
+	input  logic [7:0]   ram_mb,          // installed RAM, at most 4 x rom_at
+	input  logic [4:0]   rom_at,          // the ROM's SDRAM offset in 4 MB: the board's top 4 MB (quasi-static)
+	input  logic         boot_memtest,    // the memory test in place of the ROM
+	input  logic         l2_on,           // the L2 cache in the memory path (quasi-static, taken under reset)
+
+	// memory, in the memory's clock, by SDRAM offset
+	input  logic         clk_b,
+	input  logic         reset_b,
+	output logic         b_req,
+	output logic         b_we,
+	output logic         b_line,
+	output logic [31:2]  b_addr,
+	output logic [3:0]   b_be,
+	output logic [255:0] b_wdata,
+	input  logic         b_ack,
+	input  logic [255:0] b_rdata,
+
+	// the CPU's memory port, as the machine sees it
+	output logic         cpu_req,
+	output logic         cpu_we,
+	output logic         cpu_line,
+	output logic [31:2]  cpu_addr,
+	output logic [3:0]   cpu_be,
+	output logic [255:0] cpu_wdata,
+	output logic         cpu_ack,
+	output logic [255:0] cpu_rdata,
+	output logic         cpu_irq,
+	output logic         cpu_tb_tick,
+
+	// the modem port (the ESCC's channel A), 1 when idle; asynchronous in
+	output logic         modem_txd,
+	input  logic         modem_rxd,
+	input  logic         modem_cts,       // asynchronous: 0 clear to send
+	output logic         modem_rts,       // 1 while a received byte waits
+	output logic         modem_midi,      // 1 while the port runs at MIDI's rate (TRxC, x32)
+
+	// the sound AWACS plays, signed, in the CPU's clock, changing at its
+	// frame rate (the framework's audio input takes a value seen twice)
+	output logic [15:0]  snd_left,
+	output logic [15:0]  snd_right,
+
+	// Grand Central's NVRAM written from outside, a byte a cycle in the
+	// CPU's clock, while reset is held; or read from outside (nv_ld_re held
+	// until nv_ld_rack, the byte in nv_ld_q then); nv_wr_cpu marks the CPU's
+	// writes (the save to the SD card)
+	input  logic         nv_ld_we,
+	input  logic         nv_ld_re,
+	input  logic [12:0]  nv_ld_addr,
+	input  logic [7:0]   nv_ld_data,
+	output logic         nv_ld_rack,
+	output logic [7:0]   nv_ld_q,
+	output logic         nv_wr_cpu,
+
+	// the monitor: its AppleSense codes
+	input  logic [2:0]   mon_std,
+	input  logic [5:0]   mon_ext,
+
+	// the keyboard, the mouse and the game controller, as hps_io gives them
+	// (the ADB devices synchronise them)
+	input  logic [10:0]  ps2_key,
+	input  logic [24:0]  ps2_mouse,
+	input  logic [51:0]  joy,
+
+	// the date and time for Cuda's clock (seconds since 1904), steady in the
+	// CPU's clock while clock_ok; set once as the machine starts
+	input  logic         clock_ok,
+	input  logic [31:0]  clock_secs,
+
+	// the SCSI targets' images: hps_io's block devices (0, 1 the disks, 3 the
+	// Toolbox, 4 the CD-ROM, 5 the CD changer; 2 not driven here), in the
+	// memory's clock
+	input  logic [5:0]   img_mounted,
+	input  logic [63:0]  img_size,
+	input  logic         img_readonly,
+	output logic [31:0]  sd_lba,
+	output logic [5:0]   sd_rd,
+	output logic [5:0]   sd_wr,
+	output logic [5:0]   sd_blk_cnt,
+	input  logic [5:0]   sd_ack,
+	input  logic [13:0]  sd_buff_addr,
+	input  logic [7:0]   sd_buff_dout,
+	output logic [7:0]   sd_buff_din,
+	input  logic         sd_buff_wr,
+	output logic         disk_busy,
+	output logic signed [15:0] cd_left,  // the CD's audio, in the CPU's clock
+	output logic signed [15:0] cd_right,
+	// the floppy disk's image: hps_io's slot 6 (the other signals shared)
+	input  logic         fd_mounted,
+	output logic [31:0]  fd_lba,
+	output logic         fd_rd,
+	output logic [5:0]   fd_blk_cnt,
+	input  logic         fd_ack,
+
+	// the VRAM's accesses as the picture side answers them, in the memory's
+	// clock (for the test bench)
+	output logic         vram_ack,
+	output logic         vram_we,
+	output logic         vram_line,
+	output logic [21:2]  vram_addr,
+	output logic [255:0] vram_rdata,
+
+	// a DMA write to RAM as it goes into memory (for the test bench)
+	output logic         dma_wr,
+	output logic         dma_wr_line,
+	output logic [31:2]  dma_wr_addr,
+	output logic [3:0]   dma_wr_be,
+	output logic [255:0] dma_wr_data,
+
+	// the network bridge chosen (the OSD's Ethernet, taken under reset), in the memory's clock
+	input  logic         net_on,
+	// the trace also takes MESH's accesses (quasi-static, in the CPU's clock)
+	input  logic         tr_mesh,
+
+	// the VRAM and the network's rings in DDR3 (the framework's DDRAM port), in the memory's clock
+	input  logic         ddr_busy,
+	output logic [7:0]   ddr_burstcnt,
+	output logic [28:0]  ddr_addr,
+	input  logic [63:0]  ddr_dout,
+	input  logic         ddr_dout_ready,
+	output logic         ddr_rd,
+	output logic [63:0]  ddr_din,
+	output logic [7:0]   ddr_be,
+	output logic         ddr_we,
+
+	// the Control video's picture, in the memory's clock
+	output logic         vid_ce,
+	output logic [7:0]   vid_r,
+	output logic [7:0]   vid_g,
+	output logic [7:0]   vid_b,
+	output logic         vid_hs,
+	output logic         vid_vs,
+	output logic         vid_hblank,
+	output logic         vid_vblank,
+
+	// the machine's debug registers (the memory test's report)
+	output logic [31:0]  dbg_status,
+	output logic [31:0]  dbg_passes,
+	output logic [31:0]  dbg_errors,
+	output logic [31:0]  dbg_first,
+
+	// the CPU's retirement trace (see DSPPC603)
+	output logic         trace_valid,
+	output logic         trace_last,
+	output logic [31:0]  trace_pc,
+	output logic [31:0]  trace_insn,
+	output logic         trace_reg2_we,
+	output logic [5:0]   trace_reg2_idx,
+	output logic [31:0]  trace_reg2_val,
+	output logic         trace_fold,
+	output logic [31:0]  trace_fold_insn,
+	output logic         trace_reg_we,
+	output logic [6:0]   trace_reg_idx,
+	output logic [63:0]  trace_reg_val,
+	output logic [31:0]  trace_cr,
+	output logic [31:0]  trace_xer,
+	output logic [31:0]  trace_lr,
+	output logic [31:0]  trace_ctr,
+	output logic [31:0]  trace_fpscr,
+	output logic [31:0]  trace_msr,
+	output logic         trace_dreq,
+	output logic         trace_dwe,
+	output logic [2:0]   trace_dkind,
+	output logic [31:2]  trace_daddr,
+	output logic [3:0]   trace_dbe,
+	output logic [31:0]  trace_dwdata,
+
+	// the CPU's performance counters (PERF; see DSPPC603)
+	output logic [27:0][31:0] perf_cnt
+);
+
+logic         c_req, c_we, c_line, c_ack;
+logic [31:2]  c_addr;
+logic [3:0]   c_be;
+logic [255:0] c_wdata, c_rdata;
+logic         m_req, m_we, m_line, m_ack;
+logic [31:2]  m_addr;
+logic [3:0]   m_be;
+logic [255:0] m_wdata, m_rdata;
+logic         ext_irq, tb_tick;
+logic         snoop_req, snoop_we, snoop_ack;   // the DMA channels' lines, through the caches
+logic [31:5]  snoop_addr;
+logic         cuda_reset;         // Cuda holds the CPU in reset (Pippin_cuda)
+// (from a register: it fans out to every register of the CPU, and from
+// Cuda's own register through the OR it was a 100 MHz path, 2026-10-13)
+logic         cpu_reset = 1'b1;
+always_ff @(posedge clk) cpu_reset <= reset | cuda_reset;
+
+assign cpu_in_reset = cpu_reset;
+
+logic         cpu_dbg_ev;
+logic [223:0] cpu_dbg_rec;
+DSPPC603 #(.PERF(PERF)) cpu (
+	.clk, .reset(cpu_reset), .reset_pc,
+	.ext_irq, .tb_tick,
+	.mem_req(c_req), .mem_we(c_we), .mem_line(c_line), .mem_addr(c_addr), .mem_be(c_be),
+	.mem_wdata(c_wdata), .mem_ack(c_ack), .mem_rdata(c_rdata),
+	.snoop_req, .snoop_we, .snoop_addr, .snoop_ack,
+	.trace_valid, .trace_last, .trace_pc, .trace_insn, .trace_fold, .trace_fold_insn, .trace_reg2_we, .trace_reg2_idx, .trace_reg2_val, .trace_reg_we, .trace_reg_idx, .trace_reg_val,
+	.trace_cr, .trace_xer, .trace_lr, .trace_ctr, .trace_fpscr, .trace_msr,
+	.trace_dreq, .trace_dwe, .trace_dkind, .trace_daddr, .trace_dbe, .trace_dwdata,
+	.perf_cnt, .dbg_ev(cpu_dbg_ev), .dbg_rec(cpu_dbg_rec)
+);
+
+// the VRAM's path and the video registers, between the machine and the picture side
+logic         v_req, v_we, v_line, v_ack;
+logic [21:2]  v_addr;
+logic [3:0]   v_be;
+logic [255:0] v_wdata, v_rdata;
+logic         vb_req, vb_we, vb_line, vb_ack;
+logic [31:2]  vb_addr;
+logic [31:0]  vb_be;                          // a line write's byte mask
+logic [255:0] vb_wdata, vb_rdata;
+logic         vw_req, vw_we, vw_line, vw_ack; // the combiner's side of the crossing
+logic [159:0] vw_dbg;
+logic [21:2]  vw_addr;
+logic [31:0]  vw_be;
+logic [255:0] vw_wdata, vw_rdata;
+logic         timing_on, hs_pos, vs_pos, vbl_start_tog, vbl_end_tog;
+logic [191:0] sw_params, cursor_clut;
+logic [21:0]  fb_base;
+logic [14:0]  row_words;
+logic [7:0]   dac_cr, dbl_buf_cr, athens_d2, athens_n2, athens_p2;
+logic [23:0]  clut_index;
+logic [15:0]  cursor_x;
+logic [23:0]  clut_rgb;
+logic         net_link, net_tx_we, net_tx_go, net_tx_done, net_rx_avail, net_rx_done, net_mac_ok;
+logic [7:0]   net_tx_wa, net_rx_ra;
+logic [63:0]  net_tx_wd, net_rx_q;
+logic [10:0]  net_tx_len, net_rx_len;
+logic [47:0]  net_mac;
+logic         scsi_tr_ev;
+logic [255:0] scsi_tr_rec;
+logic         snd_frame;
+
+Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUDA_FAST_BOOT(CUDA_FAST_BOOT),
+                     .SOUND_IN_DMA(SOUND_IN_DMA)) machine (
+	.clk, .cpu_fast, .reset, .ram_mb, .rom_at, .boot_memtest,
+	.c_req, .c_we, .c_line, .c_addr, .c_be, .c_wdata, .c_ack, .c_rdata,
+	.m_req, .m_we, .m_line, .m_addr, .m_be, .m_wdata, .m_ack, .m_rdata,
+	.ext_irq, .tb_tick, .cpu_reset(cuda_reset), .power_wake,
+	.snoop_req, .snoop_we, .snoop_addr, .snoop_ack,
+	.img_mounted, .img_size, .img_readonly, .sd_lba, .sd_rd, .sd_wr, .sd_blk_cnt, .sd_ack,
+	.sd_buff_addr, .sd_buff_dout, .sd_buff_din, .sd_buff_wr, .disk_busy, .cd_left, .cd_right,
+	.fd_mounted, .fd_lba, .fd_rd, .fd_blk_cnt, .fd_ack,
+	.dma_wr, .dma_wr_line, .dma_wr_addr, .dma_wr_be, .dma_wr_data,
+	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi, .snd_left, .snd_right, .snd_frame,
+	.net_link, .net_tx_we, .net_tx_wa, .net_tx_wd, .net_tx_go, .net_tx_len, .net_tx_done,
+	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
+	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
+	.mon_std, .mon_ext, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
+	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
+	.timing_on, .sw_params, .fb_base, .row_words, .hs_pos, .vs_pos, .dac_cr, .dbl_buf_cr,
+	.cursor_x, .cursor_clut, .athens_d2, .athens_n2, .athens_p2, .vbl_start_tog, .vbl_end_tog,
+	.clk_v(clk_b), .clut_index, .clut_rgb,
+	.dbg_status, .dbg_passes, .dbg_errors, .dbg_first,
+	.tr_mesh, .tr_ev(scsi_tr_ev), .tr_rec(scsi_tr_rec)
+);
+
+// the frame buffer's stores gathered into lines, its loads a line at a time
+Pippin_vramwc #(.N(2)) vramwc (
+	.clk, .reset,
+	.a_req(v_req), .a_we(v_we), .a_line(v_line), .a_addr(v_addr), .a_be(v_be), .a_wdata(v_wdata),
+	.a_ack(v_ack), .a_rdata(v_rdata),
+	.b_req(vw_req), .b_we(vw_we), .b_line(vw_line), .b_addr(vw_addr), .b_be(vw_be), .b_wdata(vw_wdata),
+	.b_ack(vw_ack), .b_rdata(vw_rdata),
+	.dbg(vw_dbg)
+);
+
+DSPPC603_memcdc #(.BEW(32)) vcdc (
+	.clk_a(clk), .reset_a(reset),
+	.a_req(vw_req), .a_we(vw_we), .a_line(vw_line), .a_addr({10'h0, vw_addr}), .a_be(vw_be), .a_wdata(vw_wdata),
+	.a_ack(vw_ack), .a_rdata(vw_rdata),
+	.clk_b, .reset_b,
+	.b_req(vb_req), .b_we(vb_we), .b_line(vb_line), .b_addr(vb_addr), .b_be(vb_be), .b_wdata(vb_wdata),
+	.b_ack(vb_ack), .b_rdata(vb_rdata)
+);
+
+// ---- the DDR3 port: the video first, then the network's rings ----
+logic        va_busy, va_dout_ready, va_rd, va_we, na_busy, na_dout_ready, na_rd, na_we;
+logic [7:0]  va_burstcnt, va_be, na_burstcnt, na_be;
+logic [28:0] va_addr, na_addr;
+logic [63:0] va_din, na_din;
+
+Pippin_ddrarb ddrarb (
+	.clk(clk_b), .reset(reset_b),
+	.a_busy(va_busy), .a_burstcnt(va_burstcnt), .a_addr(va_addr), .a_dout_ready(va_dout_ready),
+	.a_rd(va_rd), .a_din(va_din), .a_be(va_be), .a_we(va_we),
+	.b_busy(na_busy), .b_burstcnt(na_burstcnt), .b_addr(na_addr), .b_dout_ready(na_dout_ready),
+	.b_rd(na_rd), .b_din(na_din), .b_be(na_be), .b_we(na_we),
+	.ddr_busy, .ddr_burstcnt, .ddr_addr, .ddr_dout_ready, .ddr_rd, .ddr_din, .ddr_be, .ddr_we
+);
+
+// ---- B: the network's rings first, then the trace ----
+logic        ne_busy, ne_dout_ready, ne_rd, ne_we, tr_busy, tr_dout_ready, tr_rd, tr_we;
+logic [7:0]  ne_burstcnt, ne_be, tr_burstcnt, tr_be;
+logic [28:0] ne_addr, tr_addr;
+logic [63:0] ne_din, tr_din;
+
+Pippin_ddrarb ddrarb_b (
+	.clk(clk_b), .reset(reset_b),
+	.a_busy(ne_busy), .a_burstcnt(ne_burstcnt), .a_addr(ne_addr), .a_dout_ready(ne_dout_ready),
+	.a_rd(ne_rd), .a_din(ne_din), .a_be(ne_be), .a_we(ne_we),
+	.b_busy(tr_busy), .b_burstcnt(tr_burstcnt), .b_addr(tr_addr), .b_dout_ready(tr_dout_ready),
+	.b_rd(tr_rd), .b_din(tr_din), .b_be(tr_be), .b_we(tr_we),
+	.ddr_busy(na_busy), .ddr_burstcnt(na_burstcnt), .ddr_addr(na_addr), .ddr_dout_ready(na_dout_ready),
+	.ddr_rd(na_rd), .ddr_din(na_din), .ddr_be(na_be), .ddr_we(na_we)
+);
+
+// kind 12: the CPU's performance counters, every 2^23 cycles, in five parts
+// (byte 1: the part; bytes 4-7: the cycles; then counters 6p+1 to 6p+6).
+// A part waits while a SCSI record goes out; the counters are read as each
+// part is sent, so the parts are a few cycles apart.
+logic         pf_ev = 1'b0;
+logic [255:0] pf_rec;
+logic [2:0]   pf_part = 3'd0;           // 0: none pending; 1-5: the next part
+logic [191:0] pf_payload;
+always_comb begin
+	case (pf_part)
+		3'd2:    pf_payload = {perf_cnt[12], perf_cnt[11], perf_cnt[10], perf_cnt[9],  perf_cnt[8],  perf_cnt[7]};
+		3'd3:    pf_payload = {perf_cnt[18], perf_cnt[17], perf_cnt[16], perf_cnt[15], perf_cnt[14], perf_cnt[13]};
+		3'd4:    pf_payload = {perf_cnt[24], perf_cnt[23], perf_cnt[22], perf_cnt[21], perf_cnt[20], perf_cnt[19]};
+		3'd5:    pf_payload = {64'd0,        perf_cnt[0],  perf_cnt[27], perf_cnt[26], perf_cnt[25]};
+		default: pf_payload = {perf_cnt[6],  perf_cnt[5],  perf_cnt[4],  perf_cnt[3],  perf_cnt[2],  perf_cnt[1]};
+	endcase
+end
+always_ff @(posedge clk) begin
+	if (pf_ev & ~scsi_tr_ev) pf_ev <= 1'b0;
+	if (PERF != 0 && TRACE != 0 && perf_cnt[0][22:0] == 23'd0) pf_part <= 3'd1;
+	else if (pf_part != 3'd0 && (~pf_ev | ~scsi_tr_ev)) begin
+		pf_ev   <= 1'b1;
+		pf_rec  <= {pf_payload, perf_cnt[0], 16'd0, 5'd0, pf_part - 3'd1, 8'd12};
+		pf_part <= (pf_part == 3'd5) ? 3'd0 : pf_part + 3'd1;
+	end
+	if (reset) begin
+		pf_ev   <= 1'b0;
+		pf_part <= 3'd0;
+	end
+end
+// kind 13 (SND_TRACE): the codec's output, seven frames a record (bytes 4-31,
+// the oldest first, left then right) with a frame count in bytes 1-3; a
+// record waits behind a SCSI or counter record (syn/sndtrace.py reads them)
+logic         sn_tick;                  // the frame's samples are there
+logic [191:0] sn_buf;
+logic [2:0]   sn_n = 3'd0;
+logic [23:0]  sn_cnt = 24'd0;
+logic         sn_ev = 1'b0;
+logic [255:0] sn_rec;
+always_ff @(posedge clk) begin
+	sn_tick <= snd_frame;
+	if (sn_ev & ~scsi_tr_ev & ~pf_ev) sn_ev <= 1'b0;
+	if (SND_TRACE != 0 && TRACE != 0 && sn_tick) begin
+		sn_buf <= {sn_buf[159:0], snd_left, snd_right};
+		sn_cnt <= sn_cnt + 24'd1;
+		if (sn_n == 3'd6) begin
+			sn_n   <= 3'd0;
+			sn_ev  <= 1'b1;
+			sn_rec <= {sn_buf, snd_left, snd_right, sn_cnt + 24'd1, 8'd13};
+		end
+		else sn_n <= sn_n + 3'd1;
+	end
+	if (reset) begin
+		sn_ev  <= 1'b0;
+		sn_n   <= 3'd0;
+		sn_cnt <= 24'd0;
+	end
+end
+// kind 14 (PERF): the CPU's sample every 65536 cycles (syn/cpusample.py):
+// bytes 4-7 the cycle count, then EX's address, the last exception's
+// address, its vector, MSR, eight exception counts by vector, EX's
+// instruction; it waits behind the records above
+logic         cs_ev = 1'b0;
+logic [255:0] cs_rec;
+always_ff @(posedge clk) begin
+	if (cs_ev & ~scsi_tr_ev & ~pf_ev & ~sn_ev) cs_ev <= 1'b0;
+	if (PERF != 0 && TRACE != 0 && cpu_dbg_ev) begin
+		cs_ev  <= 1'b1;
+		cs_rec <= {cpu_dbg_rec[223:32], perf_cnt[0], 24'd0, 8'd14};
+	end
+	if (reset) cs_ev <= 1'b0;
+end
+// kind 15 (TRACE): the VRAM combiner's counts and state every 2^20 cycles
+// (syn/vramstat.py): bytes 4-7 the cycle count, 8-27 its dbg; it waits
+// behind the records above
+logic         vc_ev = 1'b0;
+logic [255:0] vc_rec;
+logic [31:0]  vc_cyc = '0;
+always_ff @(posedge clk) begin
+	vc_cyc <= vc_cyc + 32'd1;
+	if (vc_ev & ~scsi_tr_ev & ~pf_ev & ~sn_ev & ~cs_ev) vc_ev <= 1'b0;
+	if (TRACE != 0 && vc_cyc[19:0] == 20'd0) begin
+		vc_ev  <= 1'b1;
+		vc_rec <= {32'd0, vw_dbg, vc_cyc, 24'd0, 8'd15};
+	end
+	if (reset) begin vc_ev <= 1'b0; vc_cyc <= '0; end
+end
+wire         tr_ev  = scsi_tr_ev | pf_ev | sn_ev | cs_ev | vc_ev;
+wire [255:0] tr_rec = scsi_tr_ev ? scsi_tr_rec : pf_ev ? pf_rec : sn_ev ? sn_rec : cs_ev ? cs_rec : vc_rec;
+
+generate
+if (TRACE != 0) begin : g_trace
+	Pippin_trace trace (
+		.clk, .ev(tr_ev), .rec(tr_rec),
+		.clk_h(clk_b), .reset_h(reset_b),
+		.ddr_busy(tr_busy), .ddr_burstcnt(tr_burstcnt), .ddr_addr(tr_addr), .ddr_rd(tr_rd), .ddr_din(tr_din),
+		.ddr_be(tr_be), .ddr_we(tr_we)
+	);
+end
+else begin : g_no_trace
+	// without the trace its records have no load, and their logic goes with it
+	assign tr_burstcnt = 8'd0;  assign tr_addr = 29'd0;  assign tr_rd = 1'b0;
+	assign tr_din = 64'd0;      assign tr_be = 8'd0;     assign tr_we = 1'b0;
+end
+endgenerate
+
+// ---- the network bridge: MACE's frames to and from the Main, through DDR3 ----
+Pippin_enet enet (
+	.clk_h(clk_b), .reset_h(reset_b), .on(net_on),
+	.ddr_busy(ne_busy), .ddr_burstcnt(ne_burstcnt), .ddr_addr(ne_addr), .ddr_dout, .ddr_dout_ready(ne_dout_ready),
+	.ddr_rd(ne_rd), .ddr_din(ne_din), .ddr_be(ne_be), .ddr_we(ne_we),
+	.clk, .tx_we(net_tx_we), .tx_wa(net_tx_wa), .tx_wd(net_tx_wd), .tx_go(net_tx_go), .tx_len(net_tx_len),
+	.tx_done(net_tx_done), .rx_ra(net_rx_ra), .rx_q(net_rx_q), .rx_avail(net_rx_avail), .rx_len(net_rx_len),
+	.rx_done(net_rx_done), .link(net_link), .mac(net_mac), .mac_ok(net_mac_ok)
+);
+
+Pippin_video video (
+	.clk(clk_b), .reset(reset_b),
+	.c_req(vb_req), .c_we(vb_we), .c_line(vb_line), .c_addr(vb_addr[21:2]), .c_be(vb_be), .c_wdata(vb_wdata),
+	.c_ack(vb_ack), .c_rdata(vb_rdata),
+	.ddr_busy(va_busy), .ddr_burstcnt(va_burstcnt), .ddr_addr(va_addr), .ddr_dout, .ddr_dout_ready(va_dout_ready),
+	.ddr_rd(va_rd), .ddr_din(va_din), .ddr_be(va_be), .ddr_we(va_we),
+	.timing_on, .sw_params, .fb_base, .row_words, .hs_pos, .vs_pos, .dac_cr, .dbl_buf_cr,
+	.cursor_x, .cursor_clut, .athens_d2, .athens_n2, .athens_p2, .vbl_start_tog, .vbl_end_tog,
+	.clut_index, .clut_rgb,
+	.ce_pix(vid_ce), .r(vid_r), .g(vid_g), .b(vid_b), .hs(vid_hs), .vs(vid_vs),
+	.hblank(vid_hblank), .vblank(vid_vblank)
+);
+
+// the L2 cache between the machine's memory port and the crossing
+logic         l_req, l_we, l_line, l_ack;
+logic [31:2]  l_addr;
+logic [3:0]   l_be;
+logic [255:0] l_wdata, l_rdata;
+
+// (L2_KB = 0 builds none: the port goes straight to the crossing, as the
+// cache switched off would pass it, and the OSD's L2 option does nothing)
+generate
+if (L2_KB != 0) begin : g_l2
+Pippin_l2 #(.L2_KB(L2_KB)) l2 (
+	.clk, .reset, .on(l2_on),
+	.a_req(m_req), .a_we(m_we), .a_line(m_line), .a_addr(m_addr), .a_be(m_be), .a_wdata(m_wdata),
+	.a_ack(m_ack), .a_rdata(m_rdata),
+	.b_req(l_req), .b_we(l_we), .b_line(l_line), .b_addr(l_addr), .b_be(l_be), .b_wdata(l_wdata),
+	.b_ack(l_ack), .b_rdata(l_rdata)
+);
+end
+else begin : g_no_l2
+assign {l_req, l_we, l_line, l_addr, l_be, l_wdata} = {m_req, m_we, m_line, m_addr, m_be, m_wdata};
+assign {m_ack, m_rdata} = {l_ack, l_rdata};
+end
+endgenerate
+
+DSPPC603_memcdc cdc (
+	.clk_a(clk), .reset_a(reset),
+	.a_req(l_req), .a_we(l_we), .a_line(l_line), .a_addr(l_addr), .a_be(l_be), .a_wdata(l_wdata),
+	.a_ack(l_ack), .a_rdata(l_rdata),
+	.clk_b, .reset_b,
+	.b_req, .b_we, .b_line, .b_addr, .b_be, .b_wdata, .b_ack, .b_rdata
+);
+
+assign vram_ack    = vb_ack;
+assign vram_we     = vb_we;
+assign vram_line   = vb_line;
+assign vram_addr   = vb_addr[21:2];
+assign vram_rdata  = vb_rdata;
+
+assign cpu_req     = c_req;
+assign cpu_we      = c_we;
+assign cpu_line    = c_line;
+assign cpu_addr    = c_addr;
+assign cpu_be      = c_be;
+assign cpu_wdata   = c_wdata;
+assign cpu_ack     = c_ack;
+assign cpu_rdata   = c_rdata;
+assign cpu_irq     = ext_irq;
+assign cpu_tb_tick = tb_tick;
+
+endmodule
