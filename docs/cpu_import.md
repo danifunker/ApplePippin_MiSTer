@@ -9,6 +9,7 @@ patch (the rule set on 2026-10-17).
 | `rtl/DSPPC604/` (all files) | `MacPPC7300_MiSTer` `rtl/DSPPC604/` | 21ba191 (master, 2026-10-16: the fpu-pipe2 merge) |
 | `verilator/` Makefile, run.py, run_core.py, vector_dut.sv, sim_main.cpp, core_main.cpp, cdc_main.cpp, fpmodel.py, progs.py, perf.py, ref/ | `MacPPC7300_MiSTer` `verilator/` | 21ba191 |
 | `verilator/machref/` (dingusppc's whole machine, headless, logging every device access; `--machine pippin` runs DingusPPC's Pippin) | `MacPPC7300_MiSTer` `verilator/machref/` | 21ba191 (Makefile paths changed to `~/.cache/applepippin/`) |
+| `syn/mister.py`, `syn/trstream.py`, `tools/misterdeploy/` (the board tool; `install` added, paths and options the Pippin's) | `MacPPC7300_MiSTer` `syn/`, `tools/misterdeploy/` | 14f46cb |
 | `ppctest/runs/results_604_run2.csv` (the 7600's 604 run; run1 is byte-identical and not copied) | `MacPPC7300_MiSTer` `ppctest/runs/` | 21ba191 |
 
 Patches applied on top, in order:

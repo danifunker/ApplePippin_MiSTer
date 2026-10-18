@@ -26,6 +26,7 @@ Newest last.
 | 11 | Quartus 17: a net declared with a typedef | (603 only) | No: only in DSPPC603's changed cache |
 | 12 | The lockstep bench: `dcbz`'s alignment exception handed to the reference | bench | Latent (no divergence seen there) |
 | 13 | ppctest's supervisor PTEs: WIMG shifted twice (`super603.py`'s copy fixed) | test generator | Check MacPPC7300's own PTE helpers |
+| 14 | Main_MiSTer: a CHD with an unstored pregap mounts unlike its CUE | Main (Mac CD layer) | Yes: the same Main code serves MacPPC7300's CD |
 
 ## The items
 
@@ -164,6 +165,21 @@ Newest last.
   shows the PTEs as meant (00120022 for an I page).
 - MacPPC7300: only if its own ppctest builds PTEs the same way (the helper
   here is the Pippin's; `svectors.py` there was not changed).
+
+### 14. Main_MiSTer's Mac CD layer: CHDs with a pregap the CHD does not store
+
+- Here: Main_MiSTer branch `pippin-cdrom`, commit 557a706
+  (`support/mac/mac_cdrom.cpp`, `mount_chd`); found with this repository's
+  `verilator/maincd` `cdcheck`.
+- What: the shared `mister_load_chd` folds a CUE `PREGAP` (not stored in
+  the CHD) into the previous track's end and keeps pregaps in `indexes[1]`
+  only. From a CHD the data disc of a mixed-mode CD (Racing Days) was 150
+  sectors longer than from its CUE, and the TOC blob lost track 2's pregap.
+  `mount_chd` now undoes both; the CHD and the CUE give identical data,
+  TOC blob, READ TOC answers and CD-DA frames.
+- MacPPC7300: the same Main code serves its CD; the fix is in the Main, not
+  in the core. (`cdcheck` would need MacPPC7300's slot predicates if it were
+  copied there; the code is the Main's.)
 
 ## Not for MacPPC7300
 
