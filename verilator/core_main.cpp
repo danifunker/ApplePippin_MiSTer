@@ -83,8 +83,29 @@ uint32_t SDRAM_SIZE = 128u << 20;
 const uint32_t ROM_BASE   = 0xFFC00000u;
 const uint32_t ROM_SIZE   = 4u << 20;
 uint32_t ROM_SDRAM  = SDRAM_SIZE - ROM_SIZE;
-uint32_t RAM_SIZE = 16u << 20;               // installed RAM (--ram)
+uint32_t RAM_SIZE = 17u << 20;               // the RAM's span: up to the last bank's end (--ram)
 uint32_t RAM_MASK = 0xFFFFFFFFu;             // the bench's memory is indexed by SDRAM offset
+
+// Aspen's RAM (Pippin_machine.sv, ram_map): banks of 4, 1, 8 and 8 MB at 0, 16, 32 and 48
+// MB as the installed RAM has them, each with 4 KB windows onto its DRAM wrap; the SDRAM
+// offset is the physical address
+unsigned g_ram_mb = 5;
+unsigned bank_mb(unsigned n) {
+	switch (n) {
+	case 0:  return g_ram_mb >= 4 ? 4 : g_ram_mb;
+	case 1:  return g_ram_mb >= 5 ? 1 : 0;
+	case 2:  return g_ram_mb >= 13 ? 8 : 0;
+	default: return g_ram_mb >= 21 ? 8 : 0;
+	}
+}
+uint32_t bank_wrap(unsigned mb) { return mb == 1 ? 0x000 : mb == 4 ? 0x200 : 0x600; }
+bool pippin_ram(uint32_t a) {
+	if (a >> 26) return false;
+	unsigned sz = bank_mb((a >> 24) & 3);
+	uint32_t off = a & 0xFFFFFF, w = off >> 12;
+	if (!sz) return false;
+	return (off >> 20) < sz || (sz < 8 && w == 0x400) || (sz < 16 && w == 0xC00) || w == 0xC01;
+}
 #else
 const uint32_t RAM_SIZE = 16u << 20;
 const uint32_t RAM_MASK = RAM_SIZE - 1;
@@ -112,9 +133,9 @@ struct Options {
 	// machine_tb
 	bool machine = false;
 	std::string rom;
-	unsigned ram_mb = 16;
+	unsigned ram_mb = 5;           // the retail Pippin's; 13 and 21 with the expansion banks
 	unsigned module_mb = 128;      // the SDRAM board: 32, 64 or 128
-	double cpu_mhz = 70.0, mem_mhz = 100.0;
+	double cpu_mhz = 66.0, mem_mhz = 100.0;
 	uint64_t max_instr = 0;        // stop after this many instructions (0: no limit)
 	uint64_t progress = 0;         // a line every N instructions
 	std::string dev_log;           // every device access, in machref's log format
@@ -130,7 +151,7 @@ struct Options {
 	std::vector<std::string> serial_in;   // lines typed at the modem port, one at each prompt
 	std::string serial_log;        // what the machine sent on the modem port
 	bool serial_stop = false;      // stop at the prompt after the last line (or the first prompt)
-	unsigned monitor = 13;         // 13: Apple's 13-inch RGB (dingusppc's default); 16, 12, 17, 21: the OSD's others
+	unsigned monitor = 5;          // Taos's monitor ID: 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
 	uint64_t frame_at = 0;         // after this many instructions, write the next whole frame
 	uint64_t frame_every = 0;      // ... and again every this many (0: once)
 	std::string frame_out;         // ... to this file (PNG if it ends in .png, else PPM)
@@ -322,7 +343,7 @@ void usage() {
 		"usage: machine_tb --machine --rom FILE [options]\n"
 		"  --prog FILE      a program file (as core_tb's: R, M, E records) in RAM, the\n"
 		"                   ROM's reset vector a branch to its reset address\n"
-		"  --ram MB         installed RAM (default 16)\n"
+		"  --ram MB         installed RAM: 5 (the default, the retail Pippin's), 13 or 21\n"
 		"  --module MB      the SDRAM board: 32, 64 or 128 (default), the ROM in its top 4 MB\n"
 		"  --no-l2         the L2 cache off (Pippin_l2; on by default)\n"
 		"  --cpu-mhz F      the CPU's clock (default 70)\n"
@@ -343,10 +364,8 @@ void usage() {
 		"                   (\"> \"); repeat for more lines\n"
 		"  --serial-log FILE  write what the machine sends on the modem port\n"
 		"  --serial-stop    end the run at the prompt after the last line typed\n"
-		"  --monitor 13|16|12|17|21|20  the monitor's sense code: Apple's 13-inch (640 x 480,\n"
-		"                   the default, dingusppc's), 16-inch (832 x 624) or 12-inch RGB (512 x\n"
-		"                   384), the 17-inch Multiscan (to 1024 x 768), the 21-inch (1152 x 870)\n"
-		"                   or the 20-inch Multiscan (to 1280 x 1024)\n"
+		"  --monitor 5|6|3  the console's video switch, Taos's monitor ID: 5 NTSC (the default,\n"
+		"                   dingusppc's), 6 VGA, 3 PAL\n"
 		"  --frame-at N --frame-out FILE   after N instructions, write the next whole\n"
 		"                   frame of the Control video's picture (PNG if FILE ends in .png,\n"
 		"                   else PPM)\n"
@@ -771,15 +790,22 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 	if (opt.module_mb != 32 && opt.module_mb != 64 && opt.module_mb != 128) { usage(); return 2; }
-	if (opt.monitor != 13 && opt.monitor != 16 && opt.monitor != 12 && opt.monitor != 17 && opt.monitor != 21
-	    && opt.monitor != 20) { usage(); return 2; }
+	if (opt.monitor != 5 && opt.monitor != 6 && opt.monitor != 3) { usage(); return 2; }
 	SDRAM_SIZE = opt.module_mb << 20;
 	ROM_SDRAM  = SDRAM_SIZE - ROM_SIZE;
 	if (opt.ram_mb < 1 || (opt.ram_mb << 20) > ROM_SDRAM) {
 		std::fprintf(stderr, "--ram must leave the top 4 MB of the %u MB module to the ROM\n", SDRAM_SIZE >> 20);
 		return 2;
 	}
-	RAM_SIZE = opt.ram_mb << 20;
+	g_ram_mb = opt.ram_mb;
+	RAM_SIZE = 0;
+	for (unsigned n = 0; n < 4; n++)
+		if (bank_mb(n)) RAM_SIZE = (n << 24) + (bank_mb(n) << 20);
+	if (RAM_SIZE > ROM_SDRAM) {
+		std::fprintf(stderr, "--ram %u needs a larger module than %u MB (the banks reach %u MB)\n",
+		    opt.ram_mb, SDRAM_SIZE >> 20, RAM_SIZE >> 20);
+		return 2;
+	}
 #else
 	if (opt.machine) {
 		std::fprintf(stderr, "this is the CPU-only bench; the machine runs in machine_tb\n");
@@ -907,16 +933,38 @@ int main(int argc, char** argv) {
 
 #ifdef WITH_REF
 	if (opt.lockstep) {
-		if (ref_init(RAM_SIZE, PVR_604) != 0) { std::fprintf(stderr, "reference model failed to start\n"); return 2; }
 #ifdef PIPPIN_MACHINE
-		// RAM, the ROM, and everything else answered by the core's machine
-		if (ref_add_rom(ROM_BASE, rom.data(), ROM_SIZE) != 0 ||
-		    ref_add_mmio(RAM_SIZE, ROM_BASE - RAM_SIZE, dev_read, dev_write, &devq) != 0) {
-			std::fprintf(stderr, "reference model: cannot map the ROM and devices\n");
+		// Aspen's banks and windows, the ROM, and everything else (the RAM's holes too)
+		// answered by the core's machine
+		if (ref_init_map(RAM_SIZE, PVR_604) != 0) { std::fprintf(stderr, "reference model failed to start\n"); return 2; }
+		std::vector<std::pair<uint32_t, uint32_t>> mapped;      // [start, end) of RAM and windows
+		bool map_ok = true;
+		for (unsigned n = 0; n < 4 && map_ok; n++) {
+			unsigned sz = bank_mb(n);
+			if (!sz) continue;
+			uint32_t base = n << 24;
+			map_ok = ref_add_ram(base, sz << 20) == 0;
+			mapped.push_back({base, base + (sz << 20)});
+			for (uint32_t w : {0x400000u, 0xC00000u, 0xC01000u}) {
+				if ((w == 0x400000u && sz >= 8) || (w == 0xC00000u && sz >= 16)) continue;
+				map_ok = map_ok && ref_add_mirror(base + w, base, bank_wrap(sz), 0x1000) == 0;
+				mapped.push_back({base + w, base + w + 0x1000});
+			}
+		}
+		std::sort(mapped.begin(), mapped.end());
+		uint32_t gap = 0;
+		for (auto& r : mapped) {
+			if (r.first > gap) map_ok = map_ok && ref_add_mmio(gap, r.first - gap, dev_read, dev_write, &devq) == 0;
+			gap = r.second;
+		}
+		map_ok = map_ok && ref_add_mmio(gap, ROM_BASE - gap, dev_read, dev_write, &devq) == 0;
+		if (!map_ok || ref_add_rom(ROM_BASE, rom.data(), ROM_SIZE) != 0) {
+			std::fprintf(stderr, "reference model: cannot map RAM, the ROM and the devices: %s\n", ref_last_error());
 			return 2;
 		}
 		if (!opt.prog.empty()) std::memcpy(ref_ram(), mem.data(), RAM_SIZE);
 #else
+		if (ref_init(RAM_SIZE, PVR_604) != 0) { std::fprintf(stderr, "reference model failed to start\n"); return 2; }
 		std::memcpy(ref_ram(), mem.data(), RAM_SIZE);
 #endif
 		ref_state_t s{};
@@ -1049,11 +1097,9 @@ int main(int argc, char** argv) {
 		dut->nv_ld_data = nv_ld >= 0 ? nvimg[nv_ld] : 0;
 		dut->b_ack = mm.ack;
 		for (int i = 0; i < 8; i++) dut->b_rdata[i] = mm.rdata[i];
-		// the sense codes as dingusppc's MacRGB16in, MacRGB12in, Multiscan17in, MacColor21in,
-		// Multiscan20in, else HiRes12-14in
-		dut->mon_std = opt.monitor == 16 ? 7 : opt.monitor == 12 ? 2 : opt.monitor == 21 ? 0 : 6;
-		dut->mon_ext = opt.monitor == 16 ? 0x2D : opt.monitor == 12 ? 0x21 : opt.monitor == 17 ? 0x0B
-		             : opt.monitor == 21 ? 0x00 : opt.monitor == 20 ? 0x23 : 0x2B;
+		// the console's video switch (Taos's GPIO): 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
+		dut->mon_id = opt.monitor == 6 ? 6 : opt.monitor == 3 ? 3 : 5;
+		dut->tray_closed = 1;
 		dut->clock_ok = opt.clock_secs != 0;
 		dut->clock_secs = opt.clock_secs;
 		dut->ddr_busy = ddr.busy;
@@ -1306,7 +1352,9 @@ int main(int argc, char** argv) {
 						    (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__dcache__DOT__r_ci,
 						    (unsigned)dut->rootp->Pippin_system__DOT__cpu__DOT__dcache__DOT__hit);
 					bool rom_read = addr >= ROM_BASE && !dut->cpu_we;
-					cpu_access = dut->cpu_ack && dut->cpu_req && addr >= RAM_SIZE && !rom_read;
+					// (a store to the ROM goes nowhere in either machine: the Pippin's ROM
+					// stores to FFF00000 as it starts)
+					cpu_access = dut->cpu_ack && dut->cpu_req && !pippin_ram(addr) && addr < ROM_BASE;
 					if (cpu_access) {
 						accepted_cpu = {(bool)dut->cpu_we, (bool)dut->cpu_line, addr,
 						    dut->cpu_be, dut->cpu_wdata[0], dut->cpu_rdata[0], {}, {}};

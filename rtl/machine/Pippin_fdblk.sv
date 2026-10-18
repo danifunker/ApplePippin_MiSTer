@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The floppy disk image: hps_io's block slot 6, read for Pippin_swim3
 //
 //  An image is told by its size, as dingusppc's floppyimg.cpp tells a raw

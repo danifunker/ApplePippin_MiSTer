@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The Control video's picture side, in the video clock (the memory clock):
 //  the VRAM in DDR3, the dot clock, Swatch's timing, the scan-out
 //

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The internal SCSI bus: MESH's lines and the targets', wired together
 //
 //  Each side sees its own lines at once and the other side's a clock later,

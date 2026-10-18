@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Cuda: the 7600's ADB, power, reset, real-time clock and PRAM
 //  microcontroller, as the chip itself: a 68HC05E1 (Pippin_hc05) running
 //  Apple's firmware 341S0060, Cuda 2.40 (Pippin_cudarom): the 7300's own,

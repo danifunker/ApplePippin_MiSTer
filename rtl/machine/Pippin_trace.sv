@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  A trace in DDR3, for debugging on the board: 32-byte records from the
 //  CPU's clock into a ring the ARM reads (syn/mister.py trace)
 //

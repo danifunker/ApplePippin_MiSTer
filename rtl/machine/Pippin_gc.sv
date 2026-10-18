@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Grand Central, the 7600's I/O controller, as register stubs
 //
 //  The 128 KB register window (the ROM puts it at F3000000) as dingusppc's

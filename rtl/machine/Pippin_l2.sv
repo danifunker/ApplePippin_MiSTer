@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The L2 cache: a direct-mapped, write-back cache of 32-byte lines on the
 //  machine's single memory port, in the CPU's clock, in front of the clock
 //  crossing to the SDRAM (the 7300/7600's cache slot holds 256 KB to 1 MB)

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  AWACS, the sound codec behind Grand Central (Screamer, as dingusppc)
 //
 //  The registers as dingusppc's devices/sound/awacs.cpp (AwacsScreamer)

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Athens, the clock generator (Apple 343S1191) that makes the video's dot
 //  clock, as an I2C slave on Cuda's I2C lines
 //

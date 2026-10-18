@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Curio's SCSI controller, the external bus: an Am53CF94 (a 53C94 with
 //  AMD's extended features), with an empty bus
 //

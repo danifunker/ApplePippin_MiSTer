@@ -64,6 +64,18 @@ int      ref_translate_dbg(uint32_t ea, uint32_t *pa);
 /* ---- A machine around the CPU (for running a real ROM in lockstep) ----------
    All of these must be called again after every ref_init(). */
 
+/* RAM in pieces (the Pippin's Aspen: banks on 16 MB boundaries, with 4 KB
+   windows onto them). ref_init_map(span, pvr) is ref_init without its one RAM
+   region: the host buffer ref_ram() covers 0 .. span, physical address =
+   buffer offset, but nothing is mapped until ref_add_ram(base, size) maps
+   base .. base + size (whole 4 KB pages) onto the buffer at base, and
+   ref_add_mirror(start, dest, offset, size) maps start .. start + size onto
+   the RAM region at dest, from offset in it (dingusppc's
+   add_mem_mirror_partial). Each returns 0, or -1. */
+int      ref_init_map(uint32_t span, uint32_t pvr);
+int      ref_add_ram(uint32_t base, uint32_t size);
+int      ref_add_mirror(uint32_t start, uint32_t dest, uint32_t offset, uint32_t size);
+
 /* Read-only memory at base (instructions can be fetched from it, as from RAM).
    The data is copied. Returns 0, or -1 if the range overlaps another region. */
 int      ref_add_rom(uint32_t base, const uint8_t *data, uint32_t size);

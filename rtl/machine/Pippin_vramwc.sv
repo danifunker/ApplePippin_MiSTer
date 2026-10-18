@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The VRAM's write combiner and read line
 //
 //  Between the machine's VRAM port and its clock crossing (DSPPC603_memcdc

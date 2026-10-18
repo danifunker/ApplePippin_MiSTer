@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The NVRAM kept on the SD card (milestone P): Grand Central's 8 KB NVRAM
 //  (Open Firmware's settings, Mac OS's XPRAM at 1300-13FF) in an image on
 //  hps_io's block slot 2, the Mac SCSI family's NVRAM slot

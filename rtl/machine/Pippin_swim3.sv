@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The SWIM3, Grand Central's floppy controller, with an internal
 //  Superdrive and a disk image in it (read only)
 //

@@ -230,6 +230,39 @@ void ref_hook_dcbz(uint32_t opcode, uint32_t guest_va) {
 
 extern "C" {
 
+static bool g_flat_ram = true;     /* ref_init: one RAM region at 0; ref_init_map: none */
+
+int ref_init_map(uint32_t span, uint32_t pvr) {
+    g_flat_ram = false;
+    int rc = ref_init(span, pvr);
+    g_flat_ram = true;
+    return rc;
+}
+
+int ref_add_ram(uint32_t base, uint32_t size) {
+    if (!g_ready || !g_mem || (base & (PAGE - 1)) || (size & (PAGE - 1)))
+        return -1;
+    try {
+        if (!g_mem->add_ram_region(base, size, g_ram + base))
+            return -1;
+    } catch (...) {
+        return -1;
+    }
+    return 0;
+}
+
+int ref_add_mirror(uint32_t start, uint32_t dest, uint32_t offset, uint32_t size) {
+    if (!g_ready || !g_mem)
+        return -1;
+    try {
+        if (!g_mem->add_mem_mirror_partial(start, dest, offset, size))
+            return -1;
+    } catch (...) {
+        return -1;
+    }
+    return 0;
+}
+
 int ref_init(uint32_t ram_size, uint32_t pvr) {
     g_ready   = false;
     g_nstores = 0;
@@ -252,7 +285,7 @@ int ref_init(uint32_t ram_size, uint32_t pvr) {
 
     try {
         g_mem = new MemCtrlBase();
-        if (!g_mem->add_ram_region(0, size, g_ram))
+        if (g_flat_ram && !g_mem->add_ram_region(0, size, g_ram))
             return -1;
 
         /* The time-base frequency is irrelevant (virtual time never advances

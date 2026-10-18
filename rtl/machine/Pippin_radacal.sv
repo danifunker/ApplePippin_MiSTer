@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  RaDACal, the Control video's RAMDAC: Grand Central's IOBus device 2
 //  (F301B000), as dingusppc's devices/video/appleramdac.cpp has it
 //

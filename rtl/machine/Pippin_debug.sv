@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The debug readout: rows of squares on the video output, the same rows as
 //  hex on the UART once a second, the user LED
 //

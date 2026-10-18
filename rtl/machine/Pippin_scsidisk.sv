@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The internal SCSI bus's targets: two hard disks (IDs 0 and 1) and a
 //  CD-ROM drive (ID 3), on the MiSTer's block devices in the Mac SCSI
 //  family's layout: slots 0 and 1 the disks, 3 the BlueSCSI Toolbox, 4 the

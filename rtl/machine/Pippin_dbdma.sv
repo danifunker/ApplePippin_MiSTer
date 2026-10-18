@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  A DBDMA channel: Apple's descriptor-based DMA, as Grand Central has it
 //
 //  One channel of the engine dingusppc's devices/common/dbdma.cpp models,

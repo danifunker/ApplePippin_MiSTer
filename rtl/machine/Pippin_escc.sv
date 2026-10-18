@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The ESCC, Grand Central's serial controller (a Z85C30): channel A, the
 //  modem port, transmits and receives at the rate software programs;
 //  channel B, the printer port, has the same registers and no line

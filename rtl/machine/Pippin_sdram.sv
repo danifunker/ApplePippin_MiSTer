@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The SDRAM controller, in the memory clock, on DSPPC603_memcdc's b side
 //
 //  Adapted from Sorgelig's MiSTer sdram.sv (2015-2019, GPL-3.0-or-later),

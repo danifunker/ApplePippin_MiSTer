@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  A Bandit or Chaos PCI host bridge: its configuration mechanism and the
 //  configuration headers of the devices behind it
 //
@@ -16,6 +16,12 @@
 //  BRIDGE = 0: Chaos, the video bus, at F0000000 (bandit.cpp:308-322,
 //              machinetnt.cpp:89-96): device 11 is the Control video
 //              controller's header (control.cpp:96-104).
+//  BRIDGE = 2: the Pippin's Aspen, PCI at F2000000 (bandit.cpp:336-350,
+//              AspenPci): CONFIG_ADDR is kept as written, not byte-swapped
+//              (157, 211), and a type 0 access names its device by number,
+//              CONFIG_ADDR >> 11 plus 11 (273-274), not by an IDSEL bit.
+//              Aspen has no header of its own; device 16 is Grand Central's
+//              (the ROM's CONFIG_ADDR 00002810: device 16, register 10).
 //
 //  The base address registers are stored and read back with their masks.
 //  The machine's decoder follows Control's two memory BARs (as dingusppc
@@ -53,15 +59,15 @@ import Pippin_pkg::*;
 logic [31:0] config_addr;          // as the CPU wrote it (dingusppc keeps it swapped and swaps it back)
 
 // ---- the device addressed by CONFIG_ADDR (bandit.cpp:262-290) ----------------
-wire [31:0] cfg   = bswap32(config_addr);
+wire [31:0] cfg   = (BRIDGE == 2) ? config_addr : bswap32(config_addr);
 wire [20:0] idsel = cfg[31:11];
 wire [5:0]  reg_n = cfg[7:2];
 wire        fun0  = cfg[10:8] == 3'd0;
 wire        type0 = ~cfg[0];
 // type 0 with exactly one IDSEL bit: device 11 + its position
 wire        idsel_one = (idsel != 21'd0) && ((idsel & (idsel - 21'd1)) == 21'd0);
-wire        dev11 = type0 & fun0 & idsel_one & idsel[0];
-wire        dev16 = type0 & fun0 & idsel_one & idsel[5];
+wire        dev11 = (BRIDGE != 2) & type0 & fun0 & idsel_one & idsel[0];
+wire        dev16 = (BRIDGE == 2) ? (type0 & fun0 & idsel == 21'd5) : (type0 & fun0 & idsel_one & idsel[5]);
 
 // ---- the headers' writable parts -------------------------------------------------
 // Bandit (bandit.cpp:41-64, 66-111)
@@ -95,7 +101,7 @@ always_comb begin
 			default: hdr = 32'h0;
 		endcase
 	end
-	else if (BRIDGE == 1 && dev16) begin
+	else if (BRIDGE != 0 && dev16) begin
 		present = 1'b1;
 		case (reg_n)
 			6'h00: hdr = 32'h0002_106B;                       // Grand Central, Apple
@@ -142,7 +148,7 @@ always_ff @(posedge clk) begin
 				default: ;
 			endcase
 		end
-		if (BRIDGE == 1 && dev16) begin
+		if (BRIDGE != 0 && dev16) begin
 			case (reg_n)
 				6'h01: begin gc_stat <= gc_stat & ~(wle[31:16] & 16'hF900); gc_cmd <= wle[15:0] & 16'hFF77; end
 				6'h03: begin gc_lat <= wle[15:8]; gc_cache <= wle[7:0]; end

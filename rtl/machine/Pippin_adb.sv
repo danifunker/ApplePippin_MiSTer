@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The ADB devices on Cuda's ADB line: a keyboard (address 2) and a mouse
 //  (address 3), from the MiSTer's PS/2 keyboard and mouse
 //

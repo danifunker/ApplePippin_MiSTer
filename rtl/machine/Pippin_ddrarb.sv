@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The DDR3 port shared: the video (A, first) and the network bridge (B)
 //
 //  The owner changes only between transfers: when the owner asks for

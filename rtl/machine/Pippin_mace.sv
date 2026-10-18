@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  MACE, the Ethernet controller (Am79C940) behind Grand Central: its cable
 //  unplugged, or (2026-10-08) on the MiSTer's network through the Main
 //  (Pippin_enet, the OSD's Ethernet option)

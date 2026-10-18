@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Control, the 7300/7600's video controller on Chaos: its registers, and
 //  Swatch, its timing generator
 //

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  Shared helpers: how a device access's byte enables map to the sizes and
 //  byte lanes dingusppc's devices see
 //

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The CD-ROM drive's audio, as the Quadra 800 core's rtl/cd_audio.sv: the
 //  Main's Mac CD layer (support/mac/mac_cdrom*.cpp) keeps the AppleCD
 //  playhead, executes the transport commands Pippin_scsidisk forwards and

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  MESH, the internal SCSI controller (Macintosh Enhanced SCSI Hardware,
 //  Apple 343S1146 on the TNT boards)
 //

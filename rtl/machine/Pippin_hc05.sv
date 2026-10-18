@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  A 68HC05 CPU, for Cuda (Pippin_cuda)
 //
 //  The instruction set and flags are MAME's 6805 core with the HC05's tables

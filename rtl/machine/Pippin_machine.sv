@@ -1,8 +1,8 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
-//  The Power Macintosh 7600 (dingusppc's TNT): the address map, the device
-//  stubs, the time base
+//  Pippin - the machine around the CPU
+//  The Apple/Bandai Pippin (dingusppc's machinepippin.cpp, MAME's
+//  apple/pippin.cpp): the address map, the device stubs, the time base
 //
 //  Sits on the CPU's side of the clock crossing, in the CPU's clock. It takes
 //  the CPU's memory port, decodes the address, answers device accesses
@@ -11,40 +11,46 @@
 //  request at a time, req held until ack, a 32-byte line or one word with
 //  byte enables (the lowest address in bits 255-224 or 31-24).
 //
-//  The map, from dingusppc's machines/machinetnt.cpp and the devices it
-//  builds (file and line for each entry):
+//  The map (dingusppc's machinepippin.cpp and the devices it builds; MAME's
+//  pippin.cpp:105-150 agrees):
 //
-//    00000000  installed RAM          ram_mb MB in Hammerhead's banks, one a
-//                                     bit of ram_mb, where its bank registers
-//                                     put them (flat until they are set)
-//                                     (machinetnt.cpp:135-143,
-//                                     hammerhead.cpp:161-176); SDRAM offset 0
-//    F0000000  Chaos, video bus       16 MB: configuration space only
-//                                     (bandit.cpp:308-322) -> Pippin_pcicfg
-//    F2000000  Bandit 1, PCI          16 MB: configuration space only
-//                                     (bandit.cpp:293-306) -> Pippin_pcicfg
+//    00000000  RAM                    Aspen's four banks, one per 16 MB: 4 MB
+//                                     and 1 MB on the board, two expansion
+//                                     slots (ram_mb 5, 13 or 21: 8 MB in bank
+//                                     2, then 3); each with Aspen's 4 KB
+//                                     windows onto it, which the ROM's memory
+//                                     sizing probes (aspen.cpp:154-205): at
+//                                     + C01000 always, + C00000 below 16 MB,
+//                                     + 400000 below 8 MB, each onto the
+//                                     bank's DRAM row and column wrap
+//                                     (1 MB: + 0; 4 MB: + 200; 8 MB: + 600).
+//                                     SDRAM offset = the physical address, so
+//                                     5 MB fits a 32 MB module, 13 and 21 MB
+//                                     need 64 MB
+//    40000000  save flash             Am29F010, 128 KB, a byte per word
+//                                     (pippin.cpp:145, 158-166) -> stub for now
+//    F0000000  Taos's VRAM            1 MB: memory, through its own crossing
+//                                     to the picture side (Pippin_video, the
+//                                     VRAM in DDR3), big-endian
+//    F0800000  Taos's registers       2 KB -> Pippin_taos
+//    F1000000  Taos's colour table    1 KB -> Pippin_taos
+//    F2000000  Aspen's PCI            16 MB: configuration space only
+//                                     (bandit.cpp:336-350) -> Pippin_pcicfg
 //    F3000000  Grand Central          128 KB, where the ROM sets its base
-//                                     address register (grandcentral.cpp:52,
-//                                     machinetnt.cpp:78-80) -> Pippin_gc
-//    F8000000  Hammerhead             1,280 bytes of registers
-//                                     (hammerhead.cpp:39) -> below
-//    FFC00000  ROM                    4 MB (machinetnt.cpp:131); SDRAM offset
+//                                     address register (CONFIG_ADDR 2810) ->
+//                                     Pippin_gc
+//    F8000000  Aspen's registers      2 KB, 32 registers repeated every 128
+//                                     bytes (aspen.cpp:76-133) -> below
+//    FFC00000  ROM                    4 MB (machinepippin.cpp:64); SDRAM offset
 //                                     rom_at x 4 MB (the board's top 4 MB);
 //                                     writes are ignored.
 //                                     With boot_memtest, the 8 KB memory-test
 //                                     program (Pippin_bootrom) mirrored over
 //                                     it instead
-//    F9000000  debug registers        not a 7600 device: 256 bytes where the
-//                                     memory test reports (see below); no
-//                                     7600 ROM touches this address
-//    Control's second BAR             its registers, 4 KB (Open Firmware
-//                                     puts them at 94000000) -> Pippin_control
-//    Control's third BAR              its VRAM window, 64 MB (90000000): not
-//                                     a device but memory, through its own
-//                                     crossing to the picture side
-//                                     (Pippin_video, the VRAM in DDR3)
+//    F9000000  debug registers        not a Pippin device: 256 bytes where the
+//                                     memory test reports (see below)
 //
-//  Anything else reads as zeros and ignores writes. A device answers at
+//  Anything else (RAM's holes included) reads as zeros and ignores writes. A device answers at
 //  once, but for the VIA, which Grand Central paces to its 783,360 Hz clock:
 //  an access waits for the clock's next edge and then half a cycle (MAME's
 //  Grand Central, heathrow.cpp via_sync), 0.64-1.91 us. The 7600's ROM
@@ -86,9 +92,9 @@
 
 module Pippin_machine
 #(
-	parameter int unsigned CPU_HZ   = 65_000_000,
+	parameter int unsigned CPU_HZ   = 66_000_000,
 	parameter int unsigned CPU_HZ_FAST = CPU_HZ,    // the clock with cpu_fast
-	parameter int unsigned TB_HZ    = 12_500_000,
+	parameter int unsigned TB_HZ    = 16_500_000,     // the 603's time base: a quarter of its 66 MHz bus
 	parameter int unsigned VIA_HZ   = 783_360,
 	parameter int unsigned RTXC_HZ  = 3_686_400,     // the ESCC's RTxC clock
 	parameter int unsigned SCSI_HZ  = 25_000_000,    // MESH's time base and Curio's clock (below CPU_HZ)
@@ -204,9 +210,9 @@ module Pippin_machine
 	output logic [7:0]   nv_ld_q,
 	output logic         nv_wr_cpu,                 // the CPU wrote the NVRAM
 
-	// the monitor: its AppleSense codes (Pippin_control MON_SENSE)
-	input  logic [2:0]   mon_std,
-	input  logic [5:0]   mon_ext,
+	// the console's video switch (Taos's GPIO: 5 NTSC, 6 VGA, 3 PAL) and the CD tray
+	input  logic [2:0]   mon_id,
+	input  logic         tray_closed,
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them (Pippin_adb)
 	input  logic [10:0]  ps2_key,
@@ -263,58 +269,37 @@ module Pippin_machine
 
 import Pippin_pkg::*;
 
-// ---- RAM: Hammerhead's banks ----------------------------------------------------------------
-// One bank for each bit of ram_mb, the largest in bank 0 (120 MB: 64, 32, 16, 8 in banks
-// 0-3), each answering only within its size at the base the ROM programs (bits 30-22: the
-// bank's high register's bit 0, its low register), nothing above it; in the SDRAM largest
-// first. The ROM (FFF041B8-FFF04454) sizes bank k at k x 64 MB, then packs the banks from 0.
-// Until a base is programmed RAM is flat, as before (the start, the memory-test boot).
-logic [15:0] hh_bank [26];
-logic [8:0]  bk_base [7];                  // by size bit n: its bank's base
-logic        banked;
-always_ff @(posedge clk) begin
-	logic [4:0] j;                         // size bit n's bank: the larger parts present
-	logic       any;
-	any = 1'b0;
-	for (int n = 0; n < 7; n++) begin
-		j = 5'd0;
-		for (int m = n + 1; m < 7; m++) if (ram_mb[m]) j = j + 5'd1;
-		bk_base[n] <= hh_bank[j][8:0];
-		if (ram_mb[n] && hh_bank[j][8:0] != 9'd0) any = 1'b1;
-	end
-	banked <= any;
-end
-// {hit, SDRAM byte offset} of a physical address
-function automatic logic [27:0] ram_map(input logic [31:0] x, input logic [7:0] mb,
-                                         input logic bkd, input logic [62:0] bases);
-	logic        hit, match;
-	logic [26:0] off;
-	logic [8:0]  bb;
-	hit = 1'b0;
-	off = x[26:0];
-	if (!bkd) hit = x[31:20] < {4'h0, mb};
-	else for (int n = 6; n >= 0; n--) begin
-		bb = bases[9 * n +: 9];
-		if (n >= 2) match = (x[30:22] >> (n - 2)) == (bb >> (n - 2));
-		else        match = (x[30:22] == bb) && ((x[21:20] >> n) == 2'd0);
-		if (!hit && mb[n] && !x[31] && match) begin
-			hit = 1'b1;
-			off = 27'((({24'd0, mb} >> (n + 1)) << (n + 21)) | ({5'd0, x[26:0]} & ((32'd1 << (n + 20)) - 32'd1)));
-		end
-	end
-	ram_map = {hit, off};
+// ---- RAM: Aspen's banks ------------------------------------------------------------------
+// The bank sizes in MB from the installed RAM: 4 + 1 on the board, 8 in each expansion slot
+function automatic logic [4:0] bank_mb(input logic [1:0] n, input logic [7:0] mb);
+	case (n)
+		2'd0:    bank_mb = (mb >= 8'd4) ? 5'd4 : 5'(mb);
+		2'd1:    bank_mb = (mb >= 8'd5) ? 5'd1 : 5'd0;
+		2'd2:    bank_mb = (mb >= 8'd13) ? 5'd8 : 5'd0;
+		default: bank_mb = (mb >= 8'd21) ? 5'd8 : 5'd0;
+	endcase
 endfunction
-wire [62:0] bk_bases = {bk_base[6], bk_base[5], bk_base[4], bk_base[3], bk_base[2], bk_base[1], bk_base[0]};
+// {hit, SDRAM byte offset} of a physical address
+function automatic logic [27:0] ram_map(input logic [31:0] x, input logic [7:0] mb);
+	logic [4:0]  sz;
+	logic        direct, w400, wc00, wc01;
+	logic [11:0] wrap;
+	sz     = bank_mb(x[25:24], mb);
+	direct = (sz != 5'd0) && ({4'd0, x[23:20]} < {3'd0, sz});
+	w400   = (sz != 5'd0) && (sz < 5'd8)  && (x[23:12] == 12'h400);
+	wc00   = (sz != 5'd0) && (sz < 5'd16) && (x[23:12] == 12'hC00);
+	wc01   = (sz != 5'd0) && (x[23:12] == 12'hC01);
+	wrap   = (sz == 5'd1) ? 12'h000 : (sz == 5'd4) ? 12'h200 : 12'h600;
+	ram_map[27]   = (x[31:26] == 6'd0) && (direct | w400 | wc00 | wc01);
+	ram_map[26:0] = direct ? {1'b0, x[25:0]} : {1'b0, x[25:24], 12'h000, 12'(wrap + {1'b0, x[11:0]})};
+endfunction
 
 // ---- decode -----------------------------------------------------------------------------
 wire [31:0] a       = {c_addr, 2'b00};
-wire [27:0] a_map   = ram_map(a, ram_mb, banked, bk_bases);
+wire [27:0] a_map   = ram_map(a, ram_mb);
 wire        is_ram  = a_map[27];
 wire        is_rom  = a[31:22] == 10'h3FF;
 wire        to_mem  = is_ram | (is_rom & ~c_we & ~boot_memtest);
-// Control's registers and VRAM, where Open Firmware put them (Chaos's BARs)
-logic [31:12] ctl_regs_base;
-logic [31:26] ctl_vram_base;
 
 // ---- the request, registered, for the devices and the VRAM --------------------------------
 // The devices' and the VRAM's requests are decided from a registered copy of
@@ -341,13 +326,14 @@ wire [31:0] qa        = {q_addr, 2'b00};
 wire        q_is_rom  = qa[31:22] == 10'h3FF;
 wire        q_is_boot = q_is_rom & ~q_we & boot_memtest;
 wire        q_is_dbg  = qa[31:8] == 24'hF90000;
-wire        q_is_cha  = qa[31:24] == 8'hF0;
-wire        q_is_ban  = qa[31:24] == 8'hF2;
+wire        q_is_vram = qa[31:20] == 12'hF00;                 // Taos's VRAM, F0000000-F00FFFFF
+wire        q_is_taos = qa[31:11] == 21'h1E1000;              // F0800000-F08007FF
+wire        q_is_clut = qa[31:10] == 22'h3C4000;              // F1000000-F10003FF
+wire        q_is_pci  = qa[31:24] == 8'hF2;
 wire        q_is_gc   = qa[31:17] == 15'h7980;                // F3000000-F301FFFF
-wire        q_is_hh   = qa[31:12] == 20'hF8000 && qa[11:4] < 8'h50;
+wire        q_is_asp  = qa[31:11] == 21'h1F0000;              // F8000000-F80007FF
 wire        q_is_via  = q_is_gc && qa[16:13] == 4'b1011;      // F3016000-F3017FFF
-wire        q_is_ctl  = (ctl_regs_base != 20'h0) && (qa[31:12] == ctl_regs_base);
-wire        q_is_vram = (ctl_vram_base != 6'h0) && (qa[31:26] == ctl_vram_base);
+wire        q_is_fl   = qa[31:19] == 13'h0800;                // 40000000-4007FFFF
 wire        q_req     = q_valid & c_req;
 
 // ---- RAM and ROM: the CPU's accesses and the DMA channels', one port ------------------------
@@ -370,7 +356,7 @@ logic [31:2]  gdm_addr;
 logic [3:0]   gdm_be;
 logic [255:0] gdm_wdata, gdm_rdata;
 wire  [31:0]  da      = {gdm_addr, 2'b00};
-wire  [27:0]  da_map  = ram_map(da, ram_mb, banked, bk_bases);
+wire  [27:0]  da_map  = ram_map(da, ram_mb);
 wire          d_ram   = da_map[27];
 wire          d_rom   = da[31:22] == 10'h3FF;
 wire          d_mem   = d_ram | (d_rom & ~gdm_we);
@@ -457,44 +443,15 @@ always_ff @(posedge clk) begin
 end
 
 // The VRAM is memory, not a device: it goes to the picture side through a
-// crossing of its own, as RAM goes to the SDRAM. The 64 MB window as
-// control.cpp maps it (read and write, 238-504), the optional bank fitted
-// (4 MB in all): offset bit 23 set is the big-endian aperture; clear, the
-// little-endian one, whose bytes are swapped within each pixel (16 bits:
-// within halfwords; 32: within words; 8: as they are). In VRAM's wide mode
-// (MISC_ENABLES bit 6, which Mac OS's driver sets) the window's low 4 MB are
-// the VRAM; otherwise bits 22-21 pick a bank: 3 the optional, else the
-// standard (writes to 1, which dingusppc also makes to the optional bank,
-// are not mirrored: Pippin_stubs.md).
-logic [11:0] ctl_enables;
-wire  [25:0] vo     = qa[25:0];
-wire  [1:0]  v_swap = vo[23] ? 2'd0 : (dac_cr[3:2] == 2'd0) ? 2'd0 : (dac_cr[3:2] == 2'd1) ? 2'd1 : 2'd2;
-wire  [21:0] v_byte = ctl_enables[6] ? vo[21:0] : {vo[22:21] == 2'd3, vo[20:0]};
-
-function automatic logic [31:0] v_sw(input logic [31:0] w, input logic [1:0] s);
-	case (s)
-		2'd1:    v_sw = {w[23:16], w[31:24], w[7:0], w[15:8]};
-		2'd2:    v_sw = {w[7:0], w[15:8], w[23:16], w[31:24]};
-		default: v_sw = w;
-	endcase
-endfunction
-function automatic logic [3:0] v_swbe(input logic [3:0] e, input logic [1:0] s);
-	case (s)
-		2'd1:    v_swbe = {e[2], e[3], e[0], e[1]};
-		2'd2:    v_swbe = {e[0], e[1], e[2], e[3]};
-		default: v_swbe = e;
-	endcase
-endfunction
-function automatic logic [255:0] v_swl(input logic [255:0] l, input logic [1:0] s);
-	for (int i = 0; i < 8; i++) v_swl[32 * i +: 32] = v_sw(l[32 * i +: 32], s);
-endfunction
+// crossing of its own, as RAM goes to the SDRAM. Taos's 1 MB, big-endian, as
+// it is (dingusppc's taos.h:39-41; the ROM uses it as scratch before video).
 
 assign v_req   = q_req & q_is_vram;
 assign v_we    = q_we;
 assign v_line  = q_line;
-assign v_addr  = v_byte[21:2];
-assign v_be    = v_swbe(q_be, v_swap);
-assign v_wdata = v_swl(q_wdata, v_swap);
+assign v_addr  = {2'b00, qa[19:2]};
+assign v_be    = q_be;
+assign v_wdata = q_wdata;
 
 // Everything else is answered here: a word two cycles after it is seen, a line
 // as eight words presented on consecutive cycles, answered after the last.
@@ -503,14 +460,14 @@ assign v_wdata = v_swl(q_wdata, v_swap);
 // devices' own muxes behind them set the clock before (build 28: -1.5 ns).
 logic       dev_ack, dev_busy;
 logic [3:0] dev_cnt;                               // cycles since the request was taken
-logic [6:0] dev_sel_q;                             // which block answers: Control, Chaos, Bandit, GC, Hammerhead, debug, boot
+logic [7:0] dev_sel_q;                             // which block answers: flash, Taos, its table, PCI, GC, Aspen, debug, boot
 logic       p_sel, pq_sel;                         // a word is before the devices in this cycle; was in the last
 logic [2:0] p_k, pq_k;                             // ... this one of the line
 logic [31:2] p_a;
 logic [3:0]  p_be;
 logic [31:0] p_wd;
 logic        p_we;
-logic [6:0]  p_dev;
+logic [7:0]  p_dev;
 logic [31:0] line_buf [8];
 
 // a word access to the VIA waits for the VIA's clock: its next edge, then half
@@ -534,7 +491,7 @@ always_ff @(posedge clk) begin
 	p_be  <= dev_be;
 	p_wd  <= dev_wd;
 	p_we  <= q_we;
-	p_dev <= {q_is_ctl, q_is_cha, q_is_ban, q_is_gc, q_is_hh, q_is_dbg, q_is_boot};
+	p_dev <= {q_is_fl, q_is_taos, q_is_clut, q_is_pci, q_is_gc, q_is_asp, q_is_dbg, q_is_boot};
 end
 
 // ---- the time base, the VIA's clock, the ESCC's and the SCSI controllers', the microsecond, ----
@@ -621,36 +578,44 @@ always_ff @(posedge clk) begin
 end
 
 // ---- the devices ------------------------------------------------------------------------
-logic [31:0] cha_rdata, ban_rdata, gc_rdata;
+logic [31:0] pci_rdata, gc_rdata;
 logic        gc_irq;
-
-Pippin_pcicfg #(.BRIDGE(0)) chaos (
-	.clk, .reset(board_reset),
-	.sel(p_sel & p_dev[5]), .we(p_we), .addr(p_a[23:2]), .be(p_be), .wdata(p_wd),
-	.rdata(cha_rdata), .ctl_regs_base, .ctl_vram_base
-);
-
-logic [31:12] ban_unused_regs;            // Bandit has no Control behind it
-logic [31:26] ban_unused_vram;
-
-Pippin_pcicfg #(.BRIDGE(1)) bandit (
-	.clk, .reset(board_reset),
-	.sel(p_sel & p_dev[4]), .we(p_we), .addr(p_a[23:2]), .be(p_be), .wdata(p_wd),
-	.rdata(ban_rdata), .ctl_regs_base(ban_unused_regs), .ctl_vram_base(ban_unused_vram)
-);
-
-// ---- Control's registers, at its second BAR (4 KB: the 512 bytes repeated) ------------------
-logic [31:0] ctl_rdata;
-logic        ctl_irq;
 logic        cuda_nmi;                     // Cuda's NMI (PC2), Grand Central's source 14
 
-Pippin_control control (
+logic [31:12] pci_unused_regs;            // (Chaos's outputs: Control's BARs)
+logic [31:26] pci_unused_vram;
+Pippin_pcicfg #(.BRIDGE(2)) aspen_pci (
 	.clk, .reset(board_reset),
-	.sel(p_sel & p_dev[6]), .we(p_we), .addr(p_a[8:2]), .be(p_be), .wdata(p_wd),
-	.rdata(ctl_rdata), .irq(ctl_irq), .mon_std, .mon_ext,
-	.sw_params, .fb_base, .row_words, .enables(ctl_enables), .timing_on, .hs_pos, .vs_pos,
-	.vbl_start_tog, .vbl_end_tog
+	.sel(p_sel & p_dev[4]), .we(p_we), .addr(p_a[23:2]), .be(p_be), .wdata(p_wd),
+	.rdata(pci_rdata), .ctl_regs_base(pci_unused_regs), .ctl_vram_base(pci_unused_vram)
 );
+
+// ---- Taos: its registers and colour table -------------------------------------------------
+logic [31:0] taos_rdata;
+logic [31:0] taos_fb_base, taos_row_words, taos_crt_ctrl;
+logic        taos_color16;
+logic [1:0]  taos_video_mode;
+logic [479:0] taos_swatch;
+logic        taos_vsync;
+
+Pippin_taos taos (
+	.clk, .reset(board_reset),
+	.sel(p_sel & p_dev[6]), .clut_sel(p_sel & p_dev[5]), .we(p_we), .addr(p_a[10:2]), .be(p_be), .wdata(p_wd),
+	.rdata(taos_rdata), .mon_id, .tray_closed, .vsync(taos_vsync),
+	.fb_base(taos_fb_base), .row_words(taos_row_words), .color16(taos_color16), .video_mode(taos_video_mode),
+	.crt_ctrl(taos_crt_ctrl), .swatch(taos_swatch),
+	.clk_v, .v_index_r(clut_index[23:16]), .v_index_g(clut_index[15:8]), .v_index_b(clut_index[7:0]),
+	.v_rgb(clut_rgb)
+);
+assign taos_vsync = 1'b0;                 // the scan-out's, when it exists
+
+// the Control video's outputs, until Taos's scan-out replaces them: no picture
+assign timing_on  = 1'b0;
+assign sw_params  = 192'd0;
+assign fb_base    = 22'd0;
+assign row_words  = 15'd0;
+assign hs_pos     = 1'b0;
+assign vs_pos     = 1'b0;
 
 logic cuda_treq, cuda_cb1, cuda_cb2_oe, cuda_cb2_out;
 logic via_tip, via_byteack, via_cb2_oe, via_cb2_out;
@@ -693,13 +658,16 @@ Pippin_gc #(.SCSI_HZ(SCSI_HZ), .SOUND_IN_DMA(SOUND_IN_DMA)) gc (
 	.net_link, .net_tx_we, .net_tx_wa, .net_tx_wd, .net_tx_go, .net_tx_len, .net_tx_done,
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
-	.ctl_irq, .nmi(cuda_nmi),
+	.ctl_irq(1'b0), .nmi(cuda_nmi),
 	.mesh_rst, .mesh_bsy, .mesh_sel, .mesh_atn, .mesh_ack, .mesh_req, .mesh_msg, .mesh_cd, .mesh_io, .mesh_db,
 	.scsi_rst, .scsi_bsy, .scsi_sel, .scsi_atn, .scsi_ack, .scsi_req, .scsi_msg, .scsi_cd, .scsi_io, .scsi_db,
 	.dm_req(gdm_req), .dm_we(gdm_we), .dm_line(gdm_line), .dm_addr(gdm_addr), .dm_be(gdm_be),
 	.dm_wdata(gdm_wdata), .dm_ack(gdm_ack), .dm_rdata(gdm_rdata),
 	.snd_left, .snd_right, .snd_frame,
-	.dac_cr, .dbl_buf_cr, .cursor_x, .cursor_clut, .clk_v, .clut_index, .clut_rgb,
+	.dac_cr, .dbl_buf_cr, .cursor_x, .cursor_clut, .clk_v, .clut_index,
+	/* verilator lint_off PINCONNECTEMPTY */
+	.clut_rgb(),
+	/* verilator lint_on PINCONNECTEMPTY */
 	.dfin, .dfin_ch, .dfin_type, .dfin_info, .itr_ev, .itr_st, .itr8_ev, .itr8_st,
 	.fd_m_t, .fd_m_ok, .fd_m_fmt, .fd_m_dc42, .fd_rq_t, .fd_rq_lba, .fd_dn_t, .fd_ra, .fd_q
 );
@@ -776,52 +744,45 @@ Pippin_cuda #(.CLK_HZ(CPU_HZ), .CLK_HZ_FAST(CPU_HZ_FAST), .FAST_BOOT(CUDA_FAST_B
 	.dbg_cpi(cu_cpi), .dbg_fast(cu_fast)
 );
 
-// ---- Hammerhead (hammerhead.cpp:41-140) ---------------------------------------------------
-// One-byte registers 16 bytes apart, the byte in bits 31-24 of the word at
-// the register's address (dingusppc returns it in the most significant byte
-// of an access of any size). A write takes the access's first byte, and only
-// at the register's own address. The bank base registers (1C0-4F0, two per
-// bank, high byte first) are stored and read back, and place the RAM's banks
-// (above: "RAM: Hammerhead's banks"; dingusppc maps RAM flat whatever they say).
-localparam logic [7:0] HH_CPU_ID     = 8'h39;   // RISC machine, extended ID, TNT
-localparam logic [7:0] HH_MB_ID      = 8'h90;   // video bus present, no second PCI bus; burst ROM (machinetnt.cpp:125-126)
-localparam logic [7:0] HH_CPU_SPEED  = 8'h60;   // bus at 50 MHz (machinetnt.cpp:127)
-localparam logic [7:0] HH_WHO_AM_I   = 8'h10;   // the primary CPU
+// ---- Aspen's registers (aspen.cpp:76-133, aspen.h) -------------------------------------------
+// 32 word registers, repeated every 128 bytes. SYSTEM_ID (10) 40010000 and
+// CHIP_REV (14) 01000000 are read-only; MEM_CONFIG (18) takes the bank
+// sizes (the ROM writes AA000000 and then 40800000; the map above is fixed by
+// ram_mb, as dingusppc's is) and reads 0, as in dingusppc; GPIO_ENABLE (34)
+// keeps its top byte; GPIO_IN (30) and GPIO_OUT (38) read 0. A narrow read
+// takes its bytes from the word (dingusppc returns the whole word for any
+// size, which the CPU then truncates: a byte read of SYSTEM_ID gives 00
+// there, 40 here, the bus's big-endian answer).
+localparam logic [31:0] ASPEN_SYSTEM_ID = 32'h4001_0000;
+localparam logic [31:0] ASPEN_CHIP_REV  = 32'h0100_0000;
 
-logic [7:0]  hh_arb;
-logic [31:0] hh_rdata;
-wire  [7:0]  hh_reg   = p_a[11:4];              // register number: offset >> 4
-wire         hh_bank_r = hh_reg >= 8'h1C && hh_reg <= 8'h4F;
-wire  [5:0]  hh_n     = 6'(hh_reg - 8'h1C);     // bank * 2 + (1 for the low byte)
-wire         hh_at    = p_a[3:2] == 2'b00 && p_be[3];  // the access starts at the register
-wire  [7:0]  hh_wbyte = p_wd[31:24];
+logic [7:0]  asp_gpio_en;
+logic [31:0] asp_mem_config;
+logic [31:0] asp_rdata;
+wire  [4:0]  asp_reg = p_a[6:2];
 
 always_ff @(posedge clk) begin
 	if (p_sel & p_dev[2]) begin
-		if (hh_bank_r) begin
-			hh_rdata <= {hh_n[0] ? hh_bank[hh_n[5:1]][7:0] : hh_bank[hh_n[5:1]][15:8], 24'h0};
-			if (p_we & p_be[3]) begin
-				if (hh_n[0]) hh_bank[hh_n[5:1]][7:0]  <= hh_wbyte;
-				else         hh_bank[hh_n[5:1]][15:8] <= hh_wbyte;
-			end
-		end
-		else begin
-			case (hh_reg)
-				8'h00:   hh_rdata <= {hh_at ? HH_CPU_ID    : 8'h00, 24'h0};
-				8'h02:   hh_rdata <= {hh_at ? HH_MB_ID     : 8'h00, 24'h0};
-				8'h03:   hh_rdata <= {hh_at ? HH_CPU_SPEED : 8'h00, 24'h0};
-				8'h09:   hh_rdata <= {hh_at ? hh_arb       : 8'h00, 24'h0};
-				8'h0B:   hh_rdata <= {hh_at ? HH_WHO_AM_I  : 8'h00, 24'h0};
-				default: hh_rdata <= 32'h0;     // L2 cache configuration (0E) included: no L2
-			endcase
-			if (p_we & hh_at & hh_reg == 8'h09) hh_arb <= hh_wbyte;
+		case (asp_reg)
+			5'd4:    asp_rdata <= ASPEN_SYSTEM_ID;
+			5'd5:    asp_rdata <= ASPEN_CHIP_REV;
+			5'd13:   asp_rdata <= {asp_gpio_en, 24'h0};
+			default: asp_rdata <= 32'h0;
+		endcase
+		if (p_we & p_be[3]) begin
+			if (asp_reg == 5'd6)  asp_mem_config <= p_wd;
+			if (asp_reg == 5'd13) asp_gpio_en    <= p_wd[31:24];
 		end
 	end
 	if (reset) begin
-		hh_arb <= 8'h0;
-		for (int i = 0; i < 26; i++) hh_bank[i] <= 16'h0;
+		asp_gpio_en    <= 8'h0;
+		asp_mem_config <= 32'h0;
 	end
 end
+
+// ---- the save flash: not yet (Am29F010 at 40000000); reads all ones, as an erased part ---------
+logic [31:0] fl_rdata;
+always_ff @(posedge clk) if (p_sel & p_dev[7]) fl_rdata <= 32'hFFFF_FFFF;
 
 // ---- the memory-test boot program, in place of the ROM when the OSD asks ------------------
 logic [31:0] boot_rdata;
@@ -852,7 +813,7 @@ always_ff @(posedge clk) begin
 	if (dev_take) begin
 		dev_busy  <= 1'b1;
 		dev_cnt   <= 4'd1;
-		dev_sel_q <= {q_is_ctl, q_is_cha, q_is_ban, q_is_gc, q_is_hh, q_is_dbg, q_is_boot};
+		dev_sel_q <= {q_is_fl, q_is_taos, q_is_clut, q_is_pci, q_is_gc, q_is_asp, q_is_dbg, q_is_boot};
 	end
 	else if (dev_busy) dev_cnt <= dev_cnt + 4'd1;
 	// the answer is in line_buf the cycle after the devices' (a word's in
@@ -867,7 +828,7 @@ always_ff @(posedge clk) begin
 		dev_busy  <= 1'b0;
 		dev_ack   <= 1'b0;
 		dev_cnt   <= 4'd0;
-		dev_sel_q <= 7'b0;
+		dev_sel_q <= 8'b0;
 		pq_sel    <= 1'b0;
 	end
 end
@@ -875,11 +836,11 @@ end
 logic [31:0] dev_rdata;
 always_comb begin
 	dev_rdata = 32'h0;
-	if (dev_sel_q[6]) dev_rdata = ctl_rdata;
-	if (dev_sel_q[5]) dev_rdata = cha_rdata;
-	if (dev_sel_q[4]) dev_rdata = ban_rdata;
+	if (dev_sel_q[7]) dev_rdata = fl_rdata;
+	if (dev_sel_q[6] | dev_sel_q[5]) dev_rdata = taos_rdata;
+	if (dev_sel_q[4]) dev_rdata = pci_rdata;
 	if (dev_sel_q[3]) dev_rdata = gc_rdata;
-	if (dev_sel_q[2]) dev_rdata = hh_rdata;
+	if (dev_sel_q[2]) dev_rdata = asp_rdata;
 	if (dev_sel_q[1]) dev_rdata = dbg_rdata;
 	if (dev_sel_q[0]) dev_rdata = boot_rdata;
 end
@@ -925,7 +886,7 @@ assign tr_rec = sd_tr_ev ? sd_tr_rec :
                            {160'd0, adb_tr_info, bt_us, 24'd0, 8'd6};
 
 assign c_ack   = cpu_m_ack | dev_ack | v_ack;
-assign c_rdata = v_ack    ? v_swl(v_rdata, v_swap) :
+assign c_rdata = v_ack    ? v_rdata :
                  ~dev_ack ? m_rdata :
                  c_line   ? {line_buf[0], line_buf[1], line_buf[2], line_buf[3],
                              line_buf[4], line_buf[5], line_buf[6], line_buf[7]} :

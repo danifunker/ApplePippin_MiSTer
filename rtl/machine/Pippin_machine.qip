@@ -1,4 +1,4 @@
-# MacPPC7300 machine sources (the 7600 around the CPU). The package must stay first.
+# The Pippin machine sources (the Pippin around the CPU). The package must stay first.
 # verilator/Makefile reads its file list from here.
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_pkg.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_pcicfg.sv]
@@ -21,6 +21,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) P
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_radacal.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_athens.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_control.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_taos.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_video.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_gc.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) Pippin_bootrom.sv]

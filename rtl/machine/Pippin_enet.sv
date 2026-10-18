@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The Ethernet bridge's DDR3 side: MACE's frames to and from the Main
 //  (support/mac/mac_eth.cpp, the "macppc7300" card), through rings in DDR3
 //

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  MacPPC7300 - the machine around the CPU
+//  Pippin - the machine around the CPU
 //  The CPU, the machine and the clock crossing to memory, as one block
 //
 //    DSPPC603 --(memory port)--> Pippin_machine --(RAM, ROM)--> Pippin_l2 --> DSPPC603_memcdc --> b_*
@@ -19,10 +19,10 @@
 
 module Pippin_system
 #(
-	parameter int unsigned CPU_HZ   = 65_000_000,
+	parameter int unsigned CPU_HZ   = 66_000_000,
 	parameter int unsigned CPU_HZ_FAST = CPU_HZ,    // the clock with cpu_fast (the OSD's CPU speed)
-	parameter int unsigned TB_HZ    = 12_500_000,
-	parameter int unsigned L2_KB    = 128,          // the L2 cache (Pippin_l2)
+	parameter int unsigned TB_HZ    = 16_500_000,     // the 603's time base: a quarter of its 66 MHz bus
+	parameter int unsigned L2_KB    = 0,            // the L2 cache (Pippin_l2): the Pippin has none
 	parameter int unsigned CUDA_FAST_BOOT = 0,      // 1: the test bench's (Pippin_cuda FAST_BOOT)
 	parameter int unsigned TRACE = 1,               // 0: no DDR3 trace (Pippin_trace)
 	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
@@ -90,8 +90,8 @@ module Pippin_system
 	output logic         nv_wr_cpu,
 
 	// the monitor: its AppleSense codes
-	input  logic [2:0]   mon_std,
-	input  logic [5:0]   mon_ext,
+	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 6 VGA, 3 PAL
+	input  logic         tray_closed,
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them
 	// (the ADB devices synchronise them)
@@ -285,7 +285,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.net_link, .net_tx_we, .net_tx_wa, .net_tx_wd, .net_tx_go, .net_tx_len, .net_tx_done,
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
-	.mon_std, .mon_ext, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
+	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
 	.timing_on, .sw_params, .fb_base, .row_words, .hs_pos, .vs_pos, .dac_cr, .dbl_buf_cr,
 	.cursor_x, .cursor_clut, .athens_d2, .athens_n2, .athens_p2, .vbl_start_tog, .vbl_end_tog,
