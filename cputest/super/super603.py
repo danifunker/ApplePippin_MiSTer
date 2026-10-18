@@ -259,6 +259,45 @@ def bclr_l():
     return (19 << 26) | (20 << 21) | (16 << 1) | 1       # blrl
 
 
+# HID0 bits the 603e manual (Table 2-2) calls reserved, or the 603e's only
+# (IFEM, ABE): 1, 13-15 (15 is NHR), 22-26, 28-30. Setting or clearing them
+# touches neither the caches nor the power modes.
+HID0_RESERVED = 0x400703EE
+
+
+def q603_sequences():
+    """What DSPPC603 assumed without a measurement (docs/DSPPC603_notes.md,
+    "Not explained, or not measured"); the SPR sweep and the probe group
+    answer the rest (mfspr of every number in both modes, the whole PVR)."""
+    vs = []
+
+    def add(name, code, **kw):
+        vs.append(SVector(name, "q603", code, **kw))
+
+    pat = [0, 0xFFFFFFFF, 0, 0xA5A5A5A5, 0, 0]
+    # the table search registers written and read back; HASH1 and HASH2 are
+    # read-only in the manual: does mtspr to them trap, or do nothing?
+    for spr, name in ((IMISS, "IMISS"), (ICMP, "ICMP"), (HASH1, "HASH1"), (HASH2, "HASH2")):
+        add("mtspr-" + name.lower(), [mfspr(3, spr), mtspr(spr, 4), isync(), mfspr(5, spr),
+                                      mtspr(spr, 6), isync(), mfspr(7, spr), mtspr(spr, 3), isync()], r=pat)
+    # HID0's reserved bits: which stay set, which stay clear (r5: after
+    # setting them all, r8: after clearing them all; r3 the value before)
+    add("hid0-reserved", [mfspr(3, HID0), or_(4, 3, 6), sync(), mtspr(HID0, 4), isync(), mfspr(5, HID0),
+                          and_(4, 3, 7), sync(), mtspr(HID0, 4), isync(), mfspr(8, HID0),
+                          sync(), mtspr(HID0, 3), isync()],
+        r=[0, 0, 0, HID0_RESERVED, (~HID0_RESERVED) & 0xFFFFFFFF, 0])
+    # MSR[ILE] kept by mtmsr (svectors' MSR group leaves bit 15 out)
+    add("mtmsr-00010000", [mfmsr(3), mtmsr(4), isync(), mfmsr(5), mtmsr(3), isync()],
+        r=[0, MSR_SAFE | 0x10000, 0, 0, 0, 0])
+    # MSR[TGPR] by mtmsr: kept? and does it remap GPR0-3 at once? Nothing
+    # below r4 is used while it may be on (svectors' mtmsr-00020000 restores
+    # the MSR from r3, which TGPR would remap: left out for this group)
+    add("mtmsr-tgpr", [mfmsr(6), mtmsr(4), isync(), mfmsr(5), addi(3, 0, 0x777), addi(7, 3, 0),
+                       mtmsr(6), isync()],
+        r=[0x3333, MSR_SAFE | 0x20000, 0, 0, 0, 0])
+    return vs
+
+
 def build_set(base, groups, skip=(), skip_groups=()):
     """skip: sequence names left out (instructions an emulator aborts on)."""
     vs = []
@@ -269,6 +308,11 @@ def build_set(base, groups, skip=(), skip_groups=()):
             vs.append(v)
     if groups in ("all", "basic", "tlb"):
         vs += tlb_sequences(base)
+    if groups in ("all", "basic", "q603"):
+        vs += q603_sequences()
+        # replaced by q603's mtmsr-tgpr: with TGPR on, a real 603 reads the
+        # shadow r3 when svectors' version restores the MSR from r3
+        skip = tuple(skip) + ("mtmsr-00020000",)
     return [v for v in vs if v.name not in skip and v.group not in skip_groups]
 
 
@@ -1061,7 +1105,7 @@ def main():
 
     def common(sp):
         sp.add_argument("--base", type=lambda s: int(s, 0), default=0x100000, help="load address, 64 KB aligned")
-        sp.add_argument("--groups", default="basic", choices=("all", "basic", "sweep", "tlb"),
+        sp.add_argument("--groups", default="basic", choices=("all", "basic", "sweep", "tlb", "q603"),
                         help="basic: everything but the opcode/SPR sweeps (default)")
         sp.add_argument("--skip", default="", type=lambda s: tuple(x for x in s.split(",") if x),
                         help="sequence names to leave out, comma-separated (mame: %s)" % ",".join(MAME_SKIP))

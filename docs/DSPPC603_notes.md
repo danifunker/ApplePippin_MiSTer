@@ -137,13 +137,39 @@ Open in the manual: 4-30 names `eciwx`/`ecowx` among the unimplemented
 optional instructions, but Table B-1 (B-1), the complete list, does not;
 DSPPC603 keeps them as DSPPC604 has them (a DSI unless EAR[E]).
 
+## The PVR in the Pippin's ROM
+
+The Kinka 1.0 ROM (`disasm/kinka-1.0`, the dev ROM the same) reads PVR in
+21 places: `ppc_exception_table.s` (6), `nanokernel.s` (8), `hwinit/text.s`
+(2), `openfirmware/of_native.s` (7, one of them Forth's `<pvr1@>`). Every
+one but two looks at the version half only: `srwi 16` then a compare with
+1 (601), 3 (603), 4 (604), 6 or 7 (603e), or `andis. 0xFFFE` to set the 601
+apart. The two exceptions keep the whole word as data: the NanoKernel
+stores it at 0xF80 of its globals (`nanokernel.s:280`, FFF103D4) and hands
+it to software from there (FFF13A3C, its emulation of a supervisor-register
+read); Open Firmware's `<pvr1@>` returns it. So no ROM behaviour depends
+on the revision: any `0003xxxx` boots the same; only software that prints
+the revision would show a difference.
+
+The reset code at FFF03000 sets HID0 per version; for a 603 or 603e
+(FFF03048) it ORs in EMCP, ECLK, NAP, DPM, ICE and DCE (`8250C000`), every
+bit inside DSPPC603's `HID0_MASK`.
+
 ## Not explained, or not measured
 
-- The low half of the Pippin's PVR, and whether reserved MSR and HID0 bits
-  read back as written: the supervisor run on the 6300 (or a Pippin) will
-  tell.
-- `mfspr` 268/269 (the time base through mfspr) is kept as the 604 has it.
+Each of these is assumed in DSPPC603 and has a supervisor-mode sequence in
+`cputest/super/super603.py` waiting for a real 603 or 603e (the 6300 needs
+the MkLinux Booter route, `cputest/README.md` section 3):
 
+| Assumption in DSPPC603 | Sequence(s) |
+|---|---|
+| user-mode `mfspr 1023` (PIR, absent) is illegal, as 1009 on the 604 | `sprsweep` (every number, both modes) |
+| `mfspr` 268/269 work as on the 604, in user mode too | `sprsweep`, `probe tb-user` |
+| `mtspr` to HASH1/HASH2 is illegal | `q603 mtspr-hash1`, `mtspr-hash2` |
+| IMISS, ICMP, DMISS, DCMP, RPA keep every bit written | `q603 mtspr-imiss`, `mtspr-icmp`; `tlb603 mtspr-dmiss`, `mtspr-rpa` |
+| HID0 keeps the defined bits only (`BFF8F011`) | `q603 hid0-reserved` |
+| MSR keeps `0007FF73` (no reserved bits, no PM) | `msr` (every bit), `q603 mtmsr-00010000`, `mtmsr-tgpr` |
+| the revision half of PVR (no ROM behaviour depends on it, above) | `probe mfmsr` |
 ## How it is checked
 
 ```

@@ -218,6 +218,19 @@ State on 2026-10-16:
   sequence. Before that rule existed the handler searched whatever SDR1
   pointed at and the run went astray after `dsi-ro-store`; found by
   bisecting with `--skip-groups`/`--skip`.
+- `--groups q603` (2026-10-18, also part of `basic` and `all`): seven
+  sequences for what DSPPC603 assumed without a measurement
+  (`docs/DSPPC603_notes.md`): IMISS, ICMP, HASH1 and HASH2 written and read
+  back (does `mtspr` to the read-only HASH1/2 trap?), HID0's reserved bits
+  set and cleared (`HID0_RESERVED`, no cache or power bits), MSR[ILE] by
+  `mtmsr`, and MSR[TGPR] by `mtmsr` with a write to r3 while it is on (is
+  the shadow r3 used at once?). It replaces svectors' `mtmsr-00020000`,
+  which restores the MSR from r3 and on a real 603 would read the shadow
+  r3. Under MAME all seven run (`runs/sresults_603_mame_q603.csv`); MAME's
+  answers (writes to the miss registers ignored, `mtspr` HASH1 not trapped,
+  every HID0 bit kept, r3 remapped) are only the mechanism. The rest of the
+  open items come from groups already here: the whole PVR from `probe`,
+  `mfspr` 268/269/1009/1023 in both modes from `sprsweep`.
 - `--groups sweep`: not possible under MAME. Its 603 aborts the emulator on
   an instruction it has not implemented (`eciwx` first, then others in the
   opcode sweep) instead of raising the program exception; `MAME_SKIP` holds

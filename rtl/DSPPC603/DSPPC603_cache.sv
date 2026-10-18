@@ -367,7 +367,8 @@ wire k_icbi  = (r_kind == CK_ICBI);
 // locked, or a store miss on a write-through page
 wire unc = k_word & (r_ci | ~enable | (lock & ~hit) | (WRITABLE & r_we & r_wt & ~hit));
 
-wire way_t wsel = hit ? hit_sel : victim;   // the way a line-zero takes
+way_t wsel;                                 // the way a line-zero takes
+assign wsel = hit ? hit_sel : victim;
 
 // the answer: as decided in this cycle, or from a register a cycle later
 logic        ans_now, ans_q;
