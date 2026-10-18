@@ -1,0 +1,195 @@
+//============================================================================
+//
+//  DSPPC603 - PowerPC 604-class CPU core
+//  Integer execute unit
+//
+//  Holds no architectural state. The requester supplies operand values and
+//  the XER bits the instruction reads, and commits the results itself.
+//
+//  Handshake
+//    The requester holds req_valid, unit, ctl and the operands steady until
+//    the response is taken. A request starts in a cycle where req_valid and
+//    req_ready are both high. resp_valid then stays high, with the results,
+//    until a cycle in which resp_ready is high too; the requester moves on at
+//    the end of that cycle.
+//
+//    UNIT_ALU   resp_valid in the same cycle as the request (combinational)
+//    UNIT_MUL   resp_valid two cycles after the request
+//    UNIT_DIV   resp_valid 34 cycles after the request (1 for the
+//               architecturally undefined cases)
+//
+//    flush abandons a multiply or divide in progress.
+//
+//============================================================================
+
+module DSPPC603_int_unit
+(
+	input  logic        clk,
+	input  logic        reset,
+	input  logic        flush,
+
+	input  logic        req_valid,
+	output logic        req_ready,
+	input  DSPPC603_pkg::unit_t    unit,
+	input  DSPPC603_pkg::int_ctl_t ctl,
+	input  logic [31:0] a,
+	input  logic [31:0] b,
+	input  logic        ca_in,       // XER[CA]
+	input  logic        so_in,       // XER[SO]
+
+	output logic        resp_valid,
+	input  logic        resp_ready,
+	output logic [31:0] result,
+	output logic [31:0] sum,         // the ALU's adder alone (a + b): a memory access's effective address,
+	                                 // ahead of the result mux that the rotator feeds too
+	output logic        ca_out,      // new XER[CA], for instructions that set it
+	output logic        ov_out,      // new XER[OV], for instructions with OE
+	output logic [3:0]  cr_out,      // CR field: LT GT EQ SO
+	output logic        cmp_lts,     // the ALU's compare, signed and unsigned at once (traps)
+	output logic        cmp_ltu,
+	output logic        cmp_eq,
+	// each operation's own result (sum is the adder's): the pipeline chooses
+	// flat among them with selects registered with the operation, instead
+	// of behind the choice result makes here
+	output logic [31:0] alu_log, alu_rot, alu_clz, alu_exts, mul_hi, mul_lo, div_q
+);
+
+import DSPPC603_pkg::*;
+
+// ---- single-cycle ALU ------------------------------------------------------
+logic [31:0] alu_result;
+logic        alu_ca;
+logic        alu_ov;
+logic        alu_lt;
+logic        alu_gt;
+logic        alu_eq;
+logic        alu_zero, alu_neg;
+
+DSPPC603_alu alu
+(
+	.ctl    (ctl),
+	.a      (a),
+	.b      (b),
+	.ca_in  (ca_in),
+	.result (alu_result),
+	.sum    (sum),
+	.ca_out (alu_ca),
+	.ov_out (alu_ov),
+	.lt     (alu_lt),
+	.gt     (alu_gt),
+	.eq     (alu_eq),
+	.lt_s   (cmp_lts),
+	.lt_u   (cmp_ltu),
+	.zero   (alu_zero),
+	.neg    (alu_neg),
+	.log_o  (alu_log),
+	.rot_o  (alu_rot),
+	.clz_o  (alu_clz),
+	.exts_o (alu_exts)
+);
+
+assign cmp_eq = alu_eq;
+
+// ---- multiply and divide ---------------------------------------------------
+typedef enum logic [1:0] {
+	S_IDLE,
+	S_MUL1,
+	S_MUL2,
+	S_DIV
+} state_t;
+
+state_t state;
+
+wire start     = req_valid & (state == S_IDLE);
+wire mul_start = start & (unit == UNIT_MUL);
+wire div_start = start & (unit == UNIT_DIV);
+
+logic [63:0] mul_product;
+
+DSPPC603_mul mul
+(
+	.clk       (clk),
+	.load      (mul_start),
+	.is_signed (ctl.is_signed),
+	.a         (a),
+	.b         (b),
+	.product   (mul_product)
+);
+
+logic        div_done;
+logic [31:0] div_quotient;
+logic        div_overflow;
+
+DSPPC603_div div
+(
+	.clk       (clk),
+	.reset     (reset),
+	.start     (div_start),
+	.abort     (flush),
+	.ack       (resp_ready),
+	.is_signed (ctl.is_signed),
+	.a         (a),
+	.b         (b),
+	.done      (div_done),
+	.quotient  (div_quotient),
+	.overflow  (div_overflow)
+);
+
+always_ff @(posedge clk) begin
+	case (state)
+		S_IDLE:  if (mul_start) state <= S_MUL1;
+		         else if (div_start) state <= S_DIV;
+		S_MUL1:  state <= S_MUL2;
+		S_MUL2:  if (resp_ready) state <= S_IDLE;
+		default: if (div_done & resp_ready) state <= S_IDLE;
+	endcase
+
+	if (reset | flush) state <= S_IDLE;
+end
+
+assign req_ready = (state == S_IDLE);
+assign mul_hi = mul_product[63:32];
+assign mul_lo = mul_product[31:0];
+assign div_q  = div_quotient;
+
+// ---- results ---------------------------------------------------------------
+logic so_new;
+logic res_zero, res_neg;   // (found per unit, before the result's choice: CR0 is not behind it)
+
+always_comb begin
+	ca_out = alu_ca;
+
+	case (unit)
+		UNIT_MUL: begin
+			resp_valid = req_valid & (state == S_MUL2);
+			result     = ctl.mul_high ? mul_product[63:32] : mul_product[31:0];
+			res_zero   = ctl.mul_high ? ~(|mul_product[63:32]) : ~(|mul_product[31:0]);
+			res_neg    = ctl.mul_high ? mul_product[63] : mul_product[31];
+			// mullwo: the product does not fit in 32 bits
+			ov_out     = (mul_product[63:32] != {32{mul_product[31]}});
+		end
+		UNIT_DIV: begin
+			resp_valid = req_valid & (state == S_DIV) & div_done;
+			result     = div_quotient;
+			res_zero   = ~(|div_quotient);
+			res_neg    = div_quotient[31];
+			ov_out     = div_overflow;
+		end
+		default: begin
+			resp_valid = req_valid & (unit == UNIT_ALU);
+			result     = alu_result;
+			res_zero   = alu_zero;
+			res_neg    = alu_neg;
+			ov_out     = alu_ov;
+		end
+	endcase
+
+	so_new = so_in | (ctl.oe & ov_out);
+
+	if (unit == UNIT_ALU && ctl.alu_op == ALU_CMP)
+		cr_out = {alu_lt, alu_gt, alu_eq, so_in};
+	else
+		cr_out = {res_neg, ~res_neg & ~res_zero, res_zero, so_new};
+end
+
+endmodule
