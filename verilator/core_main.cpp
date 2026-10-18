@@ -166,6 +166,7 @@ struct Options {
 	std::vector<MouseMove> mouse;  // PS/2 mouse packets, each after so many instructions
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
+	std::string vram_dump;         // the VRAM's DDR3 as the run ends, raw (VRAM byte order)
 	std::string disk[2];           // disk images for SCSI IDs 0 and 1 (hps_io slots 0 and 1)
 	std::string cd;                // a CD's CUE sheet, served on slot 4 as the Main's Mac CD layer
 	unsigned disk_latency = 2000;  // memory clocks from a block request to hps_io's acknowledge
@@ -393,6 +394,7 @@ void usage() {
 		"                   window's low 22 bits: both apertures, wide mode, 8 bits a\n"
 		"                   pixel), and check every CPU read of a byte written before\n"
 		"  --vram-log FILE  write every CPU access to the VRAM window\n"
+		"  --vram-dump FILE write the VRAM's DDR3 as the run ends (raw, VRAM byte order)\n"
 		"  --disk0 FILE --disk1 FILE   disk images for SCSI IDs 0 and 1 on MESH (hps_io\n"
 		"                   slots 0 and 1; blocks written are kept in memory, the file\n"
 		"                   is not changed)\n"
@@ -781,6 +783,7 @@ int main(int argc, char** argv) {
 		}
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
+		else if (a == "--vram-dump") opt.vram_dump = next();
 		else if (a == "--disk0") opt.disk[0] = next();
 		else if (a == "--cd") opt.cd = next();
 		else if (a == "--disk1") opt.disk[1] = next();
@@ -1071,7 +1074,7 @@ int main(int argc, char** argv) {
 	size_t mouse_next = 0;
 	// the VRAM window as the CPU wrote it: every byte's value and whether it
 	// has been written
-	const uint32_t VWIN = 0x90000000u, VWIN_SIZE = 64u << 20, VRAM_MASK = (4u << 20) - 1;
+	const uint32_t VWIN = VRAM_BASE, VWIN_SIZE = VRAM_SIZE, VRAM_MASK = (4u << 20) - 1;
 	std::vector<uint8_t> vshadow, vknown;
 	if (opt.vram_check) { vshadow.assign(VRAM_MASK + 1, 0); vknown.assign(VRAM_MASK + 1, 0); }
 	uint64_t v_lr = 0, v_lw = 0, v_wr = 0, v_ww = 0, v_bad = 0;
@@ -1210,7 +1213,7 @@ int main(int argc, char** argv) {
 	// the DDR3's recent traffic (for --vram-check's report), and how many
 	// CPU reads the picture side answered differently from the DDR3
 	std::deque<std::string> ddr_hist;
-	uint64_t ddr_bad = 0;
+	uint64_t ddr_bad = 0, vp_reads = 0, vp_writes = 0;
 	auto ddr_note = [&](const char* fmt, ...) {
 		char b[160];
 		va_list ap;
@@ -1244,6 +1247,7 @@ int main(int argc, char** argv) {
 				}
 			}
 		}
+		if (dut->vram_ack) (dut->vram_we ? vp_writes : vp_reads)++;
 		if (dut->vram_ack) ddr_note("%llu: answer %s %s %06X", (unsigned long long)sd.clocks, dut->vram_we ? "W" : "R",
 			dut->vram_line ? "line" : "word", (uint32_t)dut->vram_addr << 2);
 		ddr.ready = false;
@@ -2167,6 +2171,15 @@ int main(int argc, char** argv) {
 		std::printf("instruction fetches outside RAM and ROM: %llu (separate from data comparison)\n",
 			(unsigned long long)devq.instruction_reads);
 	if (vlog) std::fclose(vlog);
+	std::printf("vram port: %llu reads and %llu writes answered\n", (unsigned long long)vp_reads, (unsigned long long)vp_writes);
+	if (!opt.vram_dump.empty()) {
+		// a DDR3 word's byte k is the VRAM's byte 8n + k
+		std::vector<uint8_t> img(Ddr::WORDS * 8);
+		for (uint32_t w = 0; w < Ddr::WORDS; w++)
+			for (int k = 0; k < 8; k++) img[8 * w + k] = (uint8_t)(ddr.m[w] >> (8 * k));
+		if (FILE* f = std::fopen(opt.vram_dump.c_str(), "wb")) { std::fwrite(img.data(), 1, img.size(), f); std::fclose(f); }
+		else std::printf("cannot write %s\n", opt.vram_dump.c_str());
+	}
 	if (xlog) { exc_summary("exceptions taken, by vector:"); std::fclose(xlog); }
 	if (sd.reads || sd.writes)
 		std::printf("disks: %llu blocks read, %llu written\n", (unsigned long long)sd.reads, (unsigned long long)sd.writes);
