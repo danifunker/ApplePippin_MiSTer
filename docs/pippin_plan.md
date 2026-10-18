@@ -180,19 +180,19 @@ release, not the board tests.
    1.3 here it is the default ROM from Day 1 (1.0 stays as the second ROM
    that must keep booting); Day 12's ROM work shrinks to the options. No
    Kickstart: the retail discs are signed and boot on the retail ROMs.
-3. **Board access, to work without waiting on you:** the MiSTer's address,
+2. **Board access, to work without waiting on you:** the MiSTer's address,
    an SSH key for it (MacPPC7300 used `~/.ssh/mister_only`), the MiSTer
    Remote (mrext, port 8182) running on it, and the board's HDMI on your
    capture if you want `kvms.py`. Without it, board tests 1 and 2 (Days 5
    and 8) need about 30 minutes of you each.
-4. **Main_MiSTer:** done 2026-10-18 on a new branch `pippin-cdrom` off
+3. **Main_MiSTer:** done 2026-10-18 on a new branch `pippin-cdrom` off
    your fork's `master` (00bdff0, which already has MacPPC7300's CD support),
    in the worktree `~/repos/Main_MiSTer-pippin`: `applepippin` added to
    `is_mac_scsi_family()` and `is_mac_scsi_optimized()` (commit 0e25569, not
    pushed). It builds with `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf`
    on the PATH (`bin/MiSTer`); it goes on the board with the first disc test
    (Day 6-8).
-5. **A real Pippin:** if you have one, a few measurements would settle what
+4. **A real Pippin:** if you have one, a few measurements would settle what
    the emulators guess (Taos, Aspen, the PVR); not needed for the plan.
 
 ## 9. After the two weeks (in order)
