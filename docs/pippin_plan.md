@@ -207,3 +207,31 @@ release, not the board tests.
    `q603` and `tlb603` questions on real silicon).
 4. Taos's flicker convolution for interlaced output on CRTs.
 5. The floppy dock (SWIM3 is already there).
+
+## 10. Progress log
+
+**2026-10-18 (Day 1, with parts of Days 3-7).** Branch `pippin`.
+
+- The machine: MacPPC7300's machine RTL imported as `rtl/machine/Pippin_*`
+  and changed for the Pippin: Aspen's banked RAM with its sizing windows,
+  registers and PCI (Grand Central at device 16); Taos's registers, colour
+  table, VRAM and scan-out (`Pippin_taosvideo`: its own timing registers,
+  NTSC interlaced as two fields, 16-bit pixels through the table); Athens at
+  I2C 29 on its 20 MHz crystal; the save flash (`Pippin_flash`, Am29F010,
+  passes its unit bench); the AppleJack on ADB (controller 5); CPU 70 MHz
+  (MacPPC7300's PLL), time base 16.5 MHz, no L2.
+- The bench: `run_machine.py` runs the whole Pippin in lockstep with
+  dingusppc's CPU; its reference memory is Aspen's map (banks, windows, the
+  holes as devices) with Taos's VRAM as RAM. Kinka 1.3: Cuda powers the
+  machine up, then **23.2 million instructions in lockstep** (memory
+  sizing, PCI, Open Firmware, the NanoKernel's SPR probes, into Mac OS),
+  until a bench fault (the VRAM was device space to the reference; fixed,
+  being rerun).
+- The MiSTer top (`ApplePippin.sv`, from MacPPC7300's): the OSD (ROM, CD on
+  slot 4, the save flash on slot 2, RAM 5/13/21 MB, video NTSC/VGA/PAL, the
+  AppleJack first), Taos's field to the framework. Quartus Analysis &
+  Synthesis passes; no fit yet.
+- Main_MiSTer `pippin-cdrom`: the core's name in the Mac SCSI family; builds.
+- Lessons: Verilator builds at `-j 3` (an OOM reboot at -j 0 next to a
+  Quartus fit); the dingusppc Pippin's logo frame (Kinka 1.3, 300 M
+  instructions) is the reference for the first picture.

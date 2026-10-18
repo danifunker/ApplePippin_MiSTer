@@ -251,6 +251,21 @@ int ref_add_ram(uint32_t base, uint32_t size) {
     return 0;
 }
 
+static std::vector<std::unique_ptr<uint8_t[]>> g_ram_extra;   /* ref_add_ram_own's buffers */
+
+int ref_add_ram_own(uint32_t base, uint32_t size) {
+    if (!g_ready || !g_mem || (base & (PAGE - 1)) || (size & (PAGE - 1)))
+        return -1;
+    try {
+        g_ram_extra.emplace_back(new uint8_t[size + RAM_GUARD]());
+        if (!g_mem->add_ram_region(base, size, g_ram_extra.back().get()))
+            return -1;
+    } catch (...) {
+        return -1;
+    }
+    return 0;
+}
+
 int ref_add_mirror(uint32_t start, uint32_t dest, uint32_t offset, uint32_t size) {
     if (!g_ready || !g_mem)
         return -1;
@@ -277,6 +292,7 @@ int ref_init(uint32_t ram_size, uint32_t pvr) {
 
     delete g_mem;
     g_mem = nullptr;
+    g_ram_extra.clear();
     g_mmio.clear();
     free(g_ram);
     g_ram = static_cast<uint8_t *>(calloc(size_t(size) + RAM_GUARD, 1));

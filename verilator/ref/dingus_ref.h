@@ -75,6 +75,8 @@ int      ref_translate_dbg(uint32_t ea, uint32_t *pa);
 int      ref_init_map(uint32_t span, uint32_t pvr);
 int      ref_add_ram(uint32_t base, uint32_t size);
 int      ref_add_mirror(uint32_t start, uint32_t dest, uint32_t offset, uint32_t size);
+/* RAM at base in a buffer of its own (not ref_ram()'s): the Pippin's video RAM */
+int      ref_add_ram_own(uint32_t base, uint32_t size);
 
 /* Read-only memory at base (instructions can be fetched from it, as from RAM).
    The data is copied. Returns 0, or -1 if the range overlaps another region. */

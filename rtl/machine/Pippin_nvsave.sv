@@ -18,6 +18,9 @@
 //  With no image mounted nothing happens: the NVRAM starts as it does
 //  without this module (zeros, or boot1.rom's image).
 //
+//  ABITS sets the size: 13 (8 KB, 16 blocks: the NVRAM), 17 (128 KB, 256
+//  blocks: the Pippin's save flash, Pippin_flash, on the same slot).
+//
 //  hps_io's side (sd_*) is the block interface the disks use: rd or wr held
 //  until sd_ack rises, the block moved while sd_ack is high (sd_buff_wr with
 //  the bytes for a read; sd_buff_din one clock after sd_buff_addr for a
@@ -30,7 +33,8 @@
 
 module Pippin_nvsave
 #(
-	parameter int unsigned CLK_HZ = 100_000_000
+	parameter int unsigned CLK_HZ = 100_000_000,
+	parameter int unsigned ABITS  = 13              // the image's size: 2 ** ABITS bytes
 )
 (
 	input  logic        clk,
@@ -56,18 +60,21 @@ module Pippin_nvsave
 	// the byte channel to the NVRAM
 	output logic        b_req,
 	output logic        b_we,
-	output logic [12:0] b_addr,
+	output logic [ABITS-1:0] b_addr,
 	output logic [7:0]  b_wdata,
 	input  logic        b_done,
 	input  logic [7:0]  b_rdata
 );
 
 localparam int unsigned SETTLE = CLK_HZ * 2;          // 2 s
+localparam int unsigned BB     = ABITS - 9;           // bits of the block number
+localparam logic [63:0] SIZE   = 64'd1 << ABITS;
+localparam logic [BB-1:0] LAST = {BB{1'b1}};
 
 typedef enum logic [2:0] {S_IDLE, S_LD_RD, S_LD_WAIT, S_LD_PUT, S_SV_GET, S_SV_WR, S_SV_WAIT} st_t;
 st_t         s;
 logic        ok, ro;                  // an image of 8 KB or more; read-only
-logic [3:0]  blk;                     // the block in hand
+logic [BB-1:0] blk;                   // the block in hand
 logic [9:0]  idx;                     // the byte in hand (10 bits: 512 ends the block)
 logic        acked;                   // hps_io has taken the block request
 logic        dirty;
@@ -89,7 +96,7 @@ always_ff @(posedge clk) begin
 	buf_qa <= buf_ra;
 end
 assign sd_buff_din = buf_q;
-assign sd_lba      = {28'h0, blk};
+assign sd_lba      = 32'(blk);
 assign hold        = s == S_LD_RD || s == S_LD_WAIT || s == S_LD_PUT;
 
 wire dirty_ev = dt_s[2] != dt_s[1];
@@ -107,16 +114,16 @@ always_ff @(posedge clk) begin
 	case (s)
 		S_IDLE: begin
 			if (img_mounted) begin
-				ok <= img_size >= 64'd8192;
+				ok <= img_size >= SIZE;
 				ro <= img_readonly;
-				if (img_size >= 64'd8192) begin
-					blk <= 4'd0;
+				if (img_size >= SIZE) begin
+					blk <= '0;
 					s   <= S_LD_RD;
 				end
 			end
 			else if (ok && !ro && dirty && !dirty_ev && (settle == 32'd0 || (osd_open && !osd_q))) begin
 				dirty <= 1'b0;                   // writes from now on make it dirty again
-				blk   <= 4'd0;
+				blk   <= '0;
 				idx   <= 10'd0;
 				s     <= S_SV_GET;
 			end
@@ -141,8 +148,8 @@ always_ff @(posedge clk) begin
 		S_LD_PUT: begin                          // buf_q is the byte at idx a clock after
 			if (!b_req) begin
 				if (idx == 10'd512) begin
-					blk <= blk + 4'd1;
-					if (blk == 4'd15) begin
+					blk <= blk + 1'b1;
+					if (blk == LAST) begin
 						dirty <= 1'b0;
 						s     <= S_IDLE;
 					end
@@ -188,9 +195,9 @@ always_ff @(posedge clk) begin
 			else if (acked) s <= S_SV_WAIT;
 		end
 		S_SV_WAIT: begin
-			blk <= blk + 4'd1;
+			blk <= blk + 1'b1;
 			idx <= 10'd0;
-			s   <= (blk == 4'd15) ? S_IDLE : S_SV_GET;
+			s   <= (blk == LAST) ? S_IDLE : S_SV_GET;
 		end
 		default: s <= S_IDLE;
 	endcase
@@ -199,7 +206,7 @@ always_ff @(posedge clk) begin
 		s      <= S_IDLE;
 		ok     <= 1'b0;
 		ro     <= 1'b1;
-		blk    <= 4'd0;
+		blk    <= '0;
 		idx    <= 10'd0;
 		acked  <= 1'b0;
 		dirty  <= 1'b0;

@@ -99,6 +99,10 @@ unsigned bank_mb(unsigned n) {
 	}
 }
 uint32_t bank_wrap(unsigned mb) { return mb == 1 ? 0x000 : mb == 4 ? 0x200 : 0x600; }
+// Taos's VRAM: memory to both machines (Mac OS maps it cacheable and keeps data in it), so
+// the reference has its own copy rather than the core's device answers
+const uint32_t VRAM_BASE = 0xF0000000u, VRAM_SIZE = 1u << 20;
+bool pippin_vram(uint32_t a) { return a - VRAM_BASE < VRAM_SIZE; }
 bool pippin_ram(uint32_t a) {
 	if (a >> 26) return false;
 	unsigned sz = bank_mb((a >> 24) & 3);
@@ -954,6 +958,8 @@ int main(int argc, char** argv) {
 				mapped.push_back({base + w, base + w + 0x1000});
 			}
 		}
+		map_ok = map_ok && ref_add_ram_own(VRAM_BASE, VRAM_SIZE) == 0;
+		mapped.push_back({VRAM_BASE, VRAM_BASE + VRAM_SIZE});
 		std::sort(mapped.begin(), mapped.end());
 		uint32_t gap = 0;
 		for (auto& r : mapped) {
@@ -1370,7 +1376,7 @@ int main(int argc, char** argv) {
 					bool rom_read = addr >= ROM_BASE && !dut->cpu_we;
 					// (a store to the ROM goes nowhere in either machine: the Pippin's ROM
 					// stores to FFF00000 as it starts)
-					cpu_access = dut->cpu_ack && dut->cpu_req && !pippin_ram(addr) && addr < ROM_BASE;
+					cpu_access = dut->cpu_ack && dut->cpu_req && !pippin_ram(addr) && !pippin_vram(addr) && addr < ROM_BASE;
 					if (cpu_access) {
 						accepted_cpu = {(bool)dut->cpu_we, (bool)dut->cpu_line, addr,
 						    dut->cpu_be, dut->cpu_wdata[0], dut->cpu_rdata[0], {}, {}};

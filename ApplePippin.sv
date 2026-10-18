@@ -104,6 +104,8 @@ localparam CONF_STR = {
 	// the CD-ROM on slot 4, as the Mac SCSI family has it (the Main's Mac CD layer:
 	// Main_MiSTer branch pippin-cdrom); SC, so the Main remembers the disc
 	"SC4,ISOTO*CUEBINCHD,Mount CD;",
+	// the save flash (Pippin_flash), 128 KB, kept in an image on slot 2 (Pippin_nvsave)
+	"SC2,SAV,Mount save flash;",
 	"-;",
 	// RAM: the retail 5 MB; 13 and 21 MB (the expansion banks at 32 and 48 MB) need a
 	// 64 MB SDRAM board or larger (menu mask bit 0)
@@ -380,9 +382,11 @@ end
 // acknowledge's). Two users: the NVRAM image of boot1.rom (index 40), each
 // byte written with the machine in reset (the image comes before the ROM),
 // hps_io waiting meanwhile; and Pippin_nvsave, the image on block slot 2.
-wire nv_index = ioctl_index[7:0] == 8'h40;
-wire nv_dl    = ioctl_download & nv_index;
-reg  [12:0] nv_m_addr;
+// (the channel serves the save flash: Grand Central's NVRAM is not kept, and boot1.rom, MacPPC7300's
+// NVRAM download, is not taken)
+wire nv_index = 1'b0;
+wire nv_dl    = 1'b0;
+reg  [16:0] nv_m_addr;
 reg  [7:0]  nv_m_data;
 reg         nv_m_we;
 reg         nv_req = 0, nv_busy = 0;
@@ -390,12 +394,12 @@ reg  [2:0]  nv_ack_s;
 wire        nv_ack;                   // the CPU's side, toggled when a byte is done
 wire [7:0]  nv_c_q;                   // ... the byte read
 reg         nv_dl_pend = 0;           // an ioctl byte waiting for the channel
-reg  [12:0] nv_dl_addr;
+reg  [16:0] nv_dl_addr;
 reg  [7:0]  nv_dl_data;
 reg         nvs_own = 0, nvs_taken = 0, nvs_done = 0;
 reg  [7:0]  nvs_q;
 wire        nvs_req, nvs_we;
-wire [12:0] nvs_addr;
+wire [16:0] nvs_addr;
 wire [7:0]  nvs_wdata;
 always @(posedge clk_mem) begin
 	nv_ack_s <= {nv_ack_s[1:0], nv_ack};
@@ -431,7 +435,7 @@ always @(posedge clk_mem) begin
 	// (after the issue: a byte arriving in the clock a pending one is issued stays pending)
 	if (nv_dl & ioctl_wr & ioctl_addr[26:13] == 14'd0) begin
 		nv_dl_pend <= 1;
-		nv_dl_addr <= ioctl_addr[12:0];
+		nv_dl_addr <= {4'd0, ioctl_addr[12:0]};
 		nv_dl_data <= ioctl_dout;
 	end
 end
@@ -441,7 +445,7 @@ assign ioctl_wait = sd_up_busy | nv_busy | nv_dl_pend;
 // the NVRAM image on block slot 2 (milestone P)
 reg         nv_dirty_t = 0;           // toggled in the CPU's clock at each CPU write to the NVRAM
 wire        nvs_hold;
-Pippin_nvsave #(.CLK_HZ(100_000_000)) nvsave (
+Pippin_nvsave #(.CLK_HZ(100_000_000), .ABITS(17)) nvsave (
 	.clk(clk_mem), .reset(~pll_locked),
 	.img_mounted(img_mounted[2]), .img_size, .img_readonly,
 	.sd_lba(nvs_lba), .sd_rd(nvs_rd), .sd_wr(nvs_wr), .sd_ack(sd_ack[2]),
@@ -546,13 +550,15 @@ wire clock_ok = clock_secs != 32'd0;
 // from the toggle until the acknowledge returns)
 reg  [2:0]  nv_req_s;
 reg         nv_ack_c = 0, nv_ld_we = 0, nv_ld_re = 0;
-reg  [12:0] nv_ld_addr;
+reg  [16:0] nv_ld_addr;
 reg  [7:0]  nv_ld_data, nv_q_c;
-wire        nv_ld_rack, nv_wr_cpu;
+reg         nv_ld_rack = 0;                // the flash's byte is there the clock after its read
+wire        nv_wr_cpu;                     // the CPU programmed or erased the flash
 wire [7:0]  nv_ld_q;
 always @(posedge clk_cpu) begin
 	nv_req_s <= {nv_req_s[1:0], nv_req};
 	nv_ld_we <= 0;
+	nv_ld_rack <= nv_ld_re & ~nv_ld_rack;
 	if (nv_ld_re & nv_ld_rack) begin           // a read done: the byte, then the acknowledge
 		nv_ld_re <= 0;
 		nv_q_c   <= nv_ld_q;
@@ -709,9 +715,10 @@ Pippin_system #(.CPU_HZ(70000000), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_H
 
 	.cpu_req, .cpu_we, .cpu_line, .cpu_addr, .cpu_be, .cpu_wdata, .cpu_ack, .cpu_rdata, .cpu_irq, .cpu_tb_tick,
 	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi, .snd_left, .snd_right,
-	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
+	.nv_ld_we(1'b0), .nv_ld_re(1'b0), .nv_ld_addr(13'd0), .nv_ld_data(8'd0), .nv_ld_rack(), .nv_ld_q(), .nv_wr_cpu(),
 	.mon_id(mon_c[1]), .tray_closed(1'b1),
-	.fl_ld_we(1'b0), .fl_ld_re(1'b0), .fl_ld_addr(17'd0), .fl_ld_data(8'd0), .fl_ld_q(), .fl_changed(),
+	.fl_ld_we(nv_ld_we), .fl_ld_re(nv_ld_re), .fl_ld_addr(nv_ld_addr), .fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
+	.fl_changed(nv_wr_cpu),
 	.ps2_key, .ps2_mouse, .joy,           // in the memory clock: Pippin_adb synchronises them
 	.clock_ok, .clock_secs,
 	.img_mounted(img_mounted[5:0]), .img_size, .img_readonly,   // the targets' side runs in the memory clock
