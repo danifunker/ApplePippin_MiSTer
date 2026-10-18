@@ -1,0 +1,22 @@
+Mac OS run: 603e, Gestalt cput 0106, machine 42, system 0755
+dingus-int        5596      24       0
+dingus-fp         2044      10       0
+gen-fp-unary      2160       0       0
+gen-fsel             8       0       0
+gen-fcmp           576       0       0
+gen-fp-binary    12774      26       0
+gen-fma           7868     132       0
+gen-muldiv        2596     108       0
+gen-carry         3168       0       0
+gen-rotate          84       0       0
+model            19791     209       0
+model-enable      8302     198       0
+model-ni          3975      25       0
+model-ni0         3970      30       0
+model-rsqrte       251       0       0
+model-sweep       1664       0       0
+model-mem          517      93       0
+v4-xer               0       0     284
+v4-fpscr             0       0    2989
+v4-mem               0       0     152
+against results_604_run2.csv: 37336 vectors in common, 37036 identical, 300 differ

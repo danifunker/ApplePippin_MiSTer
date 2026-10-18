@@ -10,8 +10,9 @@ Downloaded third-party material (PDFs, emulator and MiSTer source excerpts, arch
 2. **[pdf-index.md](pdf-index.md)**: a catalogue of the 44 PDFs, plus a list of documents known to exist but not yet found.
 3. **[`../../MacPPC7300_MiSTer`](../../MacPPC7300_MiSTer)**: the sibling Power Mac 7300 core. It already has a working 32-bit PowerPC CPU and most of the Pippin's I/O chips (Grand Central, MESH, Cuda, AWACS, DBDMA, the serial chip, SWIM3). Its README names the Pippin as the long-term goal.
 4. **[implementation_plan.md](implementation_plan.md)**: the phased plan for building the core.
-5. **[prompts/DSPPC603_tlb_reload.md](prompts/DSPPC603_tlb_reload.md)**: a resume prompt for implementing the real 603 TLB reload and checking it against a real 603 machine.
-6. **[rom-map.md](rom-map.md)**: byte-accurate map of the Kinka 1.0 and Dev boot ROMs (regions, landmarks, 1.0-vs-Dev differences, MMIO the startup code touches), with full disassembly in `../disasm/disasm.tar.xz` (unpack with `python3 tools/rom/pack.py unpack`) produced by `../tools/rom/`.
+5. **[prompts/DSPPC603_build.md](prompts/DSPPC603_build.md)**: the resume prompt for building DSPPC603 from DSPPC604 against the 603e data of 2026-10-18 (milestones A-E). **[prompts/DSPPC603_tlb_reload.md](prompts/DSPPC603_tlb_reload.md)**: a resume prompt for implementing the real 603 TLB reload and checking it against a real 603 machine.
+6. **[../cputest/README.md](../cputest/README.md)**: the PowerPC 603 CPU test suite for the Performa 62xx (user-mode vectors as a Mac OS application; supervisor-mode sequences with the 603's TLB reload as a firmware-free blob, running under MAME today), built on MacPPC7300's `ppctest/`.
+7. **[rom-map.md](rom-map.md)**: byte-accurate map of the Kinka 1.0 and Dev boot ROMs (regions, landmarks, 1.0-vs-Dev differences, MMIO the startup code touches), with full disassembly in `../disasm/disasm.tar.xz` (unpack with `python3 tools/rom/pack.py unpack`) produced by `../tools/rom/`.
 
 ## Layout
 

@@ -26,6 +26,7 @@ Drafted 2026-10-16. Facts with citations are in [core-dev/README.md](core-dev/RE
   - **Q10:** does boot depend on Bt856 or the second Athens answering on I²C?
   - **Q5:** which Taos registers are actually written.
 - If a real Pippin is available, read its PVR (Q7) and capture a serial/debug log of boot for comparison.
+- **Real 603 data (2026-10-16):** a Performa 62xx with a 603 is on its way. [`../cputest/`](../cputest/README.md) holds the test suite for it: ppctest's vector set as a Mac OS application (user mode), and the supervisor sequences plus a `tlb603` group as a firmware-free blob (runs under MAME's Pippin now; the 62xx needs the MkLinux-Booter route described there). Its results are the golden data for Phases 2 and 8.
 - **Done when:** the questions have answers written into core-dev/README.md, and a reference MMIO trace of a 1.3 ROM boot to the CD-insert screen is saved for comparison against the RTL.
 
 ## Phase 2: DSPPC603, minimal
@@ -36,7 +37,7 @@ Wait until the author finishes the FPU work in MacPPC7300.
 - Add the 603 SPRs (DMISS, DCMP, HASH1, HASH2, IMISS, ICMP, RPA, HID1) as plain registers. Decode `tlbld`/`tlbli` as no-ops. Map HID0 doze/nap/sleep and MSR[POW] to "wait for interrupt".
 - Keep the hardware page-table walk for now (DingusPPC boots the Pippin this way).
 - Time base = CPU/4 (16.5 MHz at 66 MHz).
-- **Done when:** the CPU's existing golden vectors still pass, and Fmax is no worse than DSPPC604 at the same settings.
+- **Done when:** the CPU's existing golden vectors still pass, the 603 run of `cputest` (user-mode tier) replays through the bench with the 603's own `fres`/`frsqrte` and denormal results, and Fmax is no worse than DSPPC604 at the same settings.
 
 ## Phase 3: machine skeleton and Aspen
 
@@ -83,7 +84,7 @@ Wait until the author finishes the FPU work in MacPPC7300.
 
 ## Phase 8: full 603 TLB reload
 
-Follow [prompts/DSPPC603_tlb_reload.md](prompts/DSPPC603_tlb_reload.md): implement the exception-based reload faithfully and check it bit for bit against a real 603 machine, MAME and the RTL. Keep the hardware-walk build as an option until the real reload is proven across the title list.
+Follow [prompts/DSPPC603_tlb_reload.md](prompts/DSPPC603_tlb_reload.md): implement the exception-based reload faithfully and check it bit for bit against a real 603 machine, MAME and the RTL. The test programs it asks for exist: `cputest/super/super603.py` (`tlb603` group, with the handlers, the log format and the MAME runner); what is left is running them on the 62xx. Keep the hardware-walk build as an option until the real reload is proven across the title list.
 
 ## Phase 9: compatibility, speed, release
 

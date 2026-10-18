@@ -1,6 +1,15 @@
 # Downloaded third-party material (not committed)
 scratch/
+scratch.zip
 
 # ROM disassembly listings: committed as disasm/disasm.tar.xz
 # (tools/rom/pack.py unpack to extract, pack to rebuild)
 disasm/*/
+# cputest build outputs
+cputest/ppc603.vec
+cputest/*.hda
+cputest/macapp/build/
+cputest/super/super603.bin
+cputest/**/__pycache__/
+cputest/envelope/
+cputest/probe/build/
