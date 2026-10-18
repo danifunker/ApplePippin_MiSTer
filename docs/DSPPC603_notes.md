@@ -202,3 +202,24 @@ The lockstep reference is dingusppc, which models neither the 603's
 undefined results nor its SPR set: the random programs do not use the
 removed SPRs, and undefined divides are taken from the core (as for the
 604). With a 603 the reference's `rfi` is made to clear MSR[PM].
+
+## Size and speed (milestone E, first measurement)
+
+`python3 syn/check.py core --cpu 603|604 --mhz 66 --paths 15`: the CPU
+alone (pipeline, FPU, MMU, both caches; the wrapper registers the memory
+port; each top's default parameters, so `PERF = 1`, and DSPPC604's
+64 KB instruction cache), Quartus 17.0 Lite, 5CSEBA6U23I7, seed 1,
+2026-10-18:
+
+| CPU | ALMs | Registers | RAM blocks | DSP | Fmax slow 100 C | Fmax slow -40 C | slack at 66 MHz |
+|---|---|---|---|---|---|---|---|
+| DSPPC604 | 15,594 (37 %) | 13,780 | 175 | 7 | 57.55 MHz | 58.48 MHz | -2.223 ns |
+| DSPPC603 | 14,895 (36 %) | 13,365 | 107 | 7 | 60.84 MHz | 61.54 MHz | -1.284 ns |
+
+DSPPC603 is no slower than DSPPC604 (the milestone's condition); its
+smaller caches give back 68 RAM blocks and 700 ALMs. Its slowest families:
+the data cache's request address into the FPU's normalising shift, the
+FPSCR's commit from the FP operand fields, the instruction cache's tag RAM
+into EX's operand. The frC rounding (the partial-product mux) is not among
+them. The figure swings 2-3 MHz between fits; MacPPC7300 runs DSPPC604
+on the board at 70 MHz with -1.3 to -2.6 ns of slack on this same model.
