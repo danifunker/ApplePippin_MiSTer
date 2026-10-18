@@ -63,6 +63,9 @@ typedef VDSPPC604 Top;
 #ifdef WITH_REF
 #include "dingus_ref.h"
 #endif
+#ifdef PIPPIN_MACHINE
+#include "cdhost.h"                // (outside the namespace below: Main's CD code links to it)
+#endif
 
 namespace {
 
@@ -291,10 +294,6 @@ struct Disk {
 // after a latency (the ARM reading the file), sd_ack up, the 512 bytes
 // written into the core's buffer (sd_buff_wr) or read from it (sd_buff_din,
 // a clock or two after the address), sd_ack down.
-#ifdef PIPPIN_MACHINE
-#include "cdhost.h"
-#endif
-
 struct SdHost {
 	Disk disk[2];
 #ifdef PIPPIN_MACHINE
