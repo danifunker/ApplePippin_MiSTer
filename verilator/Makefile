@@ -60,7 +60,7 @@ $(CORE_DIR)/core_tb: $(RTL_SRCS) $(HERE)core_main.cpp $(RTL)/$(CPU_NAME).qip $(H
 	@mkdir -p $(CORE_DIR)
 	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)core_main.cpp > $(CORE_DIR)/core_main.cpp
 	@$(VERILATOR) $(VFLAGS) --top-module $(CPU_NAME) -Mdir $(CORE_DIR) -o core_tb \
-		-CFLAGS "-O2 -std=c++17 $(REF_CFLAGS)" $(REF_LDFLAGS) \
+		-CFLAGS "-O2 -std=c++17 -DCPU_MODEL=$(CPU) $(REF_CFLAGS)" $(REF_LDFLAGS) \
 		$(RTL_SRCS) $(CORE_DIR)/core_main.cpp \
 		> $(CORE_DIR)/build.log 2>&1 || (cat $(CORE_DIR)/build.log; false)
 	@grep -E '^%Warning' $(CORE_DIR)/build.log || true

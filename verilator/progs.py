@@ -31,6 +31,10 @@ import os
 import random
 import sys
 
+# the CPU model the programs are for: "604", or "603" (run_core.py --cpu
+# sets FPMODEL_CPU, which fpmodel.py reads too)
+CPU = os.environ.get("FPMODEL_CPU", "604")
+
 CODE_BASE = 0x00010000
 DATA_A = 0x00800000          # base register r1
 DATA_B = 0x00900001          # base register r2: deliberately unaligned
@@ -330,6 +334,19 @@ def exctest(out):
     expect(mfspr(1009, 9), 0x00080000)                            # an SPR that does not exist (HID1 is the 604e's)
     expect(X(5, 0, 9, 150), 0x00080000)                           # stwcx without the dot: illegal on a 604
     expect(0xFC201090, 0)                                         # fmr with MSR[FP] off
+    if CPU == "603":
+        # the 603's SPR set (603e manual 2.1.2; PowerPC 603 Technical Summary
+        # Figure 2): the 604's performance monitor, DABR and PIR are not
+        # there; the table search registers are, HASH1 and HASH2 read-only;
+        # tlbld and tlbli are its own (no-ops until the software reload)
+        expect(mfspr(952, 9), 0x00080000)                         # MMCR0
+        expect(mfspr(1013, 9), 0x00080000)                        # DABR
+        expect(mtspr(978, 9), 0x00080000)                         # HASH1 cannot be written
+        no_exc(mfspr(978, 9))                                     # ... but read
+        p.words += li32(9, 0x12345678)
+        no_exc(mtspr(976, 9))                                     # DMISS
+        no_exc(X(0, 0, 9, 978))                                   # tlbld r9
+        no_exc(X(0, 0, 9, 1010))                                  # tlbli r9
     setm(MSR_FP)
     expect(D(46, 29, 1, 2), 0, align_ea=DATA_A + 2)               # lmw at an odd address
     expect(D(47, 29, 1, 6), 0, align_ea=DATA_A + 6)               # stmw
@@ -353,7 +370,11 @@ def exctest(out):
     setm(MSR_FP | MSR_PR)
     expect(X(9, 0, 0, 83), 0x00040000)                            # mfmsr in user mode
     expect(mfspr(SRR0, 9), 0x00040000)                            # a supervisor SPR in user mode
-    expect(mfspr(1023, 9), 0x00040000)                            # PIR too
+    if CPU == "603":
+        expect(mfspr(1023, 9), 0x00080000)                        # PIR: not on a 603, so illegal as 1009 is on the 604 (not measured)
+        expect(X(0, 0, 9, 978), 0x00040000)                       # tlbld in user mode
+    else:
+        expect(mfspr(1023, 9), 0x00040000)                        # PIR too
     expect(mfspr(1009, 9), 0x00080000)                            # one that does not exist is illegal, not privileged (measured)
     no_exc(mfspr(268, 9))                                         # the time base through mfspr, in user mode
     expect(0x44000002, 0, pc_after=True)                          # sc from user mode

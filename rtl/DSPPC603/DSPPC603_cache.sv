@@ -1,12 +1,14 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
-//  Cache: 16 KB, four ways of 128 sets of 32-byte lines, as the 604's
+//  DSPPC603 - PowerPC 603-class CPU core
+//  Cache: 128 sets of 32-byte lines, two ways (8 KB, the 603's) or four
+//  (16 KB, the 603e's and the 604's): WAYS
 //
 //  One module for both caches; WRITABLE makes the data cache (write-back,
 //  write-allocate, a dirty bit per line, the cache instructions and the
 //  snoop port's write-back), the other is read-only. Replacement is a
-//  pseudo-LRU tree per set, an invalid way first.
+//  pseudo-LRU tree per set (with two ways, one bit: the way not used last), an
+//  invalid way first.
 //
 //  Request port: the requester presents a physical address and holds req
 //  until gnt (a store's data, wdata and wdata_next, is presented in the
@@ -49,7 +51,8 @@ module DSPPC603_cache
 #(
 	parameter bit WRITABLE    = 1,
 	parameter bit LATE_ANSWER = 0,           // rvalid and rdata from a register, a cycle later
-	parameter int IDXW        = 7            // set index bits: 7 is 128 sets (16 KB), 8 is 256 (32 KB, the 604e's)
+	parameter int IDXW        = 7,           // set index bits: 7 is 128 sets
+	parameter int WAYS        = 2            // 2 (the 603) or 4
 )
 (
 	input  logic        clk,
@@ -103,8 +106,9 @@ module DSPPC603_cache
 
 import DSPPC603_pkg::*;
 
-localparam int WAYS = 4;
 localparam int SETS = 1 << IDXW;
+localparam int WB   = (WAYS == 2) ? 1 : 2;  // bits of a way's number
+typedef logic [WB-1:0] way_t;
 localparam int TAGW = 27 - IDXW;            // address bits 31 down to 5+IDXW
 
 typedef struct packed {
@@ -122,7 +126,7 @@ typedef struct packed {
 tag_t         tag_q  [WAYS];
 tag_t         tag_ram_q [WAYS];
 logic [31:0]  even_q [WAYS], odd_q [WAYS];
-logic [2:0]   plru   [SETS];                // pseudo-LRU tree: [0] ways 01 vs 23, [1] 0 vs 1, [2] 2 vs 3
+logic [2:0]   plru   [SETS];                // pseudo-LRU tree: [0] ways 01 vs 23, [1] 0 vs 1, [2] 2 vs 3 (two ways: [1] alone)
 
 logic [IDXW-1:0]   rd_idx;                       // the set read at this edge
 logic [2:0]   rd_word;                      // ... and the word (with the next: a wide access's)
@@ -217,7 +221,7 @@ logic        r_ci;
 logic        r_wt;
 logic        r_snoop;        // the request in hand is the snoop's
 logic        r_snoop_we;
-logic [1:0]  r_way;          // the way chosen for a write-back or fill
+way_t        r_way;          // the way chosen for a write-back or fill
 logic        r_after_wb;     // the write-back is followed by a fill
 logic [255:0] wb_data;
 logic [31:0] unc_data;       // an uncached word read, answered from here in S_UANS
@@ -262,9 +266,13 @@ end
 logic landed_set;
 always_ff @(posedge clk) landed_set <= (rd_idx == wr_idx);
 /* synthesis translate_off */
+logic landed_any_data;
+always_comb begin
+	landed_any_data = 1'b0;
+	for (int w = 0; w < WAYS; w++) landed_any_data |= |landed_data_wq[w];
+end
 always_ff @(posedge clk)
-	if (~reset & ((state == S_LOOK) | (state == S_SNOOP)) & (|landed_tag_wq | (|landed_data_wq[0]) | (|landed_data_wq[1]) |
-	    (|landed_data_wq[2]) | (|landed_data_wq[3])) & (landed_set != (landed_idx == r_idx)))
+	if (~reset & ((state == S_LOOK) | (state == S_SNOOP)) & (|landed_tag_wq | landed_any_data) & (landed_set != (landed_idx == r_idx)))
 		$fatal(1, "the colliding write's set match differs");
 /* synthesis translate_on */
 always_comb
@@ -315,30 +323,32 @@ generate
 	end
 endgenerate
 logic            hit /* verilator public_flat_rd */;
-logic [1:0]      hit_sel;
+way_t            hit_sel;
 always_comb begin
-	hit_sel = 2'd0;
+	hit_sel = '0;
 	for (int w = 0; w < WAYS; w++) begin
 		hit_w[w] = (forward_pending & wr_tag_we[w]) ? pending_tag_hit :
 		           landed_tag_we[w] ? landed_tag_hit : ram_tag_hit[w];
-		if (hit_w[w]) hit_sel = w[1:0];
+		if (hit_w[w]) hit_sel = way_t'(w);
 	end
 	hit = |hit_w;
 end
 
 // the victim: an invalid way, else what the pseudo-LRU tree says
 wire [2:0] tree = plru[r_idx];
-logic [1:0] victim;
+way_t victim;
 always_comb begin
-	victim = tree[0] ? {1'b1, tree[2]} : {1'b0, tree[1]};
+	victim = (WAYS == 2) ? way_t'(tree[1]) : way_t'(tree[0] ? {1'b1, tree[2]} : {1'b0, tree[1]});
 	for (int w = WAYS - 1; w >= 0; w--)
-		if (!tag_q[w].valid) victim = w[1:0];
+		if (!tag_q[w].valid) victim = way_t'(w);
 end
 wire victim_dirty = tag_q[victim].valid & tag_q[victim].dirty;
 
 // the tree after touching way w: the next victim is the other branch everywhere
-function automatic logic [2:0] touch(input logic [2:0] t, input logic [1:0] w);
+function automatic logic [2:0] touch(input logic [2:0] t, input way_t wn);
+	logic [1:0] w;
 	begin
+		w = 2'(wn);
 		touch = t;
 		touch[0] = ~w[1];
 		if (w[1]) touch[2] = ~w[0];
@@ -357,7 +367,7 @@ wire k_icbi  = (r_kind == CK_ICBI);
 // locked, or a store miss on a write-through page
 wire unc = k_word & (r_ci | ~enable | (lock & ~hit) | (WRITABLE & r_we & r_wt & ~hit));
 
-wire [1:0] wsel = hit ? hit_sel : victim;   // the way a line-zero takes
+wire way_t wsel = hit ? hit_sel : victim;   // the way a line-zero takes
 
 // the answer: as decided in this cycle, or from a register a cycle later
 logic        ans_now, ans_q;

@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  The pipeline
 //
 //    IF1 -> IF2 -> ID -> EX -> MEM -> WB
@@ -89,6 +89,19 @@
 //
 //  Not here yet: trace and machine-check exceptions.
 //
+//  The 603 (this copy of DSPPC604; docs/DSPPC603_notes.md has the sources)
+//    PVR 0003xxxx; 8 KB caches of two ways; no performance monitor, DABR
+//    or PIR; the software table search registers DMISS, DCMP, HASH1,
+//    HASH2, IMISS, ICMP, RPA (storage for now); HID0 with the 603's bits;
+//    MSR with POW and TGPR and without PM; tlbld and tlbli decoded
+//    (no-ops for now); no fsqrt. The time base and decrementer advance on
+//    tb_tick, which the machine pulses every four bus clocks on a 603.
+//    The undefined results a 603e was measured to give: the divider's,
+//    the FPU's single-precision multiply, and stfs below the single range.
+//    Still the 604's: the hardware page-table walk (the 603's software
+//    reload is milestone D), the exception vectors and SRR1 contents
+//    (milestone C).
+//
 //============================================================================
 
 module DSPPC603
@@ -96,14 +109,15 @@ module DSPPC603
 	parameter int          ITT_BITS = 12,             // indirect target table entries, as a power of two (8 to 12)
 	parameter int          BTB_BITS = 11,             // branch target buffer entries, as a power of two (two ways): 2048 since 2026-10-12
 	parameter int          TLB_BITS = 6,              // entries in each TLB, as a power of two
-	parameter int          IC_IDXW  = 9,              // instruction cache sets, as a power of two: 8 is 32 KB (the 604e's), 7 is 16 KB (the 604's)
+	parameter int          IC_IDXW  = 7,              // instruction cache sets, as a power of two: 128 sets of two ways, 8 KB (the 603's; the 603e's 16 KB is four ways of 128)
 	parameter int          DC_IDXW  = 7,              // data cache sets, likewise
+	parameter int          CACHE_WAYS = 2,            // ways of each cache: 2 (the 603) or 4 (the 603e, the 604)
 	parameter int          FPU_OPERAND_REG = 0,       // 1: the FPU takes its operands into a register first (a cycle each; on 2026-10-06 to 2026-10-09 for timing)
 	parameter int          PERF     = 1,              // 1: the performance counters (perf_cnt; 0 leaves them out)
 	parameter int          COMPLETION_QUEUE = 1,      // 1: the completion queue is built: operations admitted behind a long one in EX, committed in order (since 2026-10-16 the FPU's overlap needs it)
 	parameter int          COMPLETION_ALU   = 0,      // 1: simple ALU operations are admitted to it too (0 since 2026-10-11: no gain once the dividers and FPU got faster, 1,100 ALMs, 5 % slower ROM boot)
 	parameter int          LE_MODE  = 0,              // 1: little-endian mode (MSR[LE], the 604's address munging); 0: MSR[LE] is kept but ignored, as before
-	parameter logic [31:0] PVR      = 32'h00040303    // processor version: 604 revision 3.3
+	parameter logic [31:0] PVR      = 32'h00030100    // processor version: 603 (0x0003, 603e manual C.2); the Pippin's revision is not known, QEMU's 603 is 0x00030100
 )
 (
 	input  logic        clk,
@@ -200,7 +214,12 @@ logic [31:0] ctr;
 logic [31:0] fpscr;
 
 // supervisor state
-localparam logic [31:0] MSR_MASK  = 32'h0005FF77;  // the bits the 604 implements (measured: bit 29, PM, is one of them)
+localparam logic [31:0] MSR_MASK  = 32'h0007FF73;  // the bits the 603 defines (603e manual Table 4-5: POW, TGPR, ILE, EE ... LE; no PM)
+localparam logic [31:0] MSR_TGPR  = 32'h00020000;  // shadow GPR0-3 for the TLB miss handlers: set by those exceptions, cleared by rfi and every other exception
+// HID0 bits a 603 keeps (603e manual Table 2-2 without the 603e's IFEM and
+// ABE): EMCP, EBA, EBD, SBCLK, EICE, ECLK, PAR, DOZE, NAP, SLEEP, DPM, RISEG;
+// ICE, DCE, ILOCK, DLOCK; FBIOB, NOOPTI. ICFI and DCFI act once and clear.
+localparam logic [31:0] HID0_MASK = 32'hBFF8F011;
 localparam logic [31:0] SRR1_MASK = 32'h87C0FFFF;  // MSR bits saved in SRR1 and restored by rfi
 localparam int MSR_EE = 15, MSR_PR = 14, MSR_FP = 13, MSR_FE0 = 11, MSR_FE1 = 8, MSR_IP = 6,
                MSR_IR = 5, MSR_DR = 4;
@@ -221,13 +240,12 @@ logic [15:0][31:0] sr;
 logic [31:0] hid0;
 logic [31:0] ear;
 logic [31:0] iabr;
-logic [31:0] dabr;
-logic [31:0] mmcr0;
-logic [31:0] pmc1;
-logic [31:0] pmc2;
-logic [31:0] sia;
-logic [31:0] sda;
-logic [3:0]  pir;           // the four bits a 604 keeps
+// the 603's software table search registers (603e manual 2.1.2.2-2.1.2.5):
+// storage only until the TLB miss exceptions exist (milestone D)
+logic [31:0] dmiss, dcmp, imiss, icmp, rpa;
+// HASH1 and HASH2 are read-only to software and formed by the hardware
+// from SDR1 and the missed address: zero until the misses exist
+wire  [31:0] hash1 = 32'd0, hash2 = 32'd0;
 
 // ---- pipeline registers ----------------------------------------------------
 // IF1 / IF2
@@ -2189,9 +2207,14 @@ function automatic logic [3:0] cr_field(input logic [31:0] v, input logic [2:0] 
 endfunction
 
 // ---- special-purpose registers ----------------------------------------------
-// The set a 604 has (measured: mfspr of all 1,024 numbers in both modes).
-// 268 and 269 read the time base through mfspr as well as mftb, in user mode
-// too; they cannot be written.
+// The set a 603 has (603e User's Manual, Figure 2-1 and Appendix C.2: the
+// 603e's HID1 is not on the 603; the PowerPC 603 Technical Summary,
+// Figure 2): no performance monitor (MMCR0, PMC1-2, SIA, SDA), no DABR, no
+// PIR, as on the 604; added the software table search registers DMISS,
+// DCMP, HASH1, HASH2, IMISS, ICMP and RPA. EAR is optional and present.
+// 268 and 269 read the time base through mfspr as well as mftb, in user
+// mode too, as a 604 does (not yet measured on a 603); they cannot be
+// written.
 // The register read is chosen from the SPR number in ID and registered as
 // a one-hot select (ex_spr_sel): the read is an AND-OR, without the
 // number's compares in front of EX's result.
@@ -2213,15 +2236,15 @@ function automatic logic [SPR_SEL_N-1:0] spr_sel_of(input logic [9:0] n);
 		10'd272, 10'd273, 10'd274, 10'd275: spr_sel_of[11] = 1'b1;   // SPRG0-3
 		10'd282:  spr_sel_of[12] = 1'b1;   // EAR
 		10'd287:  spr_sel_of[13] = 1'b1;   // PVR
-		10'd952:  spr_sel_of[14] = 1'b1;   // MMCR0
-		10'd953:  spr_sel_of[15] = 1'b1;   // PMC1
-		10'd954:  spr_sel_of[16] = 1'b1;   // PMC2
-		10'd955:  spr_sel_of[17] = 1'b1;   // SIA
-		10'd959:  spr_sel_of[18] = 1'b1;   // SDA
-		10'd1008: spr_sel_of[19] = 1'b1;   // HID0
-		10'd1010: spr_sel_of[20] = 1'b1;   // IABR
-		10'd1013: spr_sel_of[21] = 1'b1;   // DABR
-		10'd1023: spr_sel_of[22] = 1'b1;   // PIR
+		10'd976:  spr_sel_of[14] = 1'b1;   // DMISS
+		10'd977:  spr_sel_of[15] = 1'b1;   // DCMP
+		10'd978:  spr_sel_of[16] = 1'b1;   // HASH1
+		10'd979:  spr_sel_of[17] = 1'b1;   // HASH2
+		10'd980:  spr_sel_of[18] = 1'b1;   // IMISS
+		10'd981:  spr_sel_of[19] = 1'b1;   // ICMP
+		10'd982:  spr_sel_of[20] = 1'b1;   // RPA
+		10'd1008: spr_sel_of[21] = 1'b1;   // HID0
+		10'd1010: spr_sel_of[22] = 1'b1;   // IABR
 		default:  spr_sel_of[23] = (n[9:4] == 6'b100001);   // the BATs, 528-543
 	endcase
 endfunction
@@ -2233,20 +2256,21 @@ wire [31:0] spr_rdata = ({32{ex_spr_sel[0]}}  & xer)   | ({32{ex_spr_sel[1]}}  &
                         ({32{ex_spr_sel[8]}}  & srr1)  | ({32{ex_spr_sel[9]}}  & tbl)   |
                         ({32{ex_spr_sel[10]}} & tbu)   | ({32{ex_spr_sel[11]}} & sprg[ex_dec.spr[1:0]]) |
                         ({32{ex_spr_sel[12]}} & ear)   | ({32{ex_spr_sel[13]}} & PVR)   |
-                        ({32{ex_spr_sel[14]}} & mmcr0) | ({32{ex_spr_sel[15]}} & pmc1)  |
-                        ({32{ex_spr_sel[16]}} & pmc2)  | ({32{ex_spr_sel[17]}} & sia)   |
-                        ({32{ex_spr_sel[18]}} & sda)   | ({32{ex_spr_sel[19]}} & hid0)  |
-                        ({32{ex_spr_sel[20]}} & iabr)  | ({32{ex_spr_sel[21]}} & dabr)  |
-                        ({32{ex_spr_sel[22]}} & {28'd0, pir}) | ({32{ex_spr_sel[23]}} & bat[ex_dec.spr[3:0]]);
-// whether the 604 has the SPR (the illegal-instruction decision is
+                        ({32{ex_spr_sel[14]}} & dmiss) | ({32{ex_spr_sel[15]}} & dcmp)  |
+                        ({32{ex_spr_sel[16]}} & hash1) | ({32{ex_spr_sel[17]}} & hash2) |
+                        ({32{ex_spr_sel[18]}} & imiss) | ({32{ex_spr_sel[19]}} & icmp)  |
+                        ({32{ex_spr_sel[20]}} & rpa)   | ({32{ex_spr_sel[21]}} & hid0)  |
+                        ({32{ex_spr_sel[22]}} & iabr)  | ({32{ex_spr_sel[23]}} & bat[ex_dec.spr[3:0]]);
+// whether the 603 has the SPR (the illegal-instruction decision is
 // registered with the operation, from the instruction word: ex_x_spr_q)
 function automatic logic spr_known_of(input logic [9:0] n, input logic mf);
 	case (n)
 		10'd1, 10'd8, 10'd9, 10'd18, 10'd19, 10'd22, 10'd25, 10'd26, 10'd27,
 		10'd272, 10'd273, 10'd274, 10'd275, 10'd282, 10'd284, 10'd285, 10'd287,
-		10'd952, 10'd953, 10'd954, 10'd955, 10'd959, 10'd1008, 10'd1010, 10'd1013, 10'd1023:
+		10'd976, 10'd977, 10'd980, 10'd981, 10'd982, 10'd1008, 10'd1010:
 		          spr_known_of = 1'b1;
-		10'd268, 10'd269: spr_known_of = mf;        // the time base: mfspr only
+		10'd268, 10'd269,                           // the time base: mfspr only
+		10'd978, 10'd979: spr_known_of = mf;        // HASH1, HASH2: read-only
 		default:  spr_known_of = (n[9:4] == 6'b100001);                 // BATs, 528-543
 	endcase
 endfunction
@@ -2481,7 +2505,7 @@ always_comb begin
 				endcase
 			end
 			SYS_MTMSR: msr_next = op_a & MSR_MASK;
-			SYS_RFI:   msr_next = ((msr & ~SRR1_MASK) | (srr1 & SRR1_MASK)) & MSR_MASK;
+			SYS_RFI:   msr_next = ((msr & ~SRR1_MASK & ~MSR_TGPR) | (srr1 & SRR1_MASK)) & MSR_MASK;
 			SYS_MFFS: begin
 				// Rc: CR1 from the unchanged FPSCR
 				if (ex_dec.cr_wr) cr_next = cr_insert(cr, 3'd1, fpscr[31:28]);
@@ -2770,15 +2794,13 @@ always_ff @(posedge clk) begin
 				10'd282:  ear   <= op_a & 32'h8000003F;     // E, RID
 				10'd284:  tbl   <= op_a;
 				10'd285:  tbu   <= op_a;
-				10'd952:  mmcr0 <= op_a;
-				10'd953:  pmc1  <= op_a;
-				10'd954:  pmc2  <= op_a;
-				10'd955:  sia   <= op_a;
-				10'd959:  sda   <= op_a;
-				10'd1008: hid0  <= op_a & ~32'h00000C00;    // ICFI and DCFI act once and clear
+				10'd976:  dmiss <= op_a;
+				10'd977:  dcmp  <= op_a;
+				10'd980:  imiss <= op_a;
+				10'd981:  icmp  <= op_a;
+				10'd982:  rpa   <= op_a;
+				10'd1008: hid0  <= op_a & HID0_MASK;        // ICFI and DCFI act once and clear
 				10'd1010: iabr  <= op_a;
-				10'd1013: dabr  <= op_a;
-				10'd1023: pir   <= op_a[3:0];
 				default: ;      // the BATs: a cycle later, below
 			endcase
 		end
@@ -3033,7 +3055,7 @@ always_ff @(posedge clk) begin
 end
 assign dc_inv_ack = dc_inv_ack_q;
 
-DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW)) icache
+DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW), .WAYS (CACHE_WAYS)) icache
 (
 	.clk        (clk),
 	.reset      (reset),
@@ -3077,7 +3099,7 @@ DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW)) icache
 	.mem_rdata  (mem_rdata)
 );
 
-DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW)) dcache
+DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_WAYS)) dcache
 (
 	.clk        (clk),
 	.reset      (reset),

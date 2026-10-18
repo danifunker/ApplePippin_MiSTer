@@ -66,7 +66,16 @@ typedef VDSPPC604 Top;
 
 namespace {
 
+// the CPU's processor version, as the reference is started with it (the
+// Makefile's CPU_MODEL: 604 or 603; each the RTL's PVR parameter)
+#ifndef CPU_MODEL
+#define CPU_MODEL 604
+#endif
+#if CPU_MODEL == 603
+const uint32_t PVR_604  = 0x00030100;
+#else
 const uint32_t PVR_604  = 0x00040303;
+#endif
 
 #ifdef MACPPC7300_MACHINE
 // the machine's SDRAM board (--module), the ROM in its top 4 MB (rom_at)
@@ -1936,8 +1945,9 @@ int main(int argc, char** argv) {
 					// among them (measured: README, MSR keeps 0005FF77 and rfi the
 					// low 16); dingusppc's ppc_rfi leaves PM alone (its mask is
 					// 0x87C0FF73). The NanoKernel returns to Mac OS with PM set.
+					// (a 603 has no PM: its rfi clears it)
 					if (insn == 0x4C000064u && rc == 0) {
-						s.msr = (s.msr & ~4u) | (ref_get_spr(27) & 4u);
+						s.msr = (s.msr & ~4u) | (CPU_MODEL == 603 ? 0u : (ref_get_spr(27) & 4u));
 						ref_set_state(&s);
 					}
 #ifdef MACPPC7300_MACHINE

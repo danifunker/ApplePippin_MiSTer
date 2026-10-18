@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  DSPPC603 - PowerPC 604-class CPU core
+//  DSPPC603 - PowerPC 603-class CPU core
 //  Instruction decoder (combinational)
 //
 //  Covers the user-mode integer instruction set (arithmetic, logical,
@@ -12,6 +12,10 @@
 //  icbi are data accesses of their own kind (dec.cop), which the data cache
 //  carries out. tlbsync is accepted and does nothing, there being one
 //  processor.
+//
+//  The 603's set (603e manual Appendix A and Table B-1): no fsqrt, fsqrts or
+//  tlbia (illegal, as here they are not decoded); tlbld and tlbli, its own,
+//  supervisor-level.
 //
 //  Multi-operation instructions (update forms, lmw/stmw, string forms) are
 //  decoded here as their first operation, with dec.seq telling the sequencer
@@ -427,6 +431,10 @@ always_comb begin
 		end
 		10'd566: begin // tlbsync
 			dec.valid = 1; dec.unit = UNIT_SYS; dec.sys = SYS_NOP; dec.priv = 1;
+		end
+		10'd978, 10'd1010: begin // tlbld, tlbli: the 603's TLB loads, supervisor only (no-ops until the software reload exists)
+			dec.valid = 1; dec.unit = UNIT_SYS; dec.sys = SYS_NOP; dec.priv = 1;
+			dec.rb_rd = 1;
 		end
 		10'd310, 10'd438: begin // eciwx, ecowx: always a DSI here (EAR[E] is never set by anything)
 			dec.valid = 1; dec.unit = UNIT_ALU; dec.ic.alu_op = ALU_ADD;
