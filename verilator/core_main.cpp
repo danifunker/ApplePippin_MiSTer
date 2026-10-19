@@ -1167,7 +1167,8 @@ int main(int argc, char** argv) {
 					sd.slot = ((rd | wr) & 1) ? 0 : ((rd | wr) & 2) ? 1 : 4;
 					sd.we = (wr >> sd.slot) & 1;
 					sd.lba = dut->sd_lba;
-					sd.n = 512 * ((dut->sd_blk_cnt & 0x3F) + 1);
+					sd.n = sd.slot == 4 ? CdHost::xfer_bytes(sd.lba, (dut->sd_blk_cnt & 0x3F) + 1)
+					                    : 512 * ((dut->sd_blk_cnt & 0x3F) + 1);
 					if (sd.n > (int)sizeof(sd.buf)) sd.n = sizeof(sd.buf);
 					sd.wait = opt.disk_latency;
 					sd.st = 1;
@@ -1199,7 +1200,7 @@ int main(int argc, char** argv) {
 				}
 				break;
 			default:
-				if (sd.slot == 4 && sd.cd.mounted()) { if (sd.we) sd.cd.command(sd.lba, sd.buf); else sd.reads++; }
+				if (sd.slot == 4 && sd.cd.mounted()) { if (sd.we) sd.cd.command(sd.lba, sd.buf, sd.n); else sd.reads++; }
 				else if (sd.slot == 4) sd.absent_cd_probes++;
 				else if (sd.we) { sd.disk[sd.slot].write(sd.lba, sd.buf); sd.writes++; } else sd.reads++;
 				if (opt.disk_log && sd.slot < 2)

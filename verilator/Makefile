@@ -22,9 +22,11 @@ VERILATOR ?= verilator
 BUILD     ?= build
 REF_LIB   ?=
 CPU       ?= 604
-# the Main's Mac CD layer, for the machine bench's CD (cdhost.h): its responses and player
+# the Main's Mac CD layer, for the machine bench's CD (cdhost.h): Main_MiSTer's own
+# mac_cdrom*.cpp, its CHD reader and libraries, built by maincd/Makefile
 MAIN_MISTER ?= $(HOME)/repos/Main_MiSTer-pippin
-MAC_CD_SRCS := $(MAIN_MISTER)/support/mac/mac_cdrom_resp.cpp $(MAIN_MISTER)/support/mac/mac_cdrom_play.cpp
+MAINCD_DIR  ?= $(HOME)/.cache/applepippin/maincd
+MAINCD_LIB  := $(MAINCD_DIR)/libmaincd.a
 
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CPU_NAME := DSPPC$(CPU)
@@ -85,12 +87,17 @@ $(CORE_DIR)/core_tb: $(RTL_SRCS) $(HERE)core_main.cpp $(RTL)/$(CPU_NAME).qip $(H
 
 machine: $(MACH_DIR)/machine_tb
 
-$(MACH_DIR)/machine_tb: $(MACH_CPU) $(MACH_SRCS) $(HERE)core_main.cpp $(HERE)cdhost.h $(MACH_RTL)/DSPPC603.qip $(MACH)/Pippin_machine.qip $(HERE)Makefile $(REF_LIB)
+$(MAINCD_LIB): FORCE
+	@$(MAKE) -s -C $(HERE)maincd MAIN_MISTER=$(MAIN_MISTER) BUILD=$(MAINCD_DIR) $(MAINCD_LIB)
+
+FORCE:
+
+$(MACH_DIR)/machine_tb: $(MACH_CPU) $(MACH_SRCS) $(HERE)core_main.cpp $(HERE)cdhost.h $(MACH_RTL)/DSPPC603.qip $(MACH)/Pippin_machine.qip $(HERE)Makefile $(REF_LIB) $(MAINCD_LIB)
 	@mkdir -p $(MACH_DIR)
 	@sed 's/DSPPC604/DSPPC603/g' $(HERE)core_main.cpp > $(MACH_DIR)/core_main.cpp
 	@$(VERILATOR) $(VFLAGS) --top-module Pippin_system -GCUDA_FAST_BOOT=1 -Mdir $(MACH_DIR) -o machine_tb \
 		-CFLAGS "-O2 -std=c++17 -DPIPPIN_MACHINE -DCPU_MODEL=603 -I$(HERE) -I$(MAIN_MISTER)/support/mac $(REF_CFLAGS)" $(REF_LDFLAGS) \
-		$(MACH_CPU) $(MACH_SRCS) $(MACH_DIR)/core_main.cpp $(MAC_CD_SRCS) \
+		-LDFLAGS "$(MAINCD_LIB)" $(MACH_CPU) $(MACH_SRCS) $(MACH_DIR)/core_main.cpp \
 		> $(MACH_DIR)/build.log 2>&1 || (cat $(MACH_DIR)/build.log; false)
 	@grep -E '^%Warning' $(MACH_DIR)/build.log || true
 
