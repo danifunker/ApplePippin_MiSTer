@@ -167,6 +167,7 @@ struct Options {
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
 	std::string vram_dump;         // the VRAM's DDR3 as the run ends, raw (VRAM byte order)
+	std::string trace_out;         // Pippin_trace's records as written, in trstream.py's format
 	std::string disk[2];           // disk images for SCSI IDs 0 and 1 (hps_io slots 0 and 1)
 	std::string cd;                // a CD's CUE sheet, served on slot 4 as the Main's Mac CD layer
 	unsigned disk_latency = 2000;  // memory clocks from a block request to hps_io's acknowledge
@@ -328,6 +329,9 @@ struct Frame {
 	// interlaced timing (Taos's NTSC and PAL): two fields woven, field 0's lines the even ones
 	std::vector<std::vector<uint32_t>> field_rows[2];
 	int fields = 0;
+	// the timing, in the memory clock's cycles (100 MHz): the last line and field periods
+	uint64_t clk = 0, hs_at = 0, vs_at = 0, line = 0, field = 0;
+	bool hs_q = true, vs_q = true;
 };
 
 // The memory port: a request (one line or one word) is acknowledged after
@@ -395,6 +399,8 @@ void usage() {
 		"                   pixel), and check every CPU read of a byte written before\n"
 		"  --vram-log FILE  write every CPU access to the VRAM window\n"
 		"  --vram-dump FILE write the VRAM's DDR3 as the run ends (raw, VRAM byte order)\n"
+		"  --trace-out FILE every Pippin_trace record as the core writes it (DDR3 30500000),\n"
+		"                   in syn/trstream.py's format: syn/mister.py trace --file FILE\n"
 		"  --disk0 FILE --disk1 FILE   disk images for SCSI IDs 0 and 1 on MESH (hps_io\n"
 		"                   slots 0 and 1; blocks written are kept in memory, the file\n"
 		"                   is not changed)\n"
@@ -784,6 +790,7 @@ int main(int argc, char** argv) {
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
 		else if (a == "--vram-dump") opt.vram_dump = next();
+		else if (a == "--trace-out") opt.trace_out = next();
 		else if (a == "--disk0") opt.disk[0] = next();
 		else if (a == "--cd") opt.cd = next();
 		else if (a == "--disk1") opt.disk[1] = next();
@@ -1216,6 +1223,10 @@ int main(int argc, char** argv) {
 	// CPU reads the picture side answered differently from the DDR3
 	std::deque<std::string> ddr_hist;
 	uint64_t ddr_bad = 0, vp_reads = 0, vp_writes = 0;
+	const uint32_t TR_W0 = 0x30500000u >> 3, TR_RECS = 2048;
+	std::vector<uint64_t> tr_ring(TR_RECS * 4, 0);
+	uint32_t tr_done = 0;
+	FILE* tr_out = opt.trace_out.empty() ? nullptr : std::fopen(opt.trace_out.c_str(), "wb");
 	auto ddr_note = [&](const char* fmt, ...) {
 		char b[160];
 		va_list ap;
@@ -1284,6 +1295,20 @@ int main(int argc, char** argv) {
 				ddr_note("%llu: write %06X be %02X %016llX", (unsigned long long)sd.clocks,
 					((ddr.wr_left ? ddr.wr_addr : addr) - Ddr::BASE) * 8, (unsigned)dut->ddr_be, (unsigned long long)dut->ddr_din);
 			if (ddr.wr_left == 0) { ddr.wr_addr = addr; ddr.wr_left = cnt ? cnt : 1; }
+			// the trace's ring (Pippin_trace: the header at W0, the records from W0 + 8,
+			// four words each): a record goes out when the header's count passes it
+			if (tr_out && ddr.wr_addr - TR_W0 < 8 + TR_RECS * 4) {
+				uint32_t o = ddr.wr_addr - TR_W0;
+				if (o >= 8) tr_ring[o - 8] = dut->ddr_din;
+				else if (o == 0 && (uint32_t)(dut->ddr_din >> 32) == 0x54524345u) {
+					uint32_t cnt = (uint32_t)dut->ddr_din;
+					for (; tr_done < cnt; tr_done++) {
+						uint32_t slot = tr_done % TR_RECS;
+						std::fwrite(&tr_done, 4, 1, tr_out);
+						std::fwrite(&tr_ring[slot * 4], 8, 4, tr_out);
+					}
+				}
+			}
 			// (a write outside the VRAM, the trace's ring, is not folded into it)
 			if (ddr.wr_addr - Ddr::BASE < Ddr::WORDS) {
 				uint64_t& w = ddr.m[ddr.wr_addr - Ddr::BASE];
@@ -1299,6 +1324,11 @@ int main(int argc, char** argv) {
 
 	// the picture: after --frame-at instructions, the next whole frame
 	auto frame_edge = [&]() {
+		// the sync periods (negative syncs: a falling edge starts each)
+		fr.clk++;
+		if (fr.hs_q && !dut->vid_hs) { fr.line = fr.clk - fr.hs_at; fr.hs_at = fr.clk; }
+		if (fr.vs_q && !dut->vid_vs) { fr.field = fr.clk - fr.vs_at; fr.vs_at = fr.clk; }
+		fr.hs_q = dut->vid_hs; fr.vs_q = dut->vid_vs;
 		if (opt.frame_out.empty() || fr.st == Frame::DONE) return;
 		if (fr.st == Frame::WAIT && retired >= fr.next) fr.st = Frame::ARMED;
 		if (!dut->vid_ce) return;
@@ -1326,8 +1356,9 @@ int main(int argc, char** argv) {
 				size_t pct = name.find("%llu");
 				if (pct != std::string::npos) name.replace(pct, 4, std::to_string((unsigned long long)retired));
 				write_image(name, w, fr.rows);
-				std::printf("frame: %zu x %zu after %llu instructions, written to %s\n", w, fr.rows.size(),
-					(unsigned long long)retired, name.c_str());
+				std::printf("frame: %zu x %zu after %llu instructions, written to %s; lines at %.3f kHz, fields at %.3f Hz%s\n",
+					w, fr.rows.size(), (unsigned long long)retired, name.c_str(), fr.line ? 1e5 / fr.line : 0.0,
+					fr.field ? 1e8 / fr.field : 0.0, dut->vid_interlaced ? " (interlaced)" : "");
 				std::fflush(stdout);
 				if (opt.frame_every) { fr.st = Frame::WAIT; fr.next = retired + opt.frame_every; }
 				else fr.st = Frame::DONE;
@@ -2217,6 +2248,7 @@ int main(int argc, char** argv) {
 		std::printf("instruction fetches outside RAM and ROM: %llu (separate from data comparison)\n",
 			(unsigned long long)devq.instruction_reads);
 	if (vlog) std::fclose(vlog);
+	if (tr_out) { std::fclose(tr_out); std::printf("trace: %u records written to %s\n", tr_done, opt.trace_out.c_str()); }
 	std::printf("vram port: %llu reads and %llu writes answered\n", (unsigned long long)vp_reads, (unsigned long long)vp_writes);
 	if (!opt.vram_dump.empty()) {
 		// a DDR3 word's byte k is the VRAM's byte 8n + k
