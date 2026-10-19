@@ -590,6 +590,12 @@ wire  [7:0]  via_ifr_rd = {|(via_ifr[6:0] & via_ier[6:0]), via_ifr[6:0]};
 // the interrupt state for the trace (Pippin_system, kind 7)
 assign int_dbg = {int_mask, int_events, int_lines_q, via_ifr, via_ier, 14'd0, via_irq, irq};
 assign via_irq = via_ifr_rd[7];
+// a VIA flag newly set while enabled: in 68k mode an event of its own, even with the
+// VIA's line already high (dingusppc's ack_int sets the event at every report; an edge
+// of the line alone missed a T1 arriving while T2 held it, and Mac OS waited on the
+// board for an interrupt that never came, 2026-10-19)
+logic [6:0] via_en_q;
+wire        via_new = |((via_ifr[6:0] & via_ier[6:0]) & ~via_en_q);
 wire  [7:0]  via_pb_rd  = (via_orb & via_ddrb) | ({4'b0000, cuda_treq, 3'b000} & ~via_ddrb);
 
 assign via_tip     = ~via_ddrb[5] | via_orb[5];
@@ -816,6 +822,8 @@ always_ff @(posedge clk) begin
 	// in the cycle of a clear is a new event and stays.
 	for (int i = 0; i < 32; i++)
 		if (int_chg[i]) int_events[i] <= int_68k | int_lines[i];
+	if (int_68k & via_new) int_events[18] <= 1'b1;
+	via_en_q    <= via_ifr[6:0] & via_ier[6:0];
 	int_lines_q <= int_lines;
 
 	if (sel & dma & we & ch_ok) begin

@@ -27,6 +27,7 @@ Newest last.
 | 12 | The lockstep bench: `dcbz`'s alignment exception handed to the reference | bench | Latent (no divergence seen there) |
 | 13 | ppctest's supervisor PTEs: WIMG shifted twice (`super603.py`'s copy fixed) | test generator | Check MacPPC7300's own PTE helpers |
 | 14 | Main_MiSTer: a CHD with an unstored pregap mounts unlike its CUE | Main (Mac CD layer) | Yes: the same Main code serves MacPPC7300's CD |
+| 15 | Grand Central in 68k mode: a new VIA interrupt while the VIA's line is already high is lost | machine | Yes: the same Pippin_gc/MacPPC7300_gc code |
 
 ## The items
 
@@ -180,6 +181,21 @@ Newest last.
 - MacPPC7300: the same Main code serves its CD; the fix is in the Main, not
   in the core. (`cdcheck` would need MacPPC7300's slot predicates if it were
   copied there; the code is the Main's.)
+
+### 15. Grand Central loses a VIA interrupt that arrives while the line is high
+
+- Here: `rtl/machine/Pippin_gc.sv` (`via_new`), 2026-10-19.
+- What: Grand Central set an interrupt event only when a source's line
+  changed. In 68k mode (MACIO_INT_MODE, as Mac OS runs it) dingusppc sets the
+  event at every report of a source (`ack_int_common`). With the VIA's line
+  already high (T2's flag pending and enabled), a T1 interrupt changed
+  nothing, Mac OS cleared the event, and the CPU never saw an interrupt again:
+  on the Pippin board, Super Marathon's boot stopped 16 s in (the trace's
+  interrupt-state record: VIA IFR 64, IER 24, line high, events 0). Now a VIA
+  flag newly set and enabled is an event of its own in 68k mode. Other sources
+  (MESH, the SCCs) have the same exposure and are unchanged so far.
+- MacPPC7300: the same code (`MacPPC7300_gc`): the same hazard, timing-
+  dependent (the bench never hit it here either).
 
 ## Not for MacPPC7300
 
