@@ -118,7 +118,7 @@ devices/RTC from the Main.
 
 **Next step**: the 048981b build (TRACE_INT: kind 4 records of every write to
 Grand Central's interrupt registers F30000xx and to the VIA F3016000-F3017FFF)
-is built: `output_files/BandaiPippin.rbf` of 2026-10-19 09:57 (worst slack  ns
+is built: `output_files/BandaiPippin.rbf` of 2026-10-19 09:57 (worst slack -0.020 ns
 at 58.33 MHz), not yet on the board (rebuild from 048981b if output_files has
 changed since). Put it on .92 (`MISTER_KEY=~/.ssh/id_rsa python3
 syn/mister.py put-core`), start `python3 syn/mister.py trace-capture 150`, load
