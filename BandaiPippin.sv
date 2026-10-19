@@ -99,37 +99,51 @@ wire [1:0] ar = status[122:121];         // the aspect ratio (video_freak, below
 
 `include "build_id.v"
 localparam CONF_STR = {
+	// the OSD standard of the computer cores (hp9000-715's docs/osd-standard.md): the media
+	// and Load ROM, Memory, the pages (P2 Video, P3 Input, P4 Audio, P5 Advanced), then
+	// "Changes pending" and Apply and reset; every setting but Input's waits for the reset.
+	// The status bits are those of the earlier layout, so saved settings carry over.
 	"Pippin;UART115200:57600:38400:19200:9600,MIDI;",
 	"-;",
+	// the CD-ROM on slot 4 (the Main's Mac CD layer), the drive the Pippin boots from; SC,
+	// so the Main remembers the disc
+	"SC4,ISOTO*CUEBINCHD,Pri. CD-ROM (ID 3);",
 	"F1,ROM,Load ROM;",
-	// the CD-ROM on slot 4, as the Mac SCSI family has it (the Main's Mac CD layer:
-	// Main_MiSTer branch pippin-cdrom); SC, so the Main remembers the disc
-	"SC4,ISOTO*CUEBINCHD,Mount CD;",
+	"-;",
+	// the retail 5 MB; 13 and 21 MB (the expansion banks at 32 and 48 MB) need a 64 MB SDRAM
+	// board or larger (menu mask bit 2)
+	"H2O[7:5],Memory,5 MB;",
+	"h2O[7:5],Memory,5 MB,13 MB,21 MB;",
+	"-;",
+	"P2,Video;",
+	"P3,Input;",
+	"P4,Audio;",
+	"P5,Advanced;",
+	"-;",
+	"h0-,Changes pending;",
+	"R[0],Apply and reset;",
+
+	"P2O[32:30],Video out,NTSC,VGA,PAL;",
+	"P2O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"P2O[10:9],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+
+	// the ADB game controller (taken at the reset: the machine only sees its bus change
+	// then, so it counts in "Changes pending"); the stick's pointer setting is hidden, its
+	// line kept, without a controller (mask bit 1)
+	"P3O[13:11],Controller,AppleJack,None,MouseStick II,Firebird,GamePad,SideWinder;",
+	"H1P3O[14],Stick moves pointer,No,Yes;",
+	"h1P3-;",
+
+	"P4O[20],Use MT32-pi,Yes,No;",
+	"P4O[21],Synth,Munt,FluidSynth;",
+	// one line: the Munt ROM with Munt, the SoundFont with FluidSynth (mask bit 3)
+	"H3P4O[23:22],Munt ROM,MT-32 v1,MT-32 v2,CM-32L;",
+	"h3P4O[26:24],SoundFont,0,1,2,3,4,5,6,7;",
+	"P4O[28:27],Show Info,No,Yes,LCD-On,LCD-Auto;",
+
 	// the save flash (Pippin_flash), 128 KB, kept in an image on slot 2 (Pippin_nvsave)
-	"SC2,SAV,Mount save flash;",
-	"-;",
-	// RAM: the retail 5 MB; 13 and 21 MB (the expansion banks at 32 and 48 MB) need a
-	// 64 MB SDRAM board or larger (menu mask bit 0)
-	"H0O[7:5],RAM (on reset),5 MB;",
-	"h0O[7:5],RAM (on reset),5 MB,13 MB,21 MB;",
-	"O[32:30],Video out (on reset),NTSC,VGA,PAL;",
-	"-;",
-	"O[13:11],Controller (on reset),AppleJack,None,Gravis MouseStick II,Gravis Firebird,Gravis GamePad,SideWinder 3D Pro;",
-	"O[14],Stick moves pointer,No,Yes;",
-	"-;",
-	"P1,MT32-pi;",
-	"P1-;",
-	"P1O[20],Use MT32-pi,Yes,No;",
-	"P1O[21],Synth,Munt,FluidSynth;",
-	"P1O[23:22],Munt ROM,MT-32 v1,MT-32 v2,CM-32L;",
-	"P1O[26:24],SoundFont,0,1,2,3,4,5,6,7;",
-	"P1O[28:27],Show Info,No,Yes,LCD-On,LCD-Auto;",
-	"-;",
-	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"O[10:9],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
-	"-;",
-	"T[0],Reset;",
-	"R[0],Reset and close OSD;",
+	"P5SC2,SAV,Save flash;",
+
 	// the AppleJack's buttons (Pippin_adb): 1-9 green, red, blue, yellow, the shoulders,
 	// circle, diamond, square
 	"J,Green,Red,Blue,Yellow,L Shoulder,R Shoulder,Circle,Diamond,Square;",
@@ -289,6 +303,8 @@ assign sd_buff_din[0] = disk_buff_din; assign sd_buff_din[1] = disk_buff_din; as
 assign sd_buff_din[3] = disk_buff_din; assign sd_buff_din[4] = disk_buff_din; assign sd_buff_din[5] = disk_buff_din;
 assign sd_buff_din[6] = 8'd0;
 
+wire pending, no_stick;                     // the OSD's menu mask bits 0 and 1 (below)
+
 hps_io #(.CONF_STR(CONF_STR), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
 (
 	.clk_sys(clk_sys),
@@ -299,7 +315,7 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
 	.forced_scandoubler(forced_scandoubler),
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({15'd0, sdram_mod[1]}),
+	.status_menumask({12'd0, status[21], sdram_mod[1], no_stick, pending}),
 	.sdram_sz(sdram_sz),
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
@@ -477,6 +493,9 @@ always @(posedge clk_mem) reset_in <= {reset_in[1:0], RESET | status[0] | button
 // the console's video switch: NTSC (5, the default), VGA (6), PAL (3)
 wire [2:0] mon_sel = (status[32:30] == 3'd1) ? 3'd6 : (status[32:30] == 3'd2) ? 3'd3 : 3'd5;
 
+// the OSD's controller list: AppleJack first (controller 5), then none and the others (0-4)
+wire [2:0] joy_sel = (status[13:11] == 3'd0) ? 3'd5 : (status[13:11] > 3'd5) ? 3'd0 : status[13:11] - 3'd1;
+
 reg       spd_want_m = 0;
 reg [2:0] spd_busy_s = 3'b111, spd_pll_s;
 always @(posedge clk_mem) begin
@@ -503,14 +522,20 @@ reg         cpu_fast_m = 0;
 always @(posedge clk_mem) if (cpu_reset_m) begin
 	ram_mb     <= ram_opt;
 	mon_m      <= mon_sel;
-	// the OSD's list: AppleJack first (controller 5), then none and the others (0-4)
-	joy_mode   <= (status[13:11] == 3'd0) ? 3'd5 : (status[13:11] > 3'd5) ? 3'd0 : status[13:11] - 3'd1;
+	joy_mode   <= joy_sel;
 	net_on     <= 1'b0;                     // no Ethernet on the Pippin
 	tr_mesh_m  <= status[29];
 	l2_on_m    <= ~status[4];
 	spd_want_m <= 1'b0;                     // the PLL's 70 MHz, never reconfigured
 	cpu_fast_m <= spd_pll_s[2];
 end
+// "Changes pending" (menu mask bit 0): an OSD setting differs from the one the machine
+// took at its last reset (the memory, the video out, the controller); the Input page's
+// stick setting and the media apply at once and are left out
+assign pending  = ram_opt != ram_mb || mon_sel != mon_m || joy_sel != joy_mode;
+// mask bit 1: no controller, so no stick to move the pointer with
+assign no_stick = joy_sel == 3'd0;
+
 wire [51:0] joy = {status[14], joy_mode, joystick_r_analog_0, joystick_l_analog_0, joystick_0[15:0]};
 
 // into the CPU's clock (the options are quasi-static: they change only with the reset held)
