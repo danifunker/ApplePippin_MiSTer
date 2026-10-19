@@ -10,9 +10,11 @@ to the card and the core's UART.
 
     python syn\\mister.py install [--games DIR] [--no-games]
                                                  the whole set: the core (put-core), the Main
-                                                 build with the Pippin's CD path as MiSTer_pippin
-                                                 and MiSTer.ini's [Pippin] section main=MiSTer_pippin
-                                                 (other cores keep the board's own Main), the ROMs
+                                                 (Main_MiSTer branch consolidated: upstream master
+                                                 and the Pippin's commits) as /media/fat/MiSTer, one
+                                                 Main for every core (the old one kept as
+                                                 MiSTer.prev-<date>; an earlier install's
+                                                 MiSTer_pippin and [Pippin] main= removed), the ROMs
                                                  (Kinka 1.3 as boot.rom), and the discs of DIR
                                                  (default scratch/pippin/install): .cue/.bin and
                                                  .chd, copied unless already there at the same size
@@ -88,6 +90,7 @@ password (BatchMode). The websocket needs Python's websockets package.
 import base64
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -98,7 +101,7 @@ ROOT = os.path.dirname(HERE)
 CORE_DIR = "/media/fat/_Console"
 CORE = CORE_DIR + "/BandaiPippin_%s.rbf" % time.strftime("%Y%m%d")
 GAMES = "/media/fat/games/Pippin"
-MAIN_ALT = "/media/fat/MiSTer_pippin"                                      # Main_MiSTer branch pippin-cdrom
+MAIN = "/media/fat/MiSTer"                                                 # the one Main for every core
 MAIN_BUILD = os.path.join(os.path.expanduser("~"), "repos", "Main_MiSTer-pippin", "bin", "MiSTer")
 RAM_OPTION = {5: 0, 13: 1, 21: 2}                                         # BandaiPippin.sv: O[7:5]
 VIDEO_OPTION = {"ntsc": 0, "vga": 1, "pal": 2}                            # BandaiPippin.sv: O[32:30]
@@ -188,13 +191,30 @@ def install(games, games_dir):
     """Everything the Pippin needs on this MiSTer."""
     if put_core(os.path.join(ROOT, "output_files", "BandaiPippin.rbf")):
         return 1
-    # the Main with the Pippin's CD path, for this core only: MiSTer.ini's [Pippin]
-    # section names it (cfg.cpp MAIN; user_io.cpp restarts into it as the core loads)
-    # (a new name, then renamed: the old one may be the Main running now)
-    if scp(MAIN_BUILD, "root@%s:%s.new" % (host(), MAIN_ALT)) or ssh("chmod +x %s.new && mv %s.new %s" % (MAIN_ALT, MAIN_ALT, MAIN_ALT)):
+    # the Main: one for every core (Main_MiSTer's consolidated branch: upstream master,
+    # the HP 9000 family with it, and the Pippin's commits). The old one is kept, dated,
+    # unless it is this build already; the new one goes in under another name and is
+    # renamed, the running Main being that file. What an earlier install made for a
+    # Main of the Pippin's own goes: MiSTer_pippin, and MiSTer.ini's [Pippin] section
+    # with its main= (MiSTer.ini kept first as MiSTer.ini.prev-<date>).
+    stamp = time.strftime("%Y%m%d-%H%M")
+    if scp(MAIN_BUILD, "root@%s:%s.new" % (host(), MAIN)):
         return 1
-    ssh("cd /media/fat && touch MiSTer.ini && grep -qi '^\\[Pippin\\]' MiSTer.ini || "
-        "printf '\\n[Pippin]\\nmain=MiSTer_pippin\\n' >> MiSTer.ini; grep -i -A1 '^\\[Pippin\\]' MiSTer.ini")
+    script = """cd /media/fat || exit 1
+chmod +x MiSTer.new
+cmp -s MiSTer MiSTer.new || cp -p MiSTer MiSTer.prev-%(s)s
+mv MiSTer.new MiSTer
+rm -f MiSTer_pippin
+if grep -qi '^\\[Pippin\\]' MiSTer.ini; then
+    cp -p MiSTer.ini MiSTer.ini.prev-%(s)s
+    awk 'BEGIN{p=0} /^\\[/{p=(tolower($0)=="[pippin]")} !(p && (/^\\[/ || /^main=/))' MiSTer.ini > MiSTer.ini.new
+    mv MiSTer.ini.new MiSTer.ini
+fi
+ls -la MiSTer MiSTer.prev-* MiSTer.ini.prev-* 2>/dev/null | tail -4
+grep -n -i -A1 '^\\[Pippin\\]' MiSTer.ini || echo 'MiSTer.ini: no [Pippin] section'
+""" % {"s": stamp}
+    if ssh("sh -c %s" % shlex.quote(script)):
+        return 1
     ssh("mkdir -p '%s'" % GAMES)
     have = remote_sizes(GAMES)
     files = [(os.path.join(ROOT, ROMS[0][0]), "boot.rom")] + [(os.path.join(ROOT, f), n) for f, n in ROMS]
@@ -215,7 +235,7 @@ def install(games, games_dir):
         if scp(src, "root@%s:%s/incoming.tmp" % (host(), GAMES)) or \
                 ssh("mv '%s/incoming.tmp' '%s/%s'" % (GAMES, GAMES, name)):
             return 1
-    return ssh("ls -la '%s' %s %s/BandaiPippin_*.rbf" % (GAMES, MAIN_ALT, CORE_DIR))
+    return ssh("ls -la '%s' %s %s/BandaiPippin_*.rbf" % (GAMES, MAIN, CORE_DIR))
 
 
 def ssh_clean(cmd, timeout):
