@@ -118,8 +118,9 @@ devices/RTC from the Main.
 
 **Next step**: the 048981b build (TRACE_INT: kind 4 records of every write to
 Grand Central's interrupt registers F30000xx and to the VIA F3016000-F3017FFF)
-was queued under the lock when this was written (log in the session scratchpad;
-rebuild if it is gone). Put it on .92 (`MISTER_KEY=~/.ssh/id_rsa python3
+is built: `output_files/BandaiPippin.rbf` of 2026-10-19 09:57 (worst slack  ns
+at 58.33 MHz), not yet on the board (rebuild from 048981b if output_files has
+changed since). Put it on .92 (`MISTER_KEY=~/.ssh/id_rsa python3
 syn/mister.py put-core`), start `python3 syn/mister.py trace-capture 150`, load
 the core through the OSD (F12, up, right = System page, enter = Core, the
 browser opens in `_Console` on BandaiPippin, enter), wait 150 s,
