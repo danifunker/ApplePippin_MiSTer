@@ -475,7 +475,7 @@ Pippin_taosvideo video (
 	.ddr_busy(va_busy), .ddr_burstcnt(va_burstcnt), .ddr_addr(va_addr), .ddr_dout, .ddr_dout_ready(va_dout_ready),
 	.ddr_rd(va_rd), .ddr_din(va_din), .ddr_be(va_be), .ddr_we(va_we),
 	.timing_on(taos_on), .swatch(taos_swatch), .fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16),
-	.athens_d2, .athens_n2, .athens_p2, .vbl,
+	.athens_d2, .athens_n2, .athens_p2, .mon_id, .vbl,
 	.clut_index, .clut_rgb,
 	.ce_pix(vid_ce), .r(vid_r), .g(vid_g), .b(vid_b), .hs(vid_hs), .vs(vid_vs),
 	.hblank(vid_hblank), .vblank(vid_vblank), .field(vid_field), .interlaced(vid_interlaced)

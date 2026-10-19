@@ -27,6 +27,8 @@ CPU       ?= 604
 MAIN_MISTER ?= $(HOME)/repos/Main_MiSTer-pippin
 MAINCD_DIR  ?= $(HOME)/.cache/applepippin/maincd
 MAINCD_LIB  := $(MAINCD_DIR)/libmaincd.a
+# extra Pippin_system parameters for the machine bench (e.g. -GSOUND_IN_DMA=0, as the board's top)
+MACH_GFLAGS ?=
 
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CPU_NAME := DSPPC$(CPU)
@@ -95,7 +97,7 @@ FORCE:
 $(MACH_DIR)/machine_tb: $(MACH_CPU) $(MACH_SRCS) $(HERE)core_main.cpp $(HERE)cdhost.h $(MACH_RTL)/DSPPC603.qip $(MACH)/Pippin_machine.qip $(HERE)Makefile $(REF_LIB) $(MAINCD_LIB)
 	@mkdir -p $(MACH_DIR)
 	@sed 's/DSPPC604/DSPPC603/g' $(HERE)core_main.cpp > $(MACH_DIR)/core_main.cpp
-	@$(VERILATOR) $(VFLAGS) --top-module Pippin_system -GCUDA_FAST_BOOT=1 -Mdir $(MACH_DIR) -o machine_tb \
+	@$(VERILATOR) $(VFLAGS) --top-module Pippin_system -GCUDA_FAST_BOOT=1 $(MACH_GFLAGS) -Mdir $(MACH_DIR) -o machine_tb \
 		-CFLAGS "-O2 -std=c++17 -DPIPPIN_MACHINE -DCPU_MODEL=603 -I$(HERE) -I$(MAIN_MISTER)/support/mac $(REF_CFLAGS)" $(REF_LDFLAGS) \
 		-LDFLAGS "$(MAINCD_LIB)" $(MACH_CPU) $(MACH_SRCS) $(MACH_DIR)/core_main.cpp \
 		> $(MACH_DIR)/build.log 2>&1 || (cat $(MACH_DIR)/build.log; false)

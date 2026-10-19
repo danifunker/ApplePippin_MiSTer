@@ -69,6 +69,9 @@ always_ff @(posedge clk) begin
 	sda_q <= sda;
 
 	if (start) begin
+`ifdef VERILATOR
+		$display("athens: i2c start (state %0d)", st);
+`endif
 		st      <= S_ADDR;
 		bitn    <= 4'd0;
 		nbyte   <= 2'd0;
@@ -89,6 +92,9 @@ always_ff @(posedge clk) begin
 					// the eighth bit is in: acknowledge it, or not
 					bitn <= 4'd9;
 					if (st == S_ADDR) begin
+`ifdef VERILATOR
+						$display("athens: i2c address byte %02X (%s)", byte_in, byte_in[7:1] == ADDR ? "ours" : "not ours");
+`endif
 						if (byte_in[7:1] == ADDR) begin
 							sda_low <= 1'b1;
 							rd      <= byte_in[0];
@@ -96,6 +102,9 @@ always_ff @(posedge clk) begin
 						else st <= S_IDLE;
 					end
 					else begin
+`ifdef VERILATOR
+						$display("athens: i2c data byte %0d: %02X", nbyte, byte_in);
+`endif
 						if (nbyte == 2'd0) begin
 							reg_n   <= byte_in;
 							sda_low <= 1'b1;

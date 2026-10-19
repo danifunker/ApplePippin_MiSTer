@@ -39,7 +39,10 @@
 module Pippin_taosvideo
 #(
 	parameter int unsigned CLKV_HZ  = 100_000_000,
-	parameter logic [28:0] DDR_BASE = 29'h0600_0000     // byte 3000_0000, in 64-bit words
+	parameter logic [28:0] DDR_BASE = 29'h0600_0000,    // byte 3000_0000, in 64-bit words
+	// 1: the dot clock is the console's standard line rate times Taos's line (below); 0:
+	// Athens's, as its registers say
+	parameter bit          STD_DOT  = 1'b1
 )
 (
 	input  logic         clk,             // the video clock: the memory clock
@@ -75,6 +78,7 @@ module Pippin_taosvideo
 	input  logic [7:0]   athens_d2,
 	input  logic [7:0]   athens_n2,
 	input  logic [7:0]   athens_p2,
+	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 3 PAL, 6 VGA (STD_DOT)
 	output logic         vbl,
 	output logic [23:0]  clut_index,      // Taos's colour table (R, G, B indices), read a clock later
 	input  logic [23:0]  clut_rgb,
@@ -111,15 +115,34 @@ wire [11:0] fbb  = fb_base[31:20];
 wire [11:0] pitch = row_words[31:20];
 
 // ---- the dot clock ---------------------------------------------------------------------------
+// STD_DOT (2026-10-19): the ROM leaves Athens at 20 MHz x 46 / (16 x 4) = 14.375 MHz, which on
+// Taos's 780-clock line (HPIX 778) made 18.43 kHz lines and 70 Hz fields on the board.
+// dingusppc's Pippin (no save flash: another branch of the ROM) has Mac OS's driver set
+// 24.545 MHz (27 / 11 / 2), Taos counting a dot every second clock; that reprogramming never
+// reaches our Athens, why not yet known. Meanwhile the dot clock is the standard's line rate
+// times Taos's own line length (HPIX + 2): NTSC 4.5 MHz / 286 = 15,734.27 Hz (12.27 MHz on
+// 780), PAL 15,625 Hz, VGA 25.175 MHz / 800 = 31,468.75 Hz.
 localparam longint unsigned XTAL = 20_000_000;
 logic [39:0] numer, denom, acc;
 logic        dot_off, ce_dot;
 wire  [40:0] acc_n = {1'b0, acc} + {1'b0, numer};
 wire  [7:0]  d_eff = (athens_p2[5:4] == 2'd2) ? 8'd1 : athens_d2;
+wire  [12:0] htot  = {1'b0, T_HPIX} + 13'd2;
 always_ff @(posedge clk) begin
-	numer   <= (athens_p2[5:4] == 2'd2) ? 40'(XTAL) : 40'(athens_n2) * 40'(XTAL);
-	denom   <= (40'(d_eff) * 40'(CLKV_HZ)) << (2'd3 - athens_p2[1:0]);
-	dot_off <= athens_p2[7] | athens_p2[4] | (athens_p2[5:4] == 2'd0 && (athens_d2 == 8'd0 || athens_n2 == 8'd0));
+	if (STD_DOT) begin
+		numer   <= (mon_id == 3'd5) ? 40'(4_500_000)  * 40'(htot) :
+		           (mon_id == 3'd3) ? 40'(15_625)     * 40'(htot) :
+		                              40'(25_175_000) * 40'(htot);
+		denom   <= (mon_id == 3'd5) ? 40'(286) * 40'(CLKV_HZ) :
+		           (mon_id == 3'd3) ? 40'(CLKV_HZ) :
+		                              40'(800) * 40'(CLKV_HZ);
+		dot_off <= 1'b0;
+	end
+	else begin
+		numer   <= (athens_p2[5:4] == 2'd2) ? 40'(XTAL) : 40'(athens_n2) * 40'(XTAL);
+		denom   <= (40'(d_eff) * 40'(CLKV_HZ)) << (2'd3 - athens_p2[1:0]);
+		dot_off <= athens_p2[7] | athens_p2[4] | (athens_p2[5:4] == 2'd0 && (athens_d2 == 8'd0 || athens_n2 == 8'd0));
+	end
 	ce_dot  <= 1'b0;
 	if (dot_off) acc <= 40'd0;
 	else if (numer >= denom) begin acc <= 40'd0; ce_dot <= 1'b1; end
