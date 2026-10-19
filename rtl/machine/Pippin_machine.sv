@@ -99,7 +99,8 @@ module Pippin_machine
 	parameter int unsigned RTXC_HZ  = 3_686_400,     // the ESCC's RTxC clock
 	parameter int unsigned SCSI_HZ  = 25_000_000,    // MESH's time base and Curio's clock (below CPU_HZ)
 	parameter int unsigned CUDA_FAST_BOOT = 0,      // 1: the test bench's (Pippin_cuda FAST_BOOT)
-	parameter int unsigned SOUND_IN_DMA = 1         // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned TRACE_INT = 1            // 1: the trace takes Grand Central's interrupt and the VIA's register writes
 )
 (
 	input  logic         clk,
@@ -859,9 +860,13 @@ logic [15:0] bt_div = 16'd0;
 // MACE (F3011000-F30111FF) and its DMA channels 2 and 3 (F3008200, 8300); AWACS (F3014000)
 // and its channel 8 (F3008800); MESH (F3018000) and its channel A (F3008A00) with tr_mesh.
 // Not the interrupt registers: the NanoKernel reads and rewrites them thousands of times a second
+// With TRACE_INT: the writes to Grand Central's interrupt registers (mask, clear) and to
+// the VIA (its IFR and IER are how Mac OS takes and acknowledges its interrupts), for the
+// interrupts that stop on the board after the ROM's ADB set-up (2026-10-19)
 wire         bt_hit = q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
-                                (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)));
+                                (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
+                                (TRACE_INT != 0 && q_we && (qa[16:8] == 9'h000 || q_is_via)));
 always_ff @(posedge clk) begin
 	if (bt_div == (cpu_fast ? 16'(CPU_HZ_FAST / 1_000_000 - 1) : 16'(CPU_HZ / 1_000_000 - 1))) begin
 		bt_div <= 16'd0;
