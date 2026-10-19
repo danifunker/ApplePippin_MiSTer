@@ -90,7 +90,10 @@ reads the disc's boot blocks (READ(10) of sectors 0 and 16, twice), READ TOC,
 TEST UNIT READY, PREVENT, then the ADB address resolution (19 x "listen r3"
 to address 2), a reset/flush, ADB polling for ~1 s, and then **nothing**: no
 SCSI, no ADB. The bench (same RTL, same disc) goes on: READ(6) 1.5 s after the
-ADB reset, then the boot.
+ADB reset, then the boot: at 700 M instructions it shows the disc's own
+**Bandai Digital Entertainment splash** (no lockstep, `--cd` through the
+Main's CD code, 2,195 blocks read by 900 M). So the core boots a disc in
+simulation; the board does not.
 
 The CPU keeps running 68K-emulator code (68060CC0, 68060D2C, MSR D072, EE on)
 but takes no external interrupt again. The trace's interrupt-state record
