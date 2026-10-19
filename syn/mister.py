@@ -608,6 +608,11 @@ def trace(last, first, fname=None):
             else:
                 print("%s DMA-%d STOPPED in state %d %s res %d status %04x conds w%d b%d i%d"
                       % (t, r[1], y >> 28, c, x >> 16, x & 0xFFFF, (y >> 2) & 1, (y >> 1) & 1, y & 1))
+        elif kind == 7:
+            # Grand Central's interrupt state every 2^22 CPU cycles (Pippin_system)
+            w = [int.from_bytes(r[k:k + 4], "little") for k in (4, 8, 12, 16)]
+            print("%5d cycle %08x INT mask %08x events %08x lines %08x | VIA IFR %02x IER %02x | irq %d via_irq %d"
+                  % (i, w[0], w[1], w[2], w[3], r[20], r[21], r[22] & 1, (r[22] >> 1) & 1))
         elif kind == 13:
             # the codec's output frames (syn/sndtrace.py turns them into a WAV)
             cnt = int.from_bytes(r[1:4], "little")

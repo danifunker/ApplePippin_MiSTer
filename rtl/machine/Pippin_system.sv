@@ -278,6 +278,7 @@ logic         scsi_tr_ev;
 logic [255:0] scsi_tr_rec;
 logic         snd_frame;
 
+logic [127:0] int_dbg;                  // Grand Central's interrupt state (the trace, kind 7)
 Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUDA_FAST_BOOT(CUDA_FAST_BOOT),
                      .SOUND_IN_DMA(SOUND_IN_DMA)) machine (
 	.clk, .cpu_fast, .reset, .ram_mb, .rom_at, .boot_memtest,
@@ -294,7 +295,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
 	.fl_ld_we, .fl_ld_re, .fl_ld_addr, .fl_ld_data, .fl_ld_q, .fl_changed,
-	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs,
+	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs, .int_dbg,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
 	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .vbl,
 	.clk_v(clk_b), .clut_index, .clut_rgb,
@@ -439,8 +440,23 @@ always_ff @(posedge clk) begin
 	end
 	if (reset) begin vc_ev <= 1'b0; vc_cyc <= '0; end
 end
-wire         tr_ev  = scsi_tr_ev | pf_ev | sn_ev | cs_ev | vc_ev;
-wire [255:0] tr_rec = scsi_tr_ev ? scsi_tr_rec : pf_ev ? pf_rec : sn_ev ? sn_rec : cs_ev ? cs_rec : vc_rec;
+// kind 7 (TRACE): Grand Central's interrupt state every 2^22 cycles: bytes 4-7 the cycle
+// count, 8-11 the mask, 12-15 the events, 16-19 the lines (levels), 20 the VIA's IFR,
+// 21 its IER, 22 bit 0 the CPU's interrupt, bit 1 the VIA's
+logic         ic_ev = 1'b0;
+logic [255:0] ic_rec;
+always_ff @(posedge clk) begin
+	if (ic_ev & ~scsi_tr_ev & ~pf_ev & ~sn_ev & ~cs_ev & ~vc_ev) ic_ev <= 1'b0;
+	if (TRACE != 0 && vc_cyc[21:0] == 22'h200000) begin
+		ic_ev  <= 1'b1;
+		ic_rec <= {64'd0, int_dbg[15:0], int_dbg[23:16], int_dbg[31:24], int_dbg[63:32], int_dbg[95:64],
+		           int_dbg[127:96], vc_cyc, 24'd0, 8'd7};
+	end
+	if (reset) ic_ev <= 1'b0;
+end
+wire         tr_ev  = scsi_tr_ev | pf_ev | sn_ev | cs_ev | vc_ev | ic_ev;
+wire [255:0] tr_rec = scsi_tr_ev ? scsi_tr_rec : pf_ev ? pf_rec : sn_ev ? sn_rec : cs_ev ? cs_rec :
+                      vc_ev ? vc_rec : ic_rec;
 
 generate
 if (TRACE != 0) begin : g_trace

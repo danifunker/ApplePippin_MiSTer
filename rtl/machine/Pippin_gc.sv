@@ -95,6 +95,7 @@ module Pippin_gc
 	input  logic [31:0] wdata,
 	output logic [31:0] rdata,
 	output logic        irq,           // to the CPU's external interrupt
+	output logic [127:0] int_dbg,      // for the trace (kind 7): mask, events, lines, the VIA's IFR and IER, irq
 
 	// the VIA's lines to Cuda (Pippin_cuda): port B and the shift register
 	input  logic        cuda_treq,     // PB3 in: 0 when Cuda asks for a transaction
@@ -586,6 +587,8 @@ logic        cb1_q;                  // CB1 as last seen
 logic        cb2_q;                  // what the VIA drives on CB2
 wire  [3:0]  via_reg    = addr[12:9];
 wire  [7:0]  via_ifr_rd = {|(via_ifr[6:0] & via_ier[6:0]), via_ifr[6:0]};
+// the interrupt state for the trace (Pippin_system, kind 7)
+assign int_dbg = {int_mask, int_events, int_lines_q, via_ifr, via_ier, 14'd0, via_irq, irq};
 assign via_irq = via_ifr_rd[7];
 wire  [7:0]  via_pb_rd  = (via_orb & via_ddrb) | ({4'b0000, cuda_treq, 3'b000} & ~via_ddrb);
 

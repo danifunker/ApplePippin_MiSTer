@@ -130,6 +130,7 @@ module Pippin_machine
 	input  logic [255:0] m_rdata,
 
 	output logic         ext_irq,
+	output logic [127:0] int_dbg,         // Grand Central's interrupt state, for the trace (kind 7)
 	output logic         tb_tick,
 	output logic         cpu_reset,                 // Cuda holds the CPU in reset
 	output logic         power_wake,                // off, and the power key pressed: reset the machine
@@ -651,7 +652,7 @@ logic [7:0]   itr_st;
 Pippin_gc #(.SCSI_HZ(SCSI_HZ), .SOUND_IN_DMA(SOUND_IN_DMA)) gc (
 	.clk, .reset(board_reset), .via_tick, .rtxc_tick, .scsi_tick, .us_tick, .snd_tick,
 	.sel(p_sel & p_dev[3]), .we(p_we), .addr(p_a[16:2]), .be(p_be), .wdata(p_wd),
-	.rdata(gc_rdata), .irq(gc_irq),
+	.rdata(gc_rdata), .irq(gc_irq), .int_dbg,
 	.cuda_treq, .cuda_cb1, .cb2(cb2_line), .via_tip, .via_byteack, .via_cb2_oe, .via_cb2_out,
 	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi,
 	.net_link, .net_tx_we, .net_tx_wa, .net_tx_wd, .net_tx_go, .net_tx_len, .net_tx_done,
