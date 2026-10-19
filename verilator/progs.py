@@ -355,18 +355,29 @@ def exctest(out):
     expect(X(2, 1, 8, 663), 0, align_ea=DATA_A + 3)               # stfsx
     # a string operation that is not word-aligned and crosses a 4 KB boundary,
     # or is word-aligned and crosses a 256 MB boundary, is not performed either
+    # on the 604; the 603e performs them (its manual, 2.3.4.3.6 and 4.5.6), so
+    # there they are plain accesses (the 256 MB one left out: its store would
+    # reach 10000000, outside this program's memory)
+    string_align = CPU != "603"
     p.words += li32(8, DATA_A + 0xFFE)
-    expect(X(29, 8, 4, 597), 0, align_ea=DATA_A + 0xFFE)          # lswi r29,r8,4: bytes FFE-1001
+    if string_align:
+        expect(X(29, 8, 4, 597), 0, align_ea=DATA_A + 0xFFE)      # lswi r29,r8,4: bytes FFE-1001
+    else:
+        no_exc(X(29, 8, 4, 597))
     no_exc(X(29, 8, 2, 725))                                      # stswi r29,r8,2: ends at FFF
     p.words += li32(0, 0) + li32(9, 3) + [mtspr(XER, 9)]
-    expect(X(29, 8, 0, 533), 0, align_ea=DATA_A + 0xFFE, xer=3)   # lswx r29,r8,r0: XER says 3 bytes
+    if string_align:
+        expect(X(29, 8, 0, 533), 0, align_ea=DATA_A + 0xFFE, xer=3)   # lswx r29,r8,r0: XER says 3 bytes
+    else:
+        no_exc(X(29, 8, 0, 533), xer=3)
     p.words += li32(9, 2) + [mtspr(XER, 9)]
     no_exc(X(29, 8, 0, 661), xer=2)                               # stswx, 2 bytes
     p.words += li32(9, 0) + [mtspr(XER, 9)]
     p.words += li32(8, DATA_A + 0xFFC)
     no_exc(X(29, 8, 8, 597))                                      # lswi, word-aligned across 4 KB
-    p.words += li32(8, 0x0FFFFFFC)
-    expect(X(29, 8, 8, 725), 0, align_ea=0x0FFFFFFC)              # stswi across 256 MB
+    if string_align:
+        p.words += li32(8, 0x0FFFFFFC)
+        expect(X(29, 8, 8, 725), 0, align_ea=0x0FFFFFFC)          # stswi across 256 MB
     setm(MSR_FP | MSR_PR)
     expect(X(9, 0, 0, 83), 0x00040000)                            # mfmsr in user mode
     expect(mfspr(SRR0, 9), 0x00040000)                            # a supervisor SPR in user mode

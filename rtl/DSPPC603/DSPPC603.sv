@@ -1882,7 +1882,7 @@ wire  fsys_chk = ex_valid & ex_dec.fpscr_wr & ~is_fpu & fp_trap_on;
 // from the adder's high bits) is then decided from a register, so that
 // neither the compare nor the whole add is in front of ex_abort, which
 // every commit, the redirect and the fetch wait for
-logic slow_held, trap_hit_q, x_align_s_q;
+logic slow_held, trap_hit_q;
 // (mfsrin and mtsrin too: their segment register's number, from rB, is
 // then a register, not the forwarded operand in front of the result)
 wire  srin     = ex_dec.rb_rd & (ex_dec.unit != UNIT_ALU) & (ex_dec.unit != UNIT_MUL) &
@@ -2339,40 +2339,9 @@ wire x_align_w = (ex_dec.mem_rd | ex_dec.mem_wr) &
 // disabled or locked (HID0[DCE], HID0[DLOCK]); the same for a write-through
 // or cache-inhibited page is decided in MEM, where the page is known
 wire x_align_z = ex_zero & (~hid0[14] | hid0[12]);
-// ... nor a string operation that is not word-aligned and crosses a 4 KB
-// boundary, or is word-aligned and crosses a 256 MB boundary (604 manual
-// 2.3.4.3); checked on its first access, which carries the whole count.
-// The 4 KB test is made from the operands beside the adder (every access is
-// a plain A + B), not from its sum, which put the adder in series with it.
-// The operation crosses when its last byte is in another page than its
-// first: with t = a[11:0] + b[11:0] + (count - 1) and c the carry out of
-// a[11:0] + b[11:0], the last byte's offset in the first byte's page is
-// t - 4096 c, and t[12] differs from c exactly when that reaches 4096. The
-// three-input sum is written as a 3:2 compression and one adder, so that
-// it is one carry chain beside the other and not two in series. It is
-// made once for each place A can come from (the register, MEM, WB) and
-// the forwarding selects choose among the three results, so that the
-// operand mux is not in front of it; B is the sequencer's displacement,
-// an immediate, so ex_b is B.
-function automatic logic str_cross(input logic [11:0] a, input logic [11:0] b, input logic [6:0] last);
-	logic [11:0] x, k;
-	logic [12:0] lo;
-	logic [13:0] t;
-	begin
-		x  = a ^ b ^ {5'd0, last};
-		k  = (a & b) | ((a | b) & {5'd0, last});
-		lo = {1'b0, a} + {1'b0, b};
-		t  = {2'b00, x} + {1'b0, k, 1'b0};
-		str_cross = t[12] ^ lo[12];
-	end
-endfunction
-wire [6:0]  str_last  = ex_dec.str_bytes - 7'd1;
-wire        str_4k    = fa_mem ? str_cross(mem_result[11:0], ex_b[11:0], str_last) :
-                        fa_wb  ? str_cross(wb_result[11:0],  ex_b[11:0], str_last) :
-                                 str_cross(ex_a[11:0],       ex_b[11:0], str_last);
-wire        x_align_s_now = (ex_dec.str_bytes != 7'd0) & str_4k &
-                            ((int_sum[1:0] != 2'b00) | (&int_sum[27:12]));
-wire        x_align_s = (ex_dec.str_bytes != 7'd0) & x_align_s_q;
+// (A string operation crossing a 4 KB boundary is no alignment exception on the
+// 603e, unlike the 604 (its manual, 2.3.4.3): it is performed in pieces, and a
+// DSI on the second page restarts it (603e manual 2.3.4.3.6, 4.5.6, 4.5.6.1.1).)
 // ... and in little-endian mode, any access the 604 cannot munge: one not
 // naturally aligned, lmw/stmw, the string forms
 wire [2:0] ex_mis = (ex_dec.mem_n == 4'd8) ? int_sum[2:0] :
@@ -2380,7 +2349,7 @@ wire [2:0] ex_mis = (ex_dec.mem_n == 4'd8) ? int_sum[2:0] :
                     (ex_dec.mem_n == 4'd2) ? {2'b00, int_sum[0]} : 3'b000;
 wire x_align_le = le_on & (ex_dec.mem_rd | ex_dec.mem_wr) &
                   ((ex_mis != 3'b000) | (ex_dec.seq == SEQ_MULTI) | (ex_dec.str_bytes != 7'd0));
-wire x_align  = x_align_w | x_align_s | x_align_z | x_align_le;
+wire x_align  = x_align_w | x_align_z | x_align_le;
 // eciwx and ecowx: a DSI, this machine having no external control facility
 wire x_ecx    = ex_dec.mem_ext;
 
@@ -2668,7 +2637,6 @@ always_ff @(posedge clk) begin
 	else if (fsys_chk & ~ex_stall_ops) fsys_held <= 1'b1;
 	trap_hit_q  <= trap_hit;
 	srin_idx_q  <= op_b[31:28];
-	x_align_s_q <= x_align_s_now;
 	if (ex_leave | id_to_ex | reset) slow_held <= 1'b0;
 	else if (slow_chk & ~ex_stall_ops) slow_held <= 1'b1;
 end
