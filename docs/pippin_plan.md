@@ -263,3 +263,25 @@ release, not the board tests.
   now hands it to the reference; rerunning to the title screen (dingusppc
   shows it at 1.4 billion). DSPPC603's DAR for it is an open 603e question
   (two new `tlb603` sequences; the generator's PTE WIMG bug fixed).
+
+**2026-10-18 (night): ready for the board.**
+
+- The core is **BandaiPippin** (the Quartus project, `_Console/BandaiPippin_<date>.rbf`);
+  its OSD name is **Pippin**, so its folders are `games/Pippin`, `saves/Pippin`,
+  `config/Pippin.*`. Main_MiSTer `pippin-cdrom` (084ed6a, 557a706; not pushed)
+  knows it as `pippin`.
+- `syn/mister.py install` sets a MiSTer up: the core, the pippin-cdrom Main as
+  `MiSTer_pippin` with MiSTer.ini's `[Pippin] main=MiSTer_pippin` (other cores
+  keep the board's Main), the ROMs (Kinka 1.3 as `boot.rom`; 1.2, 1.0, GM Flash
+  in the OSD's ROM list) and the discs: Super Marathon as CUE/BIN, Racing Days,
+  Macintosh on Pippin and Power Rangers Zeo as CHD.
+- CHD: the Main's Mac CD layer reads CHD (data and CD-DA). `verilator/maincd`
+  builds the Main's own CD code on the host; `cdcheck` found a CHD with an
+  unstored pregap (Racing Days) mounting 150 sectors longer than its CUE, fixed
+  in the Main (557a706); all three CHDs now equal their CUE/BIN. The bench's
+  slot 4 is served by that same code (`cdhost.h`).
+- The build for the board (seed 7, 21:05): 80 % of the ALMs, 340 RAM blocks;
+  the CPU's clock 59.7 MHz worst case against 70 (slack -2.47 ns, total -328
+  ns; seed 1 of the same source: -2.71, -1242). Worse than the first build's
+  63.1 MHz; the worst paths to be looked at. The board will say whether 70 MHz
+  holds; if not, the CPU clock comes down for the first test.
