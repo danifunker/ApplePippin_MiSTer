@@ -57,11 +57,12 @@ module emu
 // base keeps the Pippin's 16.5 MHz whatever the CPU's clock). No speed option: the PLL is never
 // reconfigured.
 localparam int SPEED = 70;
-localparam int CPU_MHZ = 70;
+localparam int CPU_MHZ = 58;               // 70, 100, or 58 (58.333 MHz, the PLL's 700 MHz / 12)
+localparam int CPU_HZ  = CPU_MHZ == 58 ? 58_333_333 : CPU_MHZ * 1_000_000;
 localparam int L2_KB = 0;               // the Pippin has no L2 cache
 localparam int TRACE = 1;               // 1: the DDR3 trace (syn\mister.py trace), for debugging builds
 localparam int SOUND_IN_DMA = 0;        // 1: DMA channel 9 (sound in, which records silence) a real channel
-localparam int PERF = 0;                // 1: the CPU's performance counters, into the trace (syn\perf.py; needs TRACE)
+localparam int PERF = 1;                // 1: the CPU's performance counters, into the trace (syn\perf.py; needs TRACE)
 localparam int SND_TRACE = 0;           // 1: the codec's output frames into the trace (syn\sndtrace.py; needs TRACE)
 
 ///////// Default values for ports not used in this core /////////
@@ -695,7 +696,7 @@ wire   [7:0] mac_r, mac_g, mac_b;
 
 assign DDRAM_CLK = clk_mem;
 
-Pippin_system #(.CPU_HZ(70000000), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(16500000),
+Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(16500000),
                     .TRACE(TRACE), .SOUND_IN_DMA(SOUND_IN_DMA), .PERF(PERF), .SND_TRACE(SND_TRACE)) system
 (
 	.clk(clk_cpu),

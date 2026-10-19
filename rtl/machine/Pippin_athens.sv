@@ -104,6 +104,9 @@ always_ff @(posedge clk) begin
 							if (reg_n < 8'd8) begin
 								regs[reg_n[2:0]] <= byte_in;
 								sda_low <= 1'b1;
+`ifdef VERILATOR
+								$display("athens: register %0d <= %02X", reg_n, byte_in);
+`endif
 							end
 						end
 						else sda_low <= 1'b1;

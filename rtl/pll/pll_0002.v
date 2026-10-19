@@ -30,6 +30,7 @@ module  pll_0002 #(
 );
 
 	localparam FAST = CPU_MHZ == 100;
+	localparam SLOW = CPU_MHZ == 58;            // 700 / 12 = 58.333 MHz (the Pippin's timing-margin build)
 
 	altera_pll #(
 		.fractional_vco_multiplier("false"),
@@ -41,7 +42,7 @@ module  pll_0002 #(
 		.output_clock_frequency0("20.000000 MHz"),
 		.phase_shift0("0 ps"),
 		.duty_cycle0(50),
-		.output_clock_frequency1(FAST ? "100.000000 MHz" : "70.000000 MHz"),
+		.output_clock_frequency1(FAST ? "100.000000 MHz" : SLOW ? "58.333333 MHz" : "70.000000 MHz"),
 		.phase_shift1("0 ps"),
 		.duty_cycle1(50),
 		.output_clock_frequency2("100.000000 MHz"),
@@ -79,8 +80,8 @@ module  pll_0002 #(
 		.c_cnt_in_src0("ph_mux_clk"),
 		.c_cnt_bypass_en0("false"),
 		.c_cnt_odd_div_duty_en0("true"),
-		.c_cnt_hi_div1(FAST ? 4 : 5),
-		.c_cnt_lo_div1(FAST ? 3 : 5),
+		.c_cnt_hi_div1(FAST ? 4 : SLOW ? 6 : 5),
+		.c_cnt_lo_div1(FAST ? 3 : SLOW ? 6 : 5),
 		.c_cnt_prst1(1),
 		.c_cnt_ph_mux_prst1(0),
 		.c_cnt_in_src1("ph_mux_clk"),
