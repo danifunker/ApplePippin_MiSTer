@@ -594,6 +594,31 @@ stores** (tmAddr at +6 and tmCount at +10 span two words; tmWakeUp at +14
 crosses into the next line), then the `movem.l` and the misaligned load:
 added to the castout phase in three cache states (both lines cached; the
 next line flushed; both flushed), building 18:05 (~18:30).
+
+**18:25, the EA/PA capture read closer (`scratch/tr_pa1.txt`, dense
+window from line 325586): the stash step on the board is NOT the tmAddr
+branch.** Samples 268304-268306: FFCF7BC8 (`tst.l 6(a0)`) → **FFCF7BCE**
+(`tst.l -20(a0)`: so tmAddr was nonzero after all) → FFCF66A4 within 4 us
+(the poll loop's `ori #$700,sr`). From FFCF7BCE the fast path is `bne`
+not taken, `move.l (sp)+,-20(a0)`, `moveq #0,d0`, `rts` — which should
+return to the init (FFCF5D34); it returned to FFCF66A0, the address just
+popped into the slot: as if `(sp)+` did not advance a7. And the PPC PC of
+that sample is **6806617C**, the dispatch loop's fall-through: the 68k
+emulator (RAM 68xxxxxx = ROM 3xxxxx + 0x300000) fetches with
+`lhau r27,2(r24)`, builds the handler address with rlwimi/mtlr and jumps
+with `bgelr+ cr2`; when cr2.LT is set it falls into `b fff6d0a4`, a slow
+path that calls a hook at [r31+0x814] before each instruction and
+filters opcodes (ORI/ANDI/EORI to SR, MOVE to SR, RTE, RTR, RTS, JSR/JMP,
+Bcc, DBcc): the "68k interrupt pending while masked" mode. So on the
+board the init ran with a 68k interrupt pending; a candidate: the
+**second VIA event at the falling edge** (68k mode: an event at either
+edge, as dingusppc), which posts a spurious 68k interrupt right after
+every service. **50fe6c0: `Pippin_gc` with the VIA's event at the rising
+edge only in 68k mode (the bbc509d re-report while high kept, which the
+first builds, rising-only, lacked), building 18:25 (~18:50): does the
+disc boot?** run15 (6ae01be, run5's options, since 17:41) gives the
+bench's dense window with ea/pa: whether its init also runs on the slow
+path (samples at PC 6806617C).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
