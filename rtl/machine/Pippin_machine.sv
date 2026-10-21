@@ -867,12 +867,13 @@ logic [15:0] bt_div = 16'd0;
 // precedes the stall (2026-10-21); and every 256th read of the interrupt registers or the
 // VIA (bt_rdn), to see what a polling loop reads without flooding the trace
 logic [7:0]  bt_rdn = 8'd0;
-wire         bt_rd_sample = q_is_gc && ~q_we && (qa[16:8] == 9'h000 || q_is_via);
+wire         bt_rd_sample = q_is_gc && ~q_we && qa[16:8] == 9'h000;   // (the VIA's reads: every one, since 2026-10-21 14:00)
 wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory test's progress (DBG)
                       q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
                                 (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
                                 (TRACE_INT != 0 && q_we && (qa[16:8] == 9'h000 || q_is_via)) ||
+                                (TRACE_INT != 0 && q_is_via) ||   // the VIA's reads too: T2 and IFR as the Time Manager sees them
                                 (TRACE_INT != 0 && (qa[16:8] == 9'h150 || qa[16:8] == 9'h081)) ||
                                 (TRACE_INT != 0 && (qa[16:8] == 9'h120 || qa[16:8] == 9'h130)) ||   // the ESCC
                                 (TRACE_INT != 0 && bt_rd_sample && bt_rdn == 8'd0));
