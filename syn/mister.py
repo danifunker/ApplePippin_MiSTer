@@ -503,6 +503,10 @@ AWACS_REGS = {0: "control", 1: "codec ctl", 2: "codec st", 3: "clip", 4: "byte s
 
 VIA_REGS = ["ORB", "ORA", "DDRB", "DDRA", "T1CL", "T1CH", "T1LL", "T1LH",
             "T2CL", "T2CH", "SR", "ACR", "PCR", "IFR", "IER", "ORA*"]
+# Pippin_swim3's registers by (offset >> 4) & F: 6 reads the mode, written it clears mode bits;
+# 7 reads the drive's status line, written it sets mode bits
+SWIM3_REGS = ["data", "timer", "error", "param", "phase", "setup", "mode/clr", "hshk/set",
+              "intflags", "stepcnt", "curtrack", "cursect", "format", "firstsect", "sectcnt", "intmask"]
 
 
 def trace(last, first, fname=None):
@@ -575,6 +579,10 @@ def trace(last, first, fname=None):
                     data >>= 24
             elif 0x160 <= blk <= 0x17F:
                 reg = "VIA " + VIA_REGS[(addr >> 9) & 15]
+                data = (data >> (8 * (3 - (addr & 3)))) & 0xFF if be in (1, 2, 4, 8) else data
+                be = 8
+            elif blk == 0x150:
+                reg = "SWIM3 " + SWIM3_REGS[(addr >> 4) & 15]
                 data = (data >> (8 * (3 - (addr & 3)))) & 0xFF if be in (1, 2, 4, 8) else data
                 be = 8
             elif blk == 0:
