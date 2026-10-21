@@ -500,6 +500,29 @@ init's caller; on the board it comes back into the poll loop at once. The
 ~4 us trails of both machines through FFCF7BC2 are next: the board from
 b997ac4's capture, the bench from **run12** (b997ac4, run5's options,
 on the Mac since 15:58; `rep12.bin`, `runrep12.txt`).
+
+**16:25, THE DENSE TRAIL (b997ac4, slack +0.314; `scratch/tr_win2.bin`,
+`.txt`; the window armed: 5,815 samples in the 20 ms, none lost).** It
+reads like source. The init: FFCF5C4E.., the chip probe (FFCF79A2..), the
+drives (FFCF7ABE.., VIA ORB reads F3016000 as delays, SWIM3 F3015040), a
+cancel of the motor task (FFCF777A → `jmp FFCF7BDE`: the tail after
+`_Debugger` is the plain cancel routine, RmvTime = FFC3B366), then
+FFCF668E → FFCF7B92 (prime) → FFCF7B9A → PrimeTime (timer read, insert,
+a short walk of two samples, end, reload) → **FFCF7BC4, FFCF7BC8
+(`tst.l 6(a0)`) → FFCF66A0 within 4 us**: the `beq` at FFCF7BCC taken,
+**tmAddr read as zero**, though FFCF7B94 stored FFCF7BA2 there ~100 us
+earlier and no interrupt event came between (267697-267746). The same
+again after the second PrimeTime (267772 → 267809 FFCF7BCA → 267810
+FFCF66A4). Nothing in the Time Manager writes +6. **So a store to the
+TMTask's line is lost, or a later load of it returns stale data**: a
+memory-consistency bug (DSPPC603's dcache refill/castout, or the memcdc /
+Pippin_sdram ordering) that depends on the board's variable SDRAM timing
+(refresh), which the bench's fixed-latency stand-in never produces; the
+same would explain the interrupt dispatched inside the `ori #$700,SR`
+section (the emulator keeps the 68k SR in memory). Next: lockstep with
+random latency on top of the board's (`--mem-wait 20 --stall 60`), and
+the 603 random-program bench with stalls; a mismatch there is the bug in
+full view.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
