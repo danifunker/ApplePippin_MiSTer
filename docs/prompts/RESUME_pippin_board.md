@@ -171,13 +171,15 @@ On the board the pattern changes right at that write: three T2 loads, then
 single, longer T2 loads (0x0357, 0x027D, 0x0440, 0x03BA), then the stall: a
 driver waiting through timeouts on the board only. Ruled out as the
 difference: a floppy image (none mounted on the board: only `config/Pippin.s4`,
-the CD), a saved NVRAM or flash (none on the board). **Being tested on the
-Mac** (2026-10-21 06:53): the same run with the board's date, `--clock
-3875410295` (2026-10-21 in Mac seconds; the bench's default is the firmware's
-1956), `~/pippin_bench/rep.bin` (the 1956 run's partial trace kept as
-`rep_1956.bin`). A stall there at the board's point names the clock;
-otherwise the remaining differences are the CPU clock ratio (bench 66 MHz),
-the SDRAM controller, the Main's real slot-4 timing and input devices.
+the CD), a saved NVRAM or flash (none on the board). **Nothing is running** (stopped 2026-10-21 ~07:00 at the user's word;
+the next session decides what to run, and asks before starting a simulation).
+An idea not tried: the same bench run with the board's date (`--clock` with
+today in Mac seconds; the bench's default is the firmware's 1956), since the
+Main gives the board the real time; it is a guess, as are the other
+differences (the CPU clock ratio, bench 66 MHz; the SDRAM controller; the
+Main's real slot-4 timing; input devices). On the Mac, `~/pippin_bench/`
+holds `run.sh` (now with `--clock $CLOCK`; unset, it passes nothing useful:
+edit it first) and the stopped runs' partial traces.
 
 **Earlier step**: a bench run of bbc509d (the last one on this box; from now on
 the Mac's `~/pippin_bench/run.sh`, the same options) was started 05:31:
