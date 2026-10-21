@@ -130,6 +130,7 @@ struct Options {
 	bool trace = false;
 	bool profile = false;
 	int stall = 0;                 // percent chance of a wait state, per bus per cycle
+	unsigned mem_wait = 1;         // memory clocks from the CPU's memory request to its answer (the SDRAM stand-in)
 	int ack_hold = 0;              // extra clocks before the memory's ACK drops
 	long irq_every = 0;            // raise the external interrupt every N cycles
 	bool tb_run = false;           // time base and decrementer advance every cycle
@@ -427,6 +428,8 @@ void usage() {
 #endif
 		"  --lockstep       compare with dingusppc after every instruction\n"
 		"  --stall P        percent chance of a bus wait state (default 0)\n"
+		"  --mem-wait N     memory clocks from a CPU memory request to its answer (default 1;\n"
+		"                   the board's SDRAM controller takes about 12)\n"
 		"  --snoop-every N  a read snoop of a random line every N cycles, half of them lines\n"
 		"                   the program stored to (the DMA engine's traffic beside the CPU's)\n"
 		"  --seed N         seed for the wait states\n"
@@ -742,6 +745,7 @@ int main(int argc, char** argv) {
 		else if (a == "--trace") opt.trace = true;
 		else if (a == "--profile") opt.profile = true;
 		else if (a == "--stall") opt.stall = std::atoi(next().c_str());
+		else if (a == "--mem-wait") opt.mem_wait = (unsigned)std::atoi(next().c_str());
 		else if (a == "--ack-hold") opt.ack_hold = std::max(0, std::atoi(next().c_str()));
 		else if (a == "--snoop-every") opt.snoop_every = std::atoi(next().c_str());
 		else if (a == "--seed") opt.seed = (unsigned)std::strtoul(next().c_str(), nullptr, 0);
@@ -1372,7 +1376,7 @@ int main(int argc, char** argv) {
 		if (mm.ack) { mm.ack = false; mm.pending = false; return; }
 		if (dut->b_req && !mm.pending) {
 			mm.pending = true;
-			mm.wait = 1;
+			mm.wait = opt.mem_wait ? opt.mem_wait : 1;
 			while (stalled()) mm.wait++;
 		}
 		if (mm.pending && --mm.wait == 0) {
