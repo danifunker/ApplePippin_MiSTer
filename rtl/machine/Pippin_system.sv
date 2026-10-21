@@ -444,10 +444,21 @@ end
 // 2026-10-21, which the SCSI target's command start also is): bytes 4-7 the cycle
 // count, 8-11 the mask, 12-15 the events, 16-19 the lines (levels), 20 the VIA's IFR,
 // 21 its IER, 22 bit 0 the CPU's interrupt, bit 1 the VIA's
+// ... and kind 17, the same record, at every change of the events or of the CPU's
+// interrupt (which interrupts fire, and when: the board's stall of 2026-10-21)
 logic         ic_ev = 1'b0;
 logic [255:0] ic_rec;
+logic [31:0]  ie_q;
+logic         ie_irq_q;
 always_ff @(posedge clk) begin
+	ie_q     <= int_dbg[95:64];
+	ie_irq_q <= int_dbg[0];
 	if (ic_ev & ~scsi_tr_ev & ~pf_ev & ~sn_ev & ~cs_ev & ~vc_ev) ic_ev <= 1'b0;
+	if (TRACE != 0 && (int_dbg[95:64] != ie_q || int_dbg[0] != ie_irq_q)) begin
+		ic_ev  <= 1'b1;
+		ic_rec <= {64'd0, int_dbg[15:0], int_dbg[23:16], int_dbg[31:24], int_dbg[63:32], int_dbg[95:64],
+		           int_dbg[127:96], vc_cyc, 24'd0, 8'd17};
+	end
 	if (TRACE != 0 && vc_cyc[21:0] == 22'h200000) begin
 		ic_ev  <= 1'b1;
 		ic_rec <= {64'd0, int_dbg[15:0], int_dbg[23:16], int_dbg[31:24], int_dbg[63:32], int_dbg[95:64],

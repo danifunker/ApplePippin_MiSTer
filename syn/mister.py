@@ -552,13 +552,13 @@ def trace(last, first, fname=None):
             if 0xD0 <= op <= 0xDA and op not in (0xD6, 0xD9):
                 line += " main %s slot %d" % (r[24:29].hex(), r[29] & 7)
             print(line + "  " + fl)
-        elif kind == 16 or (kind == 7 and r[1:4] == b"\0\0\0" and r[24:32] == bytes(8) and not (r[22] & 0xFC)):
+        elif kind in (16, 17) or (kind == 7 and r[1:4] == b"\0\0\0" and r[24:32] == bytes(8) and not (r[22] & 0xFC)):
             # Grand Central's interrupt state every 2^22 CPU cycles (Pippin_system): kind 16,
             # or kind 7 in the cores before 2026-10-21 (the SCSI target's command start is
             # kind 7 too; this one has zeros there)
             w = [int.from_bytes(r[k:k + 4], "little") for k in (4, 8, 12, 16)]
-            print("%5d cycle %08x INT mask %08x events %08x lines %08x | VIA IFR %02x IER %02x | irq %d via_irq %d"
-                  % (i, w[0], w[1], w[2], w[3], r[20], r[21], r[22] & 1, (r[22] >> 1) & 1))
+            print("%5d cycle %08x INT %s %08x events %08x lines %08x | VIA IFR %02x IER %02x | irq %d via_irq %d"
+                  % (i, w[0], "ev   mask" if kind == 17 else "mask", w[1], w[2], w[3], r[20], r[21], r[22] & 1, (r[22] >> 1) & 1))
         elif kind == 7:
             cdb = r[8:18]
             print("%s ID%d start %-15s %s" % (t, tid, SCSI_OPS.get(cdb[0], "op %02x" % cdb[0]),
@@ -582,6 +582,10 @@ def trace(last, first, fname=None):
                     data >>= 24
             elif 0x160 <= blk <= 0x17F:
                 reg = "VIA " + VIA_REGS[(addr >> 9) & 15]
+                data = (data >> (8 * (3 - (addr & 3)))) & 0xFF if be in (1, 2, 4, 8) else data
+                be = 8
+            elif blk in (0x120, 0x130):
+                reg = "ESCC %s+%02x" % ("compat" if blk == 0x120 else "risc", addr & 0xFF)
                 data = (data >> (8 * (3 - (addr & 3)))) & 0xFF if be in (1, 2, 4, 8) else data
                 be = 8
             elif blk == 0x150:

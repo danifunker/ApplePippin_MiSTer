@@ -874,6 +874,7 @@ wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory te
                                 (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
                                 (TRACE_INT != 0 && q_we && (qa[16:8] == 9'h000 || q_is_via)) ||
                                 (TRACE_INT != 0 && (qa[16:8] == 9'h150 || qa[16:8] == 9'h081)) ||
+                                (TRACE_INT != 0 && (qa[16:8] == 9'h120 || qa[16:8] == 9'h130)) ||   // the ESCC
                                 (TRACE_INT != 0 && bt_rd_sample && bt_rdn == 8'd0));
 always_ff @(posedge clk) begin
 	if (dev_take & ~q_line & bt_rd_sample) bt_rdn <= bt_rdn + 8'd1;
