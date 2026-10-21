@@ -2070,6 +2070,15 @@ def memtest_image():
           D(32, 5, 4, 0), X(4, 6, 26, 316), cmplw(5, 6), ("bc",) + BNE + ("bad",),
           ("label", "next"),
           D(14, 4, 4, 4), cmplw(4, 30), ("bc",) + BLT + ("rl",),
+          # the RAM zeroed before the next pass (status 3), so that a ROM boot after the test
+          # starts from zeros, as the bench does (2026-10-21: the board's stale SDRAM under test)
+          D(14, 3, 0, 3), D(36, 3, 31, 0), D(14, 4, 0, 0), D(14, 5, 0, 0),
+          ("label", "zl"),
+          D(36, 5, 4, 0), D(14, 4, 4, 4),
+          D(28, 4, 6, 31), ("bc",) + BNE + ("zl",),
+          D(14, 7, 4, -32), X(0, 0, 7, 86),
+          cmplw(4, 30), ("bc",) + BLT + ("zl",),
+          X(0, 0, 0, 598),
           D(14, 29, 29, 1), D(36, 29, 31, 4), ("b", "pass"),
           ("label", "bad"),
           D(14, 28, 28, 1), D(36, 28, 31, 8),

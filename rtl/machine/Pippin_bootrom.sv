@@ -2,9 +2,9 @@
 //
 // MacPPC7300 - the machine's memory-test boot program, 8 KB, mirrored over the
 // ROM's 4 MB when the OSD selects it (see progs.py for what it does and
-// Pippin_machine.sv for the debug registers it reports through).
+// MacPPC7300_machine.sv for the debug registers it reports through).
 
-module Pippin_bootrom
+module MacPPC7300_bootrom
 (
 	input  logic        clk,
 	input  logic [12:2] addr,
@@ -163,22 +163,35 @@ always_ff @(posedge clk) begin
 		11'h430: q <= 32'h80A40000;
 		11'h431: q <= 32'h7C86D278;
 		11'h432: q <= 32'h7C053040;
-		11'h433: q <= 32'h4082001C;
+		11'h433: q <= 32'h40820050;
 		11'h434: q <= 32'h38840004;
 		11'h435: q <= 32'h7C04F040;
 		11'h436: q <= 32'h4180FFE8;
-		11'h437: q <= 32'h3BBD0001;
-		11'h438: q <= 32'h93BF0004;
-		11'h439: q <= 32'h4BFFFF98;
-		11'h43A: q <= 32'h3B9C0001;
-		11'h43B: q <= 32'h939F0008;
-		11'h43C: q <= 32'h2C1BFFFF;
-		11'h43D: q <= 32'h4082FFDC;
-		11'h43E: q <= 32'h7C9B2378;
-		11'h43F: q <= 32'h937F000C;
-		11'h440: q <= 32'h90BF0010;
-		11'h441: q <= 32'h90DF0014;
-		11'h442: q <= 32'h4BFFFFC8;
+		11'h437: q <= 32'h38600003;
+		11'h438: q <= 32'h907F0000;
+		11'h439: q <= 32'h38800000;
+		11'h43A: q <= 32'h38A00000;
+		11'h43B: q <= 32'h90A40000;
+		11'h43C: q <= 32'h38840004;
+		11'h43D: q <= 32'h7086001F;
+		11'h43E: q <= 32'h4082FFF4;
+		11'h43F: q <= 32'h38E4FFE0;
+		11'h440: q <= 32'h7C0038AC;
+		11'h441: q <= 32'h7C04F040;
+		11'h442: q <= 32'h4180FFE4;
+		11'h443: q <= 32'h7C0004AC;
+		11'h444: q <= 32'h3BBD0001;
+		11'h445: q <= 32'h93BF0004;
+		11'h446: q <= 32'h4BFFFF64;
+		11'h447: q <= 32'h3B9C0001;
+		11'h448: q <= 32'h939F0008;
+		11'h449: q <= 32'h2C1BFFFF;
+		11'h44A: q <= 32'h4082FFA8;
+		11'h44B: q <= 32'h7C9B2378;
+		11'h44C: q <= 32'h937F000C;
+		11'h44D: q <= 32'h90BF0010;
+		11'h44E: q <= 32'h90DF0014;
+		11'h44F: q <= 32'h4BFFFF94;
 		default: q <= 32'h00000000;
 	endcase
 end

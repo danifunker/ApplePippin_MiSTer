@@ -397,6 +397,23 @@ copied into `ref_ram()`) with xorshift32 bytes. **run9 = run5's options
 plus `--ram-fill 0x9E3779B9`, lockstep, running on the Mac since 12:47**
 (run8 stopped for it; `rep9.bin`, `runrep9.txt`). If run9 stalls, the
 cause is a RAM-contents dependence, visible in full in the bench.
+
+**13:10, the complete capture (585c29e, ring 16384, slack +0.153;
+`scratch/tr_via2.bin`, `.txt`, 28 records lost, none near the init).** The
+normal T2 cycle: handler IFR r E0, IER r A4; the dispatch's timer read T2CH
+FF, IFR E0, T2CL (the flag clears: the falling-edge event and clear), T2CH;
+the reload T2CL r, T2CH/T2CL/T2CH w; the periodic task's PrimeTime (timer
+read, reload). At the init (15.728): PrimeTime #1 (06/40/6F/06, 34, reload
+0629) and #2 (05/40/C0/05, 91, reload 0586) complete normally, then the
+continuation (poll, PrimeTime 04E1, poll, PrimeTime without reload: the
+walk) **runs with no interrupt**. The driver's only synchronous route into
+the continuation is FFCF7BC2: `tst.l -20(a0)` nonzero → `_Debugger`
+(nothing installed), mask, clear the slot and tmAddr, RmvTime, rts → into
+the poll loop. The slot (SonyVars+1D8) is never written before that check
+in the code read so far: zero on the bench (RAM starts zeroed), garbage on
+the board (stale or the memory test's pattern). run9 tests the bench with
+garbage RAM; a memory test that leaves RAM zeroed (then Boot: ROM) tests
+the board.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
