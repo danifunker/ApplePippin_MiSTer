@@ -619,6 +619,17 @@ first builds, rising-only, lacked), building 18:25 (~18:50): does the
 disc boot?** run15 (6ae01be, run5's options, since 17:41) gives the
 bench's dense window with ea/pa: whether its init also runs on the slow
 path (samples at PC 6806617C).
+
+**18:40. The TMTask-sequence memory test on the board (0ad6a3c, slack
++0.021; `scratch/tr_castout3.bin`, `.txt`): no error.** run15
+(`scratch/rep15.bin`, `.txt`; identical, PASS; its window armed, 5,462
+samples): **no slow-path sample in the bench's window** (the board: one,
+at the stash step), and its stash step goes FFCF7BC8 → the init's caller
+(ROM FFC76xxx/FFC77xxx, the boot going on). So on the board alone a 68k
+interrupt is pending (cr2.LT) while the init runs, and the instruction
+`move.l (sp)+,-20(a0)` executed under the slow path's hook left a7
+unpopped (the rts went to the popped address). The hook pointer is at
+KDP+0x814 (the kernel data page: the 68fffxxx loads in the samples).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
