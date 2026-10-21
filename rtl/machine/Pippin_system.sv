@@ -278,7 +278,7 @@ logic         scsi_tr_ev;
 logic [255:0] scsi_tr_rec;
 logic         snd_frame;
 
-logic [127:0] int_dbg;                  // Grand Central's interrupt state (the trace, kind 7)
+logic [127:0] int_dbg;                  // Grand Central's interrupt state (the trace, kind 16)
 Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUDA_FAST_BOOT(CUDA_FAST_BOOT),
                      .SOUND_IN_DMA(SOUND_IN_DMA)) machine (
 	.clk, .cpu_fast, .reset, .ram_mb, .rom_at, .boot_memtest,
@@ -440,7 +440,8 @@ always_ff @(posedge clk) begin
 	end
 	if (reset) begin vc_ev <= 1'b0; vc_cyc <= '0; end
 end
-// kind 7 (TRACE): Grand Central's interrupt state every 2^22 cycles: bytes 4-7 the cycle
+// kind 16 (TRACE): Grand Central's interrupt state every 2^22 cycles (kind 7 before
+// 2026-10-21, which the SCSI target's command start also is): bytes 4-7 the cycle
 // count, 8-11 the mask, 12-15 the events, 16-19 the lines (levels), 20 the VIA's IFR,
 // 21 its IER, 22 bit 0 the CPU's interrupt, bit 1 the VIA's
 logic         ic_ev = 1'b0;
@@ -450,7 +451,7 @@ always_ff @(posedge clk) begin
 	if (TRACE != 0 && vc_cyc[21:0] == 22'h200000) begin
 		ic_ev  <= 1'b1;
 		ic_rec <= {64'd0, int_dbg[15:0], int_dbg[23:16], int_dbg[31:24], int_dbg[63:32], int_dbg[95:64],
-		           int_dbg[127:96], vc_cyc, 24'd0, 8'd7};
+		           int_dbg[127:96], vc_cyc, 24'd0, 8'd16};
 	end
 	if (reset) ic_ev <= 1'b0;
 end

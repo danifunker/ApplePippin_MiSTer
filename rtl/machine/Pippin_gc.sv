@@ -590,12 +590,21 @@ wire  [7:0]  via_ifr_rd = {|(via_ifr[6:0] & via_ier[6:0]), via_ifr[6:0]};
 // the interrupt state for the trace (Pippin_system, kind 7)
 assign int_dbg = {int_mask, int_events, int_lines_q, via_ifr, via_ier, 14'd0, via_irq, irq};
 assign via_irq = via_ifr_rd[7];
-// a VIA flag newly set while enabled: in 68k mode an event of its own, even with the
-// VIA's line already high (dingusppc's ack_int sets the event at every report; an edge
-// of the line alone missed a T1 arriving while T2 held it, and Mac OS waited on the
-// board for an interrupt that never came, 2026-10-19)
-logic [6:0] via_en_q;
-wire        via_new = |((via_ifr[6:0] & via_ier[6:0]) & ~via_en_q);
+// In 68k mode every report of the VIA's line while it is high is an event of its own
+// (viacuda.cpp update_irq calls ack_int whenever the line is high, and in 68k mode
+// grandcentral.cpp's ack_int_common sets the event at every call): a report is any flag
+// set (T1, T2, the shift register; enabled or not), a read of T1CL, T2CL or SR, a write
+// of T1CH, T1LH, T2CH, SR, IFR or IER. Mac OS's 68k VIA dispatcher takes one flag an
+// interrupt and counts on the line, as a 68k's level, to bring it back for the next;
+// the clear register's "clear all" between the two left the second flag with no event,
+// and Mac OS waited on the board for an interrupt that never came (T2 and the shift
+// register set and enabled, the line high, no event: 2026-10-19 and 21). The line is
+// looked at the clock after the report, when the access has done its work on the flags.
+logic       via_rep_q;
+wire        via_acc = sel & devs & (sub == 4'h6 || sub == 4'h7) &
+                      (we ? (via_reg == 4'd5 || via_reg == 4'd7 || via_reg == 4'd9 || via_reg == 4'd10 ||
+                             via_reg == 4'd13 || via_reg == 4'd14)
+                          : (via_reg == 4'd4 || via_reg == 4'd8 || via_reg == 4'd10));
 wire  [7:0]  via_pb_rd  = (via_orb & via_ddrb) | ({4'b0000, cuda_treq, 3'b000} & ~via_ddrb);
 
 assign via_tip     = ~via_ddrb[5] | via_orb[5];
@@ -756,6 +765,8 @@ always_comb begin
 		cnt_n = {1'b0, cnt_a[3:0] - 4'd1};
 	end
 end
+// a VIA flag set this clock (a report, above)
+wire        via_set = (via_tick & ((t1_run & ~t1_reload & t1_left == 18'd1) | (t2_run & t2_left == 18'd1))) | sr_flag;
 
 // ---- writes, and the reads that change something --------------------------------------
 always_ff @(posedge clk) begin
@@ -822,8 +833,8 @@ always_ff @(posedge clk) begin
 	// in the cycle of a clear is a new event and stays.
 	for (int i = 0; i < 32; i++)
 		if (int_chg[i]) int_events[i] <= int_68k | int_lines[i];
-	if (int_68k & via_new) int_events[18] <= 1'b1;
-	via_en_q    <= via_ifr[6:0] & via_ier[6:0];
+	if (int_68k & via_rep_q & via_irq) int_events[18] <= 1'b1;
+	via_rep_q   <= via_acc | via_set;
 	int_lines_q <= int_lines;
 
 	if (sel & dma & we & ch_ok) begin

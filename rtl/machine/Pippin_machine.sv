@@ -131,7 +131,7 @@ module Pippin_machine
 	input  logic [255:0] m_rdata,
 
 	output logic         ext_irq,
-	output logic [127:0] int_dbg,         // Grand Central's interrupt state, for the trace (kind 7)
+	output logic [127:0] int_dbg,         // Grand Central's interrupt state, for the trace (kind 16)
 	output logic         tb_tick,
 	output logic         cpu_reset,                 // Cuda holds the CPU in reset
 	output logic         power_wake,                // off, and the power key pressed: reset the machine

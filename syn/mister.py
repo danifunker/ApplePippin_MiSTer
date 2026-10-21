@@ -501,6 +501,10 @@ DMA_REGS = {0x00: "control", 0x04: "status", 0x08: "cmdptr hi", 0x0C: "cmdptr", 
 AWACS_REGS = {0: "control", 1: "codec ctl", 2: "codec st", 3: "clip", 4: "byte swap", 5: "frames"}
 
 
+VIA_REGS = ["ORB", "ORA", "DDRB", "DDRA", "T1CL", "T1CH", "T1LL", "T1LH",
+            "T2CL", "T2CH", "SR", "ACR", "PCR", "IFR", "IER", "ORA*"]
+
+
 def trace(last, first, fname=None):
     if fname:
         # a capture of tools' trstream.py: records each after its 4-byte index
@@ -544,6 +548,13 @@ def trace(last, first, fname=None):
             if 0xD0 <= op <= 0xDA and op not in (0xD6, 0xD9):
                 line += " main %s slot %d" % (r[24:29].hex(), r[29] & 7)
             print(line + "  " + fl)
+        elif kind == 16 or (kind == 7 and r[1:4] == b"\0\0\0" and r[24:32] == bytes(8) and not (r[22] & 0xFC)):
+            # Grand Central's interrupt state every 2^22 CPU cycles (Pippin_system): kind 16,
+            # or kind 7 in the cores before 2026-10-21 (the SCSI target's command start is
+            # kind 7 too; this one has zeros there)
+            w = [int.from_bytes(r[k:k + 4], "little") for k in (4, 8, 12, 16)]
+            print("%5d cycle %08x INT mask %08x events %08x lines %08x | VIA IFR %02x IER %02x | irq %d via_irq %d"
+                  % (i, w[0], w[1], w[2], w[3], r[20], r[21], r[22] & 1, (r[22] >> 1) & 1))
         elif kind == 7:
             cdb = r[8:18]
             print("%s ID%d start %-15s %s" % (t, tid, SCSI_OPS.get(cdb[0], "op %02x" % cdb[0]),
@@ -562,6 +573,10 @@ def trace(last, first, fname=None):
                        "MACE " + MACE_REGS.get((addr >> 4) & 31, "%d" % ((addr >> 4) & 31)))
                 if be == 8:
                     data >>= 24
+            elif 0x160 <= blk <= 0x17F:
+                reg = "VIA " + VIA_REGS[(addr >> 9) & 15]
+                data = (data >> (8 * (3 - (addr & 3)))) & 0xFF if be in (1, 2, 4, 8) else data
+                be = 8
             elif blk == 0:
                 reg = "GC int " + {0x20: "events", 0x24: "mask", 0x28: "clear", 0x2C: "levels"}.get(addr & 0xFC, "?")
             elif blk == 0x140:
@@ -608,11 +623,6 @@ def trace(last, first, fname=None):
             else:
                 print("%s DMA-%d STOPPED in state %d %s res %d status %04x conds w%d b%d i%d"
                       % (t, r[1], y >> 28, c, x >> 16, x & 0xFFFF, (y >> 2) & 1, (y >> 1) & 1, y & 1))
-        elif kind == 7:
-            # Grand Central's interrupt state every 2^22 CPU cycles (Pippin_system)
-            w = [int.from_bytes(r[k:k + 4], "little") for k in (4, 8, 12, 16)]
-            print("%5d cycle %08x INT mask %08x events %08x lines %08x | VIA IFR %02x IER %02x | irq %d via_irq %d"
-                  % (i, w[0], w[1], w[2], w[3], r[20], r[21], r[22] & 1, (r[22] >> 1) & 1))
         elif kind == 13:
             # the codec's output frames (syn/sndtrace.py turns them into a WAV)
             cnt = int.from_bytes(r[1:4], "little")
