@@ -414,6 +414,24 @@ in the code read so far: zero on the bench (RAM starts zeroed), garbage on
 the board (stale or the memory test's pattern). run9 tests the bench with
 garbage RAM; a memory test that leaves RAM zeroed (then Boot: ROM) tests
 the board.
+
+**13:50. run9 (garbage RAM, `scratch/rep9.bin`, `.txt`; a1e0492 copies the
+image into the reference too): identical, PASS, polls every 503 ms: the
+RAM's contents are out.** (cf2a4fd fixes the memtest generator's module
+name; f5ec899 makes the test stop after one pass with the RAM zeroed,
+status 4, building 13:38: the board-side check, now of little weight.)
+**The one input-side difference found: the ADB address resolution.** The
+ROM's 19 rounds of "listen r3 at 2, listen r3 at the free address": the
+bench moves the device to 15 every round (`2b`, `fb` ×19), the board to 15
+once and then to **14** (`2b`, `eb` ×18): on the board something stayed at
+15 after the first round. The device sets differ: the board has the
+AppleJack (Controller: AppleJack, joy_mode 5, address 3 beside the mouse),
+the bench never drove `joy` (no controller). **f5c4131: `--joy MODE`**;
+**run10 = run5's options plus `--joy 5`, running on the Mac since 13:50**
+(run7, the clock, stopped for it; `rep10.bin`, `runrep10.txt`). If run10
+shows the board's resolution (`eb`) and the stall, the cause is in reach
+in the bench; if the resolution matches but no stall, the ADB difference is
+a side effect.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
