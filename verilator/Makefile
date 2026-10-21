@@ -48,6 +48,9 @@ MACH_CPU  := $(addprefix $(MACH_RTL)/,$(shell grep -o '[A-Za-z0-9_]*\.sv' $(MACH
 # SYMRSVDWORD: Verilator 5.028 (this machine's) flags the top's `logic set`,
 # which 5.020 accepted (IBMRS6K7248 suppressed it the same way).
 WARN := -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-SYMRSVDWORD
+# Verilators that know PROCASSINIT (5.052 on the Mac; not 5.028) also call the RTL's
+# power-up idiom, an initial value and then an always_ff, MULTIDRIVEN: both off there
+WARN += $(if $(findstring Unknown warning,$(shell $(VERILATOR) -Wno-PROCASSINIT --lint-only 2>&1)),,-Wno-PROCASSINIT -Wno-MULTIDRIVEN)
 
 # Parallel C++ compiles: each of the machine's takes about 2 GB, and this
 # machine has 14 GB shared with Quartus (-j 0, all cores, ran it out of
