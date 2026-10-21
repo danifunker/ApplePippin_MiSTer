@@ -565,6 +565,10 @@ def trace(last, first, fname=None):
                                               " ".join("%02x" % b for b in cdb)))
         elif kind == 2:
             print("%s bus reset  %s" % (t, fl))
+        elif kind == 18:
+            # a block of the card (Pippin_scsidisk): its LBA, half, slot and the rolling XOR of its bytes
+            print("%s block lba %d half %d slot %d bytes %d xor %08x" % (t, int.from_bytes(r[8:12], "little"), r[1] & 1, r[2] & 7,
+                  int.from_bytes(r[18:20], "little"), int.from_bytes(r[12:16], "little")))
         elif kind == 3:
             print("%s CD mount  %s" % (t, fl))
         elif kind == 4:

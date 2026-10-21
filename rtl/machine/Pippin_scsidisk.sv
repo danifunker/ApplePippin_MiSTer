@@ -161,6 +161,8 @@ logic [2:0]  c_bslot;
 logic [31:0] c_blba;
 logic [2:0]  h_btog_s;
 logic        h_bseen = 1'b0, h_bdone = 1'b0, h_acked;
+logic [31:0] h_sum;                     // the block's bytes, a rolling XOR (the trace's kind 18)
+logic [15:0] h_cnt;
 logic        h_half, h_aud, h_fr;
 logic [2:0]  h_slot;
 always_ff @(posedge clk_h) begin
@@ -181,6 +183,14 @@ always_ff @(posedge clk_h) begin
 		sd_rd   <= 6'd0;
 		sd_wr   <= 6'd0;
 		h_acked <= 1'b1;
+		h_sum   <= 32'd0;
+		h_cnt   <= 16'd0;
+	end
+	// the block's bytes folded into a rolling XOR, for the trace (kind 18): the card's
+	// data as the target gets it (2026-10-21: the board's CD reads under suspicion)
+	if (sd_buff_wr & h_mine & ~h_aud) begin
+		h_sum <= {h_sum[30:0], h_sum[31]} ^ {24'd0, sd_buff_dout};
+		h_cnt <= h_cnt + 16'd1;
 	end
 	if (h_acked && !sd_ack[h_slot]) begin           // done
 		h_acked <= 1'b0;
@@ -250,7 +260,9 @@ end
 
 // ---- the channel: the target's requests first, then the audio's ---------------------------------
 logic [2:0] c_bdone_s;
-always_ff @(posedge clk) c_bdone_s <= {c_bdone_s[1:0], h_bdone};
+logic       c_bdone_q;
+always_ff @(posedge clk) begin c_bdone_s <= {c_bdone_s[1:0], h_bdone}; c_bdone_q <= c_bdone_s[2]; end
+wire        blk_done_ev = c_bdone_s[2] != c_bdone_q;   // a block done (its fields and sum stand still now)
 wire blk_idle = c_bdone_s[2] == c_btog;  // no block in flight
 assign busy = ~blk_idle;
 
@@ -1230,6 +1242,10 @@ always_ff @(posedge clk) begin
 	else if (cd_mev) begin
 		tr_ev  <= 1'b1;
 		tr_rec <= {96'd0, tr_flag, 88'd0, tr_us, 24'd0, 8'd3};
+	end
+	else if (blk_done_ev && !h_aud) begin       // kind 18: a block of the card, its LBA, half, slot and XOR
+		tr_ev  <= 1'b1;
+		tr_rec <= {96'd0, h_cnt, 16'd0, h_sum, sd_lba, tr_us, 8'd0, 5'd0, h_slot, 7'd0, h_half, 8'd18};   // bytes 1 half, 2 slot, 4-7 us, 8-11 LBA, 12-15 XOR, 18-19 bytes
 	end
 end
 
