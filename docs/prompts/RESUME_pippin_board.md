@@ -658,6 +658,23 @@ then a board capture; run17 (af1bff3, run5's options) on the Mac since
 handlers can also be read from the ROM: RAM 68xxxxxx = ROM offset
 3xxxxx + 0x300000 (`objdump -b binary -EB -m powerpc:common
 --adjust-vma=0xffc00000`).
+
+**19:40, THE FIRST CAPTURE (af1bff3, slack +0.047; `scratch/tr_cap1.bin`,
+`.txt`; the stream in `scratch/cap1_stream.txt`), from the fetch of
+FFCF7BC8.** It reads like a debugger: the `movem.l` handler's four `stwu`
+to 81C60..81C6C, the dispatch (`lhau r27,2(r24)` fetching 7BCA/7BCC/7BCE,
+`rlwimi r29,r27,3,13,28`, `mtlr`, `bgelr+ cr2`), the `tst.l 6(a0)` handler
+`lwzx r4,r16,r27` ← **ld 81C76**, then `addco. r4,r4,r0` for CR0 and the
+`beq` handler **taking the branch to 7BD8** (so the load gave zero), the
+`moveq #0,d0`, and the `rts` handler `lwz r24,0(r1)` ← ld 3FFE22 (r1 is
+a7) → FFCF66A0, `addi r1,r1,4`: the poll loop by design of the
+tmAddr == 0 path. (In the tr_pa1 boot the 7BCE path was taken instead;
+boots differ a little; both end in the poll loop.) So the store of tmAddr
+at FFCF7B94 is lost, or something clears it, before FFCF7BC8: **bc28258**
+moves the trigger to FFCF7B8C and the capture to 8,192 instructions (a
+RAM of 4,096 pairs), building 19:40 (~20:05); run18 (bc28258, run5's
+options) on the Mac since 19:42 for the bench's stream of the same
+stretch (run17 stopped).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
