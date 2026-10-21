@@ -436,6 +436,23 @@ a side effect.
 **14:10.** The board with the RAM zeroed by the one-pass memory test
 (f5ec899, slack +0.320, on .92 as the current core; `scratch/tr_zero1.bin`,
 `.txt`) **still stalls** the same way: RAM contents are out on both sides.
+
+**14:15.** Controller: None on the board (`scratch/tr_nojoy1.bin`, `.txt`):
+the ADB resolution becomes the bench's (`fb` ×19: the AppleJack at address
+3 is what made the keyboard's move back from 15 fail, a side effect worth
+its own look later: with the AppleJack the keyboard ends at 14/15) **and the
+stall remains**: the ADB difference is not it (run10 stopped). The
+interrupt events on both machines are only the VIA (bit 18) and MESH (bit
+13). Timing-marginal paths are ruled out by the stall's sameness across
+nine fits today (slacks -0.376 to +0.32). run7 (`--clock` today) running
+since 14:12. **The one data path left untested on the board: the CD's
+sector data** through hps_io's SD-block path and the SCSI DMA (the ROM's
+upload is a different path and checks out; the disc's boot blocks are 68k
+code Mac OS runs). **08a445d: kind 18**, a record per 512-byte block the
+target receives (LBA, half, slot, byte count, a rolling XOR), building
+14:14; `syn/cdxor.py IMAGE.BIN --check TRACE.txt` compares them with the
+image (Mode 1 raw: 2048 user bytes at 16 of each 2352-byte sector, in
+512-byte blocks: lba 0 = BFF64366, 2 = 5B5DFF18, 3 = 00000E00, 64-67 zero).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
