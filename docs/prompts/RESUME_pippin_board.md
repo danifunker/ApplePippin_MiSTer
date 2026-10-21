@@ -432,6 +432,10 @@ the bench never drove `joy` (no controller). **f5c4131: `--joy MODE`**;
 shows the board's resolution (`eb`) and the stall, the cause is in reach
 in the bench; if the resolution matches but no stall, the ADB difference is
 a side effect.
+
+**14:10.** The board with the RAM zeroed by the one-pass memory test
+(f5ec899, slack +0.320, on .92 as the current core; `scratch/tr_zero1.bin`,
+`.txt`) **still stalls** the same way: RAM contents are out on both sides.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
