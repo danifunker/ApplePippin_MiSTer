@@ -236,12 +236,12 @@ always_ff @(posedge clk) cpu_reset <= reset | cuda_reset;
 assign cpu_in_reset = cpu_reset;
 
 logic         cpu_dbg_ev;
-logic         cpu_dbg_dense;        // the dense sample window: 20 ms from SWIM3's interrupt being enabled (int_dbg: the mask's bit 19)
+logic         cpu_dbg_dense;        // the dense sample window: 20 ms from SWIM3's interrupt being enabled (the mask's bit 19 = int_dbg[115])
 logic [20:0]  dense_cnt;
 logic         swim_en_q;
 always_ff @(posedge clk) begin
-	swim_en_q <= int_dbg[19];
-	if (int_dbg[19] & ~swim_en_q) dense_cnt <= 21'd1;
+	swim_en_q <= int_dbg[115];                                        // the mask's bit 19 (int_dbg[127:96] is the mask)
+	if (int_dbg[115] & ~swim_en_q) dense_cnt <= 21'd1;
 	else if (dense_cnt != 21'd0 && dense_cnt != 21'h1FFFFF) dense_cnt <= dense_cnt + 21'd1;
 	cpu_dbg_dense <= dense_cnt != 21'd0 && dense_cnt < 21'd1_170_000;   // 20 ms at 58.33 MHz
 	if (reset) begin dense_cnt <= 21'd0; cpu_dbg_dense <= 1'b0; swim_en_q <= 1'b0; end
