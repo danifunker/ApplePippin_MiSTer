@@ -583,6 +583,17 @@ last load's effective *and physical* address (bytes 20-23 and 24-27; the
 exception counts are gone from it; the decoder prints `ld ea .. pa ..`),
 building 17:33 (~18:00): in the dense window, every sample's ea/pa pair
 (68k RAM should be 1:1) and, with luck, the load at FFCF7BC8 itself.
+
+**18:05, the EA/PA capture (6ae01be, slack +0.240; `scratch/tr_pa1.bin`,
+`.txt`): in the dense window every sampled load's physical address equals
+its effective address** (000->000, ffc->ffc, f30->f30, 68f->68f; the
+only differences are a misaligned load's two word addresses, e.g. ea
+81C7A -> pa 81C78 and 81C7C). Translation is sound. Left untested by the
+memory test so far: the line's own sequence of **misaligned longword
+stores** (tmAddr at +6 and tmCount at +10 span two words; tmWakeUp at +14
+crosses into the next line), then the `movem.l` and the misaligned load:
+added to the castout phase in three cache states (both lines cached; the
+next line flushed; both flushed), building 18:05 (~18:30).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
