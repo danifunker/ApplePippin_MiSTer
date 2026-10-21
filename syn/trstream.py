@@ -5,8 +5,8 @@ for longer than the ring holds.
     python3 trstream.py SECONDS OUT
 
 Each record goes out after its 4-byte index (`mister.py trace --file` reads
-them). Reads of Grand Central's interrupt registers (kind 4 at F30000xx, not
-a write) are left out: the NanoKernel makes thousands a second.
+them). (Reads of Grand Central's interrupt registers were left out here while
+the core recorded every one; since ab959c0 it records one in 256, kept.)
 """
 import mmap, os, struct, sys, time
 
@@ -37,8 +37,6 @@ while time.time() < end:
         out = []
         for k in range(cnt):
             r = chunk[32 * k:32 * k + 32]
-            if r[0] == 4 and not (r[1] & 0x10) and r[11] == 0xF3 and r[10] == 0x00 and r[9] == 0x00:
-                continue
             out.append(struct.pack('<I', last + k) + r)
         o.write(b''.join(out))
         last = n
