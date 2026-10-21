@@ -572,7 +572,10 @@ def trace(last, first, fname=None):
             addr = int.from_bytes(r[8:12], "little")
             data = int.from_bytes(r[12:16], "little")
             blk = (addr >> 8) & 0x1FF
-            if blk in (0x180, 0x110, 0x111):
+            if (addr >> 8) == 0xF90000:
+                # the memory test's progress (Pippin_machine dbg_reg)
+                reg = "DBG " + {0: "status", 4: "passes", 8: "errors", 0xC: "first addr", 0x10: "read", 0x14: "expected"}.get(addr & 0xFF, "%02x" % (addr & 0xFF))
+            elif blk in (0x180, 0x110, 0x111):
                 reg = ("MESH " + MESH_REGS[(addr >> 4) & 15] if blk == 0x180 else
                        "MACE " + MACE_REGS.get((addr >> 4) & 31, "%d" % ((addr >> 4) & 31)))
                 if be == 8:

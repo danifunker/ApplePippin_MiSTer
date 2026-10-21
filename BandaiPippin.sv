@@ -143,6 +143,9 @@ localparam CONF_STR = {
 
 	// the save flash (Pippin_flash), 128 KB, kept in an image on slot 2 (Pippin_nvsave)
 	"P5SC2,SAV,Save flash;",
+	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
+	// in the trace's DBG writes), a debug entry (2026-10-21)
+	"P5O[34],Boot,ROM,Memory test;",
 
 	// the AppleJack's buttons (Pippin_adb): 1-9 green, red, blue, yellow, the shoulders,
 	// circle, diamond, square
@@ -374,7 +377,7 @@ end
 // ROM (a setting from a larger board) is the board's largest
 reg  [7:0] ram_opt;
 always @(posedge clk_mem) ram_opt <= (!sdram_mod[1] || status[7:5] == 3'd0) ? 8'd5 : (status[7:5] == 3'd1) ? 8'd13 : 8'd21;
-wire boot_memtest = 1'b0;                   // the memory-test boot (Pippin_bootrom): no menu entry since 2026-10-08
+wire boot_memtest = memtest_m;              // the memory-test boot (Pippin_bootrom), Advanced > Boot (status[34])
 
 // the ROM upload: index 1 from the OSD, index 0 a boot.rom loaded at start; into the
 // board's top 4 MB, the board as the Main reports it when the upload starts (it does
@@ -519,6 +522,7 @@ reg         net_on = 0;
 reg         tr_mesh_m = 0;                  // the trace also takes MESH (status[29]: no menu entry)
 reg         l2_on_m = 1;
 reg         cpu_fast_m = 0;
+reg         memtest_m = 0;                  // Advanced > Boot: the memory test in place of the ROM
 always @(posedge clk_mem) if (cpu_reset_m) begin
 	ram_mb     <= ram_opt;
 	mon_m      <= mon_sel;
@@ -526,13 +530,14 @@ always @(posedge clk_mem) if (cpu_reset_m) begin
 	net_on     <= 1'b0;                     // no Ethernet on the Pippin
 	tr_mesh_m  <= status[29];
 	l2_on_m    <= ~status[4];
+	memtest_m  <= status[34];
 	spd_want_m <= 1'b0;                     // the PLL's 70 MHz, never reconfigured
 	cpu_fast_m <= spd_pll_s[2];
 end
 // "Changes pending" (menu mask bit 0): an OSD setting differs from the one the machine
 // took at its last reset (the memory, the video out, the controller); the Input page's
 // stick setting and the media apply at once and are left out
-assign pending  = ram_opt != ram_mb || mon_sel != mon_m || joy_sel != joy_mode;
+assign pending  = ram_opt != ram_mb || mon_sel != mon_m || joy_sel != joy_mode || status[34] != memtest_m;
 // mask bit 1: no controller, so no stick to move the pointer with
 assign no_stick = joy_sel == 3'd0;
 

@@ -868,7 +868,8 @@ logic [15:0] bt_div = 16'd0;
 // VIA (bt_rdn), to see what a polling loop reads without flooding the trace
 logic [7:0]  bt_rdn = 8'd0;
 wire         bt_rd_sample = q_is_gc && ~q_we && (qa[16:8] == 9'h000 || q_is_via);
-wire         bt_hit = q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
+wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory test's progress (DBG)
+                      q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
                                 (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
                                 (TRACE_INT != 0 && q_we && (qa[16:8] == 9'h000 || q_is_via)) ||
