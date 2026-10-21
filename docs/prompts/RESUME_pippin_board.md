@@ -630,6 +630,20 @@ interrupt is pending (cr2.LT) while the init runs, and the instruction
 `move.l (sp)+,-20(a0)` executed under the slow path's hook left a7
 unpopped (the rts went to the popped address). The hook pointer is at
 KDP+0x814 (the kernel data page: the 68fffxxx loads in the samples).
+
+**19:05. The rising-edge-only VIA event (50fe6c0, slack +0.384;
+`scratch/tr_rise1.bin`, `.txt`) breaks the early ROM: a black screen, the
+mask left at 80158000, the VIA's line high with no event and an interrupt
+storm of re-reports (17.7 M records in 160 s).** The either-edge rule
+(dingusppc's) is what the ROM's Cuda handling needs; reverted (the
+revert commit follows 50fe6c0; the 6ae01be core is back on .92). The
+spurious-second-interrupt idea cannot be tested that way. Next
+instrument: a cycle-level capture of the PPC stream (PC, instruction,
+load EA) for a few thousand cycles from a trigger (the fetch of
+FFCF7BCE), kept in an on-chip RAM and drained into the trace afterwards
+(the trace's path cannot take one record a cycle): the hook's code
+addresses, the handlers of `move.l (sp)+,-20(a0)` and `rts`, and the
+stack slots their loads and stores touch.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
