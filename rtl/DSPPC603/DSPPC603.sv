@@ -3440,10 +3440,10 @@ if (PERF != 0) begin : g_perf
 	// (PC, the word, the last data access the cache took: its EA and whether a write), from
 	// the first fetch of DBG_TRIG_EA, in a RAM of 1,024 pairs, drained afterwards through
 	// dbg_rec as kind 19 records (a pair each, one every 64 cycles; the samples pause)
-	localparam logic [31:0] DBG_TRIG_EA = 32'hFFCF7BC8;   // the 68k emulator's fetch of `tst.l 6(a0)` (Kinka 1.3's floppy driver, FFCF7BC2's wait)
-	logic [193:0] cap_ram [1024];
+	localparam logic [31:0] DBG_TRIG_EA = 32'hFFCF7B8C;   // the 68k emulator's fetch of the floppy driver's prime routine (Kinka 1.3: its store of tmAddr, InsTime, PrimeTime, the wait)
+	logic [193:0] cap_ram [4096];       // 8,192 instructions
 	logic         cap_on, cap_full, cap_done, cap_half;
-	logic [10:0]  cap_wr, cap_rd;
+	logic [12:0]  cap_wr, cap_rd;
 	logic [96:0]  cap_a;
 	logic [31:0]  cap_ea;
 	logic         cap_we;
@@ -3458,20 +3458,20 @@ if (PERF != 0) begin : g_perf
 		if (cap_on & ex_leave) begin
 			if (~cap_half) begin cap_a <= {cap_we, cap_ea, ex_insn, ex_pc}; cap_half <= 1'b1; end
 			else begin
-				cap_ram[cap_wr[9:0]] <= {cap_we, cap_ea, ex_insn, ex_pc, cap_a};
+				cap_ram[cap_wr[11:0]] <= {cap_we, cap_ea, ex_insn, ex_pc, cap_a};
 				cap_half <= 1'b0;
-				cap_wr   <= cap_wr + 11'd1;
-				if (cap_wr == 11'd1023) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
+				cap_wr   <= cap_wr + 13'd1;
+				if (cap_wr == 13'd4095) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
 			end
 		end
-		cap_q <= cap_ram[cap_rd[9:0]];
+		cap_q <= cap_ram[cap_rd[11:0]];
 		if (cap_full) begin
 			if (dbg_t[5:0] == 6'h3F) begin
 				dbg_ev       <= 1'b1;
-				dbg_rec      <= {cap_q[192:161], cap_q[160:129], cap_q[128:97], cap_q[95:64], cap_q[63:32], cap_q[31:0], 21'd0, cap_rd};
+				dbg_rec      <= {cap_q[192:161], cap_q[160:129], cap_q[128:97], cap_q[95:64], cap_q[63:32], cap_q[31:0], 19'd0, cap_rd};
 				dbg_capflags <= {1'b1, cap_q[193], cap_q[96]};
-				cap_rd       <= cap_rd + 11'd1;
-				if (cap_rd == 11'd1023) begin cap_full <= 1'b0; cap_done <= 1'b1; end
+				cap_rd       <= cap_rd + 13'd1;
+				if (cap_rd == 13'd4095) begin cap_full <= 1'b0; cap_done <= 1'b1; end
 			end
 		end
 		else if (dbg_dense ? dbg_t[7:0] == 8'hFF : dbg_t[12:0] == 13'h1FFF) begin   // every 8,192 cycles (65,536 until 2026-10-21), 256 in the dense window
