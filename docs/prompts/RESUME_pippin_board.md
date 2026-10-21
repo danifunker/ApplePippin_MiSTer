@@ -523,6 +523,27 @@ section (the emulator keeps the 68k SR in memory). Next: lockstep with
 random latency on top of the board's (`--mem-wait 20 --stall 60`), and
 the 603 random-program bench with stalls; a mismatch there is the bug in
 full view.
+
+**16:45.** run_core.py already runs its vectors and lockstep programs with
+25 % and 60 % wait states (the CPU with the stand-in is covered); run12
+stopped for **run13 = run5's options plus `--stall 60`** (lockstep, the
+board's latency with random extra waits; on the Mac since 16:20;
+`rep13.bin`, `runrep13.txt`). Pippin_sdram acknowledges a line write only
+after its last WRITE plus tWR and serves requests in order; the dcache
+(DSPPC603_cache: 128 sets, 2 ways, 32-byte lines) orders a victim's
+write-back before the fill on its one port and forwards the words of a
+colliding RAM write ("landed"); the cache RAMs are altsyncram DUAL_PORT
+with READ_DURING_WRITE_MODE_MIXED_PORTS = OLD_DATA, as the Verilator
+model behaves (the map report, lines ~9466-9773). **f2dd4c9: the memory
+test's castout phase** (status 5 after the one pass and the zero fill:
+200,000 rounds of store X at A, five same-set loads, store Y at A+4,
+both read back; then store, dcbf, store, both read back; errors and the
+first one's address/read/expected in the DBG registers; status 6 at the
+end), building 16:30: Advanced > Boot: Memory test, Apply and reset, a
+capture, `grep DBG`. If it shows errors, the lost store is reproduced in
+isolation on the board (and the same program runs in the bench with
+`--boot memtest`); if not, the pattern needs widening (the board's own
+access sequence: stores under interrupts, the emulator's mix).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
