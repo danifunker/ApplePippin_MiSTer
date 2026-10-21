@@ -236,6 +236,16 @@ always_ff @(posedge clk) cpu_reset <= reset | cuda_reset;
 assign cpu_in_reset = cpu_reset;
 
 logic         cpu_dbg_ev;
+logic         cpu_dbg_dense;        // the dense sample window: 20 ms from SWIM3's interrupt being enabled (int_dbg: the mask's bit 19)
+logic [20:0]  dense_cnt;
+logic         swim_en_q;
+always_ff @(posedge clk) begin
+	swim_en_q <= int_dbg[19];
+	if (int_dbg[19] & ~swim_en_q) dense_cnt <= 21'd1;
+	else if (dense_cnt != 21'd0 && dense_cnt != 21'h1FFFFF) dense_cnt <= dense_cnt + 21'd1;
+	cpu_dbg_dense <= dense_cnt != 21'd0 && dense_cnt < 21'd1_170_000;   // 20 ms at 58.33 MHz
+	if (reset) begin dense_cnt <= 21'd0; cpu_dbg_dense <= 1'b0; swim_en_q <= 1'b0; end
+end
 logic [223:0] cpu_dbg_rec;
 DSPPC603 #(.PERF(PERF)) cpu (
 	.clk, .reset(cpu_reset), .reset_pc,
@@ -246,7 +256,7 @@ DSPPC603 #(.PERF(PERF)) cpu (
 	.trace_valid, .trace_last, .trace_pc, .trace_insn, .trace_fold, .trace_fold_insn, .trace_reg2_we, .trace_reg2_idx, .trace_reg2_val, .trace_reg_we, .trace_reg_idx, .trace_reg_val,
 	.trace_cr, .trace_xer, .trace_lr, .trace_ctr, .trace_fpscr, .trace_msr,
 	.trace_dreq, .trace_dwe, .trace_dkind, .trace_daddr, .trace_dbe, .trace_dwdata,
-	.perf_cnt, .dbg_ev(cpu_dbg_ev), .dbg_rec(cpu_dbg_rec)
+	.perf_cnt, .dbg_dense(cpu_dbg_dense), .dbg_ev(cpu_dbg_ev), .dbg_rec(cpu_dbg_rec)
 );
 
 // the VRAM's path and the video registers, between the machine and the picture side

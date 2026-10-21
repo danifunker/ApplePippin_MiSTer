@@ -180,6 +180,7 @@ module DSPPC603
 	output logic [27:0][31:0] perf_cnt,
 	// a sample every 65536 cycles (PERF): EX's address and instruction, the
 	// exceptions taken since by vector, the last one's vector and address
+	input  logic        dbg_dense,       // PERF: a sample every 256 cycles instead of 8,192 (a window the machine picks)
 	output logic        dbg_ev,
 	output logic [223:0] dbg_rec
 );
@@ -3436,7 +3437,7 @@ if (PERF != 0) begin : g_perf
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
-		if (dbg_t[12:0] == 13'h1FFF) begin        // every 8,192 cycles (65,536 until 2026-10-21: too sparse for the 68k's control flow)
+		if (dbg_dense ? dbg_t[7:0] == 8'hFF : dbg_t[12:0] == 13'h1FFF) begin   // every 8,192 cycles (65,536 until 2026-10-21), 256 in the dense window
 			dbg_ev  <= 1'b1;
 			// (the counts of four classes: decrementer, external, DSI, alignment; the load's
 			// address in the other four bytes since 2026-10-21)
