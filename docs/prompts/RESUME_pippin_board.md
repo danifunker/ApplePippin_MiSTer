@@ -564,6 +564,13 @@ written; both expect {Y[15:0], X[31:16]}), a store at A+4 then lwz A+6 at
 once, a store at A+8 then lwz A+6 at once. Building 16:53 (~17:20): the
 same procedure (Advanced > Boot: Memory test, a capture, `grep DBG`).
 run13 (random stalls, lockstep) at 250 M at 16:54.
+
+**17:15. run13 (`--mem-wait 20 --stall 60`, lockstep; `scratch/rep13.bin`,
+`.txt`): identical, PASS, polls every 503 ms.** Random latency on top of
+the board's does not reproduce it either. run14 on the Mac (17:15):
+135b4fa's memory test in the bench (`--boot memtest --memtest-passes 2`,
+`rep14.bin`, `runrep14.txt`), to validate the same-line patterns' expected
+values before reading the board's result.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
