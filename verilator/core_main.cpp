@@ -1005,7 +1005,7 @@ int main(int argc, char** argv) {
 			std::fprintf(stderr, "reference model: cannot map RAM, the ROM and the devices: %s\n", ref_last_error());
 			return 2;
 		}
-		if (!opt.prog.empty()) std::memcpy(ref_ram(), mem.data(), RAM_SIZE);
+		std::memcpy(ref_ram(), mem.data(), RAM_SIZE);     // the RAM as the core starts with it (--ram-fill too)
 #else
 		if (ref_init(RAM_SIZE, PVR_604) != 0) { std::fprintf(stderr, "reference model failed to start\n"); return 2; }
 		std::memcpy(ref_ram(), mem.data(), RAM_SIZE);
