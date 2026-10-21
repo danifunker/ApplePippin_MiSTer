@@ -17,7 +17,12 @@ downloads, other people's boards).
   git (push here, `git pull` there; the Mac clones over HTTPS). Not in git and
   copied to the same paths there: `scratch/pippin/` (ROMs, discs),
   `~/repos/Main_MiSTer-pippin` (no .git), `~/.cache/applepippin/dingusppc`.
-  Bench runs there: `~/pippin_bench/` (`run.sh`, nohup).
+  Bench runs there: `~/pippin_bench/` (`run.sh`, nohup). **Use only the Mac
+  for Verilator** (no bench runs on this box): it compiles the machine bench in
+  minutes (8 min to 50 M instructions including the build, against ~30 min
+  here) and runs ~1.75x faster (17.5 M vs 10 M CPU cycles a minute), with the
+  same results cycle for cycle (50 M instructions at 149,071,952 cycles on
+  both). Build there with `VJOBS=6`.
 - **Every Quartus flow under `flock /tmp/quartus.lock ...`** (the sessions'
   agreed lock; the SPARCstation, HP9K715 and HP9K385 sessions use it too, and
   message before long runs). Verilator builds at `VJOBS=2` or `3`.
@@ -158,8 +163,9 @@ devices/RTC from the Main.
   Not checked yet: what that 68k loop reads (the trace does not record reads;
   r24 holds the 68k PC), and whether the bench passes the same mask write.
 
-**Next step**: a bench run of bbc509d is in progress (started 05:31, slow:
-~50 M instructions in 30 min): build `~/.cache/applepippin/verilator-rep`,
+**Next step**: a bench run of bbc509d (the last one on this box; from now on
+the Mac's `~/pippin_bench/run.sh`, the same options) was started 05:31:
+build `~/.cache/applepippin/verilator-rep`,
 `MACH_GFLAGS="-GSOUND_IN_DMA=0 -GCUDA_FAST_BOOT=0"` (Verilator keeps the last
 -G, so FAST_BOOT is 0), Super Marathon, `--max-instr 900000000`, trace to the
 session scratchpad `rep.bin` (log `runrep.txt`, frame `rep_700M.png`). When its
