@@ -2079,7 +2079,10 @@ def memtest_image():
           D(14, 7, 4, -32), X(0, 0, 7, 86),
           cmplw(4, 30), ("bc",) + BLT + ("zl",),
           X(0, 0, 0, 598),
-          D(14, 29, 29, 1), D(36, 29, 31, 4), ("b", "pass"),
+          D(14, 29, 29, 1), D(36, 29, 31, 4),
+          # ... and the test stops there (status 4), the RAM zeroed, so that "Apply and reset" to
+          # the ROM boot never lands in a pass's write phase (one pass, as the bench expects)
+          D(14, 3, 0, 4), D(36, 3, 31, 0), B_SELF,
           ("label", "bad"),
           D(14, 28, 28, 1), D(36, 28, 31, 8),
           cmpwi(27, -1), ("bc",) + BNE + ("next",),
