@@ -27,7 +27,7 @@ Newest last.
 | 12 | The lockstep bench: `dcbz`'s alignment exception handed to the reference | bench | Latent (no divergence seen there) |
 | 13 | ppctest's supervisor PTEs: WIMG shifted twice (`super603.py`'s copy fixed) | test generator | Check MacPPC7300's own PTE helpers |
 | 14 | Main_MiSTer: a CHD with an unstored pregap mounts unlike its CUE | Main (Mac CD layer) | Yes: the same Main code serves MacPPC7300's CD |
-| 15 | Grand Central in 68k mode: a new VIA interrupt while the VIA's line is already high is lost | machine | Yes: the same Pippin_gc/MacPPC7300_gc code |
+| 15 | Grand Central in 68k mode: the VIA's line, high, must keep reporting events (a VIA interrupt was lost) | machine | Yes: the same Pippin_gc/MacPPC7300_gc code |
 
 ## The items
 
@@ -184,7 +184,8 @@ Newest last.
 
 ### 15. Grand Central loses a VIA interrupt that arrives while the line is high
 
-- Here: `rtl/machine/Pippin_gc.sv` (`via_new`), 2026-10-19.
+- Here: `rtl/machine/Pippin_gc.sv` (`via_new` 90f83bd, 2026-10-19; `via_rep_q`
+  bbc509d, 2026-10-21).
 - What: Grand Central set an interrupt event only when a source's line
   changed. In 68k mode (MACIO_INT_MODE, as Mac OS runs it) dingusppc sets the
   event at every report of a source (`ack_int_common`). With the VIA's line
@@ -194,6 +195,16 @@ Newest last.
   interrupt-state record: VIA IFR 64, IER 24, line high, events 0). Now a VIA
   flag newly set and enabled is an event of its own in 68k mode. Other sources
   (MESH, the SCCs) have the same exposure and are unchanged so far.
+- That did not cure it (2026-10-21, the board's trace of every Grand Central
+  interrupt-register write and VIA write): the handler of an external
+  interrupt at 15.785 s wrote "clear all", and the VIA's T2 and shift-register
+  flags stayed set and enabled with no event. Mac OS's 68k VIA dispatcher
+  takes one flag an interrupt and counts on the line (a level on a 68k Mac) to
+  bring it back for the next; in dingusppc `ViaCuda::update_irq` calls
+  `ack_int` whenever the line is high, at every flag set (enabled or not) and
+  at the reads of T1CL, T2CL, SR and the writes of T1CH, T1LH, T2CH, SR, IFR
+  and IER, and each call is an event in 68k mode. bbc509d does the same (the
+  line looked at the clock after the report) in place of `via_new`.
 - MacPPC7300: the same code (`MacPPC7300_gc`): the same hazard, timing-
   dependent (the bench never hit it here either).
 

@@ -119,33 +119,51 @@ board), the bench's functional memory model vs the real SDRAM controller, the
 CPU clock ratio (bench 66 MHz), the Main's real timing on slot 4, real input
 devices/RTC from the Main.
 
-**Next step**: the 048981b build (TRACE_INT: kind 4 records of every write to
-Grand Central's interrupt registers F30000xx and to the VIA F3016000-F3017FFF)
-is built: `output_files/BandaiPippin.rbf` of 2026-10-19 09:57 (worst slack -0.020 ns
-at 58.33 MHz), not yet on the board (rebuild from 048981b if output_files has
-changed since). Put it on .92 (`MISTER_KEY=~/.ssh/id_rsa python3
-syn/mister.py put-core`), start `python3 syn/mister.py trace-capture 150`, load
-the core through the OSD (F12, up, right = System page, enter = Core, the
-browser opens in `_Console` on BandaiPippin, enter), wait 150 s,
-`trace-fetch F` and `trace --file F`. Find the last clear (writes to
-F3000028) and the VIA writes (IFR at +1A00, IER +1C00, SR +1400) before the
-stop, and compare with the bench: run the same disc with the same build
-options (`MACH_GFLAGS=-GSOUND_IN_DMA=0 PIPPIN_BUILD=~/.cache/applepippin/<dir>
-python3 verilator/run_machine.py --no-lockstep --module 32 --cd CUE
---trace-out F ...`) and decode its F the same way. Consider also a bench run
-with CUDA_FAST_BOOT=0 (`MACH_GFLAGS=-GCUDA_FAST_BOOT=0`; the Makefile also
-passes -GCUDA_FAST_BOOT=1, so change the Makefile or the order) to see if the
-stall reproduces in simulation.
+**2026-10-21: the TRACE_INT capture, and a fix that did not cure it.**
 
-Trace decoding caveat: **kind 7 is already the SCSI target's "command start"**
-in `syn/mister.py trace` (its branch comes first), so the interrupt-state
-records print as "ID0 start". Read them from the capture file directly (36
-bytes a record: 4-byte index, 32-byte record; record byte 0 = 7, bytes 1-3 = 0,
-4-7 cycle, 8-11 mask, 12-15 events, 16-19 lines, 20 IFR, 21 IER, 22 bit 0 irq
-bit 1 via_irq, 24-31 zero), or better: move it to a free kind (e.g. 16) in
-`Pippin_system.sv` and the decoder. Kind 14 records are the CPU's PC samples
-(bytes 8-11 PC, 12-15 last exception PC, 16-17 its vector, 18-19 MSR, 28-31
-the instruction; their time stamps use another clock: align by record index).
+- The 048981b capture (`scratch/tr_int1.bin`, `.txt`): a steady pattern of T2
+  (Time Manager) interrupts and ADB polls, each interrupt's handler writing
+  Grand Central's clear register with "clear all" (`clear w 00000080`, i.e.
+  0x80000000 byte-swapped), until **15.732 s: the mask write `00a01f90`
+  (9017a000 -> 901fa000, adding bit 19 = SWIM3's interrupt)**. T2 is then
+  loaded once more (~1.2 ms), a clear at about the moment it fires, and from
+  there T2's flag stays set with the line high and no event (IFR 60); at
+  ~15.79 an interrupt arrives (the SR flag), its handler writes "clear all",
+  and nothing services the VIA: IFR 64 for good.
+- bbc509d (built 05:59, worst setup slack +0.057 ns at 58.33 MHz, **on .92
+  as `_Console/BandaiPippin_20261021.rbf`**): Grand Central now does what
+  dingusppc does, in 68k mode every report of the VIA's line while high is an
+  event (any flag set, enabled or not; reads of T1CL/T2CL/SR; writes of
+  T1CH/T1LH/T2CH/SR/IFR/IER), in place of 90f83bd's rule. It is right by the
+  reference but **does not cure the board**: capture `scratch/tr_fix1.bin`,
+  the same stall at the same place (mask write 15.732, the clear at 15.747,
+  the SR interrupt at 15.837 delivered and cleared, the VIA never serviced).
+  The interrupt-state record is now **kind 16** (decoder reads 16 and old 7);
+  the decoder prints VIA writes by register name.
+- So the event is delivered and the 68k side does not dispatch it: **68k
+  interrupts look masked while Mac OS polls**. During the stall the CPU runs a
+  short 68k loop in the emulator (PC samples 68060CC0/CC4/D2C, the opcode
+  fetch `lhau r27,2(r24)` and dispatch; ~15 handler spots, one a load
+  `lwz r4,0(r17)` at 68092088) and still takes decrementer exceptions (0x900).
+  The **leading suspect is the floppy driver's init after SWIM3's interrupt is
+  enabled** (`Pippin_swim3.sv`: Grand Central source 0x13; dingusppc's
+  swim3.cpp/superdrive.cpp), waiting for something with interrupts masked.
+  Not checked yet: what that 68k loop reads (the trace does not record reads;
+  r24 holds the 68k PC), and whether the bench passes the same mask write.
+
+**Next step**: a bench run of bbc509d is in progress (started 05:31, slow:
+~50 M instructions in 30 min): build `~/.cache/applepippin/verilator-rep`,
+`MACH_GFLAGS="-GSOUND_IN_DMA=0 -GCUDA_FAST_BOOT=0"` (Verilator keeps the last
+-G, so FAST_BOOT is 0), Super Marathon, `--max-instr 900000000`, trace to the
+session scratchpad `rep.bin` (log `runrep.txt`, frame `rep_700M.png`). When its
+interrupt-state records pass cycle 0x26200000 (the board's stall), decode it
+(`python3 syn/mister.py trace --file rep.bin`) and compare what follows the
+mask write `00a01f90` with the board's: the SWIM3 activity, the T2 servicing,
+the clears. If the bench is gone (a new session's scratchpad differs), rerun
+it with the same options. Then, if needed, dingusppc's device log of the same
+phase (`machref ... --log`, one simulation at a time). `scratch/k14.py FILE LO
+HI` prints the kind 14 PC samples (bytes 8-11 PC, 12-15 last exception PC,
+16-17 its vector, 18-19 MSR, 28-31 the instruction; align by record index).
 
 ## Open problem 2: Athens never gets Mac OS's video clock
 
