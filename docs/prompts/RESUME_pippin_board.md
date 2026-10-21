@@ -367,6 +367,36 @@ TRACE.txt [after] [before]` prints the Time Manager's view (VIA accesses,
 clears, events, polls, samples) from the mask write. run8 (run5's options,
 a5472ac: every VIA read) started 12:24 on the Mac; the a5472ac build here
 is due ~12:32: then the board's capture, and the diff.
+
+**12:50, the VIA-read capture (a5472ac, slack +0.012; `scratch/tr_via1.bin`,
+`.txt`; 11,132 records lost by the ARM's streamer, all before the init: the
+init stretch is complete) read with `syn/tmview.py`.** The Time Manager's
+routines are recognisable by their VIA accesses: FFC3B630 (mask, read the
+timer) = T2CH r, IFR r, T2CL r, T2CH r; FFC3B4D8 (reload) = T2CL r, then
+T2CH w, T2CL w, T2CH w; the 68k VIA handler = IFR r, IER r. At the init
+(15.713): PrimeTime (reads 09/40/6C/09, T2CL 30, reload 0925), a second
+PrimeTime-like operation (08/40/BC/08, 8D, reload 0882), then **the
+floppy's DISK_IN poll with no interrupt event**, a PrimeTime (reload
+07DC), a poll, a PrimeTime's reads (07/40/7F/07) **and no reload: the
+walk**. Every T2 interrupt after that (15.716, .719, .722, .726) enters
+the dispatch **without** FFC3B630's reads (T2CL r alone, then the reload:
+the table's +10 entry, FFC3B4B4), runs the poll (the continuation) and a
+PrimeTime whose walk never ends, nested in the first. So PrimeTime(500 ms)
+put the task at the head, due at once, and the dispatch inside the masked
+walk is the +10 path. The multiplier is not a critical path (the CPU
+clock's worst is 0.138 ns in fq_a_mem_r/cr[5]; the worst overall 0.012 in
+Pippin_sdram at 100 MHz). **585c29e: the trace ring is 16384 records**
+(building 12:45). **Stale RAM**: the board's SDRAM keeps the previous
+run's contents across core reloads (a warm start for the ROM, heap blocks
+reused uncleared), the bench starts from zeros. Booting the memory test
+(RAM overwritten with its patterns) and then the ROM (`scratch/tr_cold1.bin`,
+`.txt`) **still stalls** the same way: stale Mac OS contents are not it,
+but nonzero garbage still differs from the bench's zeros. **7cc5675:
+`--ram-fill SEED`** fills the bench's RAM (and the reference's: `mem` is
+copied into `ref_ram()`) with xorshift32 bytes. **run9 = run5's options
+plus `--ram-fill 0x9E3779B9`, lockstep, running on the Mac since 12:47**
+(run8 stopped for it; `rep9.bin`, `runrep9.txt`). If run9 stalls, the
+cause is a RAM-contents dependence, visible in full in the bench.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
