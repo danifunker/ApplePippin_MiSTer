@@ -3436,7 +3436,7 @@ if (PERF != 0) begin : g_perf
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
-		if (dbg_t == 16'hFFFF) begin
+		if (dbg_t[12:0] == 13'h1FFF) begin        // every 8,192 cycles (65,536 until 2026-10-21: too sparse for the 68k's control flow)
 			dbg_ev  <= 1'b1;
 			// (the counts of four classes: decrementer, external, DSI, alignment; the load's
 			// address in the other four bytes since 2026-10-21)

@@ -411,7 +411,7 @@ always_ff @(posedge clk) begin
 		sn_cnt <= 24'd0;
 	end
 end
-// kind 14 (PERF): the CPU's sample every 65536 cycles (syn/cpusample.py):
+// kind 14 (PERF): the CPU's sample every 8192 cycles (65536 until 2026-10-21) (syn/cpusample.py):
 // bytes 4-7 the cycle count, then EX's address, the last exception's
 // address, its vector, MSR, eight exception counts by vector, EX's
 // instruction; it waits behind the records above
