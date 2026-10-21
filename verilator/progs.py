@@ -2053,6 +2053,7 @@ def memtest_image():
     p += li32(3, batl(0xF0000000, 2, wimg=0b0101)) + [mtspr(539, 3)]
     p += [0x4C00012C] + li32(3, 0x50) + [mtmsr(3), 0x4C00012C]        # data translation on
     p += [D(15, 31, 0, DBG >> 16), D(32, 30, 31, 0x20)]                # r31 debug registers, r30 RAM size
+    p += li32(3, 0x400000) + [cmplw(30, 3), ("bc",) + (4, 1) + ("ram4",), X(3, 30, 3, 444), ("label", "ram4")]   # at most 4 MB (the Pippin's map: 2026-10-21)
     p += [D(14, 29, 0, 0), D(14, 28, 0, 0), D(14, 27, 0, -1)]          # passes, errors, first error
     p += [D(36, 29, 31, 4), D(36, 28, 31, 8), D(36, 27, 31, 0xC)]
     p += li32(25, 0x9E3779B9)
@@ -2086,7 +2087,7 @@ def memtest_image():
           # way written back), store Y at A+4 (A refilled), read both back; then store X at
           # A+8, dcbf A, store Y at A+12, read both back. Errors and the first one's address,
           # word read and word expected as the memory test reports them; status 6 at the end.
-          D(14, 3, 0, 5), D(36, 3, 31, 0),
+          D(14, 3, 0, 5), D(36, 3, 31, 0), D(14, 27, 0, -1), D(36, 27, 31, 0xC),
           ] + li32(8, 0x12345) + [D(14, 9, 0, 0)] + li32(10, 200000) + [
           ("label", "ct"),
           D(7, 8, 8, 5), D(14, 8, 8, 0x1234),
@@ -2100,6 +2101,23 @@ def memtest_image():
           D(36, 12, 8, 8), X(0, 0, 8, 86), D(36, 13, 8, 12),
           D(32, 14, 8, 8), cmplw(14, 12), ("bc",) + BNE + ("ctbad",),
           D(32, 14, 8, 12), cmplw(14, 13), ("bc",) + BNE + ("ctbad",),
+          # ... the same line's words written back to back and a misaligned word of it read at
+          # once, as the 68k emulator does for `movem.l d1-d3/a3,-16(a0)` then `tst.l 6(a0)`
+          # (the board's stall): four stores at A+16..A+28 then lwz A+6 (words 1-2, untouched),
+          # lwz A+22 (words 5-6, just written: expect {X1[15:0], X2[31:16]}), a store at A+4 then
+          # lwz A+6 at once, a store at A+8 then lwz A+6 at once; all on a line in the cache
+          # (status 5 still; the first error's address/read/expected as above)
+          D(36, 12, 8, 0), D(36, 13, 8, 4), D(36, 12, 8, 8), D(36, 13, 8, 12),           # X Y X Y in words 0-3
+          D(36, 12, 8, 16), D(36, 13, 8, 20), D(36, 12, 8, 24), D(36, 13, 8, 28),        # X Y X Y in words 4-7, back to back
+          D(32, 14, 8, 6),                                                             # words 1-2 misaligned: {Y[15:0], X[31:16]}
+          (21 << 26) | (13 << 21) | (15 << 16) | (16 << 11) | (0 << 6) | (15 << 1),      # rlwinm r15,r13,16,0,15: Y << 16
+          (20 << 26) | (12 << 21) | (15 << 16) | (16 << 11) | (16 << 6) | (31 << 1),     # rlwimi r15,r12,16,16,31: | X >> 16
+          cmplw(14, 15), ("bc",) + BNE + ("ctbad",),
+          D(36, 12, 8, 16), D(36, 13, 8, 20), D(36, 12, 8, 24), D(36, 13, 8, 28),
+          D(32, 14, 8, 22),                                                            # words 5-6 misaligned, just written
+          cmplw(14, 15), ("bc",) + BNE + ("ctbad",),
+          D(36, 13, 8, 4), D(32, 14, 8, 6), cmplw(14, 15), ("bc",) + BNE + ("ctbad",),   # a store at +4, the load at once
+          D(36, 12, 8, 8), D(32, 14, 8, 6), cmplw(14, 15), ("bc",) + BNE + ("ctbad",),   # a store at +8, the load at once
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
