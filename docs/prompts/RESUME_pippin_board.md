@@ -227,6 +227,41 @@ at the dispatch that is the 68k PC + 2, elsewhere the polled address.
 `scratch/k14.py` likewise. Not built yet: the next build and capture give
 the 68k PC of the loop, to be looked up in the Kinka ROM's .Sony/SWIM3
 driver.
+
+**2026-10-21 09:20, the fa7e049 capture (`scratch/tr_swim2.bin`, `.txt`;
+built 09:16, slack +0.304): the loop found.** The samples' load addresses
+during the stall alternate between ROM fetches FFC3B488-FFC3B496 (68k
+ROMBase FFC00000) and RAM 00081C70 / 00081C7A. The ROM there
+(`m68k-apple-macos-objdump -b binary -m m68k --adjust-vma=0xffc00000`) is
+**the Time Manager's queue walk inside PrimeTime/InsTime** (entered at
+FFC3B3EA; FFC3B42E `jsr ([0x2080],0x14)` masks interrupts, restored by
+`move.w d3,SR` at FFC3B536 after the T2 reload at FFC3B4D8; the dispatch
+from the T2 interrupt is FFC3B4B0): `lea (a2),a1; move.l (a1),d2; beq;
+exg d2,a1; move.l 10(a1),d1; sub.l d1,d0; bcc.s` — and the two loads are
+one TMTask at 00081C70 whose qLink points to itself with tmCount 0: a
+self-linked queue, walked for ever with interrupts off (hence T2 and the
+Cuda SR byte cleared by the nanokernel and never dispatched). Two more
+facts: (1) samples 99376-99378 show the walk already running before the
+15.739/15.740 interrupt, and that interrupt *was* dispatched (T2 reload,
+floppy poll) inside the masked section: a nested PrimeTime is how the
+self-link arises; (2) **the bench's trace of the same build
+(`scratch/rep2.bin`, `.txt`, the Mac, 1956 clock) has the identical driver
+init at 8.666 and then its DISK_IN poll task fires once, 500 ms later
+(9.167 s)**: it is a 500 ms periodic disk-insertion check. On the board the
+task fires at once and every 1-2 ms (the T2 reloads 0x070a, 0x06bb, 0x05c2,
+0x04c2: 256 ticks less each time) until the corruption. So PrimeTime(500
+ms) gives a near-zero delta on the board: the ms-to-ticks conversion
+(FFC3B3D2: `mulu.l` 64-bit by 0xC3D70A3E, a 68020 instruction the
+emulator does with mulhwu/mullw) or the queue arithmetic goes wrong on the
+board only, i.e. a timing-dependent CPU result, which real SDRAM latency
+would expose and the bench's one-cycle memory would not. **Running on the
+Mac since 09:27: `~/pippin_bench/run3.sh` = the lockstep bench
+(dingusppc's CPU) with `--stall 25` (random bus wait states), the 1956
+clock, Super Marathon, to 420 M instructions, trace `rep3.bin`, log
+`runrep3.txt`.** If lockstep diverges, the first divergence is the CPU bug;
+if the machine stalls without diverging, the problem is elsewhere (the
+nanokernel's masking under the interrupt timing); if neither, raise the
+stall rate or the clock ratio (`-GCPU_HZ=58333333`).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
