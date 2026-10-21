@@ -15,7 +15,8 @@ RANGES = [
     (0xFFC3B366, 0xFFC3B3EA, "TM InsTime"),
     (0xFFCF5C4E, 0xFFCF5D64, "drv init"), (0xFFCF668E, 0xFFCF6750, "drv poll loop"),
     (0xFFCF7B8C, 0xFFCF7BA2, "drv prime"), (0xFFCF7BA2, 0xFFCF7BC2, "drv task fired"),
-    (0xFFCF7BC2, 0xFFCF7BDC, "drv wait/stash"), (0xFFCF7BDC, 0xFFCF7BF2, "drv DEBUGGER path"),
+    (0xFFCF7BC2, 0xFFCF7BDC, "drv wait/stash"), (0xFFCF7BDC, 0xFFCF7BDE, "drv DEBUGGER"),
+    (0xFFCF7BDE, 0xFFCF7BF2, "drv cancel task"),
     (0xFFCF79A0, 0xFFCF7B8C, "drv chip/drive"), (0xFFCF5A00, 0xFFCF9000, "drv other"),
 ]
 def label(ea):
