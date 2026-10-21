@@ -571,6 +571,18 @@ the board's does not reproduce it either. run14 on the Mac (17:15):
 135b4fa's memory test in the bench (`--boot memtest --memtest-passes 2`,
 `rep14.bin`, `runrep14.txt`), to validate the same-line patterns' expected
 values before reading the board's result.
+
+**17:40, the extended memory test on the board (135b4fa, slack +0.107;
+`scratch/tr_castout2.bin`, `.txt`): pass 1 over 4 MB with no error, then
+the castout + same-line misaligned-load phase, 200,000 rounds in 1.14 s,
+no error.** The cache and the memory path handle those patterns. (The
+bench's run of the same program, run14 with `--rom ""`: pass 1 clean, the
+phase done; its DBG records in `rep14.bin`.) The other way a load gets the
+wrong word is a wrong translation: **6ae01be**, the sample records the
+last load's effective *and physical* address (bytes 20-23 and 24-27; the
+exception counts are gone from it; the decoder prints `ld ea .. pa ..`),
+building 17:33 (~18:00): in the dense window, every sample's ea/pa pair
+(68k RAM should be 1:1) and, with luck, the load at FFCF7BC8 itself.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
