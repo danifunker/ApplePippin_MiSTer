@@ -319,6 +319,33 @@ board-only differences: the memory latency and clock ratio (run5), the
 Main's CD latency (the bench's `--disk-latency`, default 2000 memory
 clocks; the SD card answers in milliseconds), the real time (`--clock`),
 the DDR3 VRAM path.
+
+**12:10.** run5 (lockstep, `--mem-wait 20 --cpu-mhz 58.333`, `scratch/rep5.bin`,
+`.txt`): identical to 420 M instructions, PASS; init at 10.293 s, the
+DISK_IN polls every ~503 ms after it. run6 (`--disk-latency 200000`)
+running since 11:31; run7 (`--clock` today) ready. **e129517, kind 17** (the
+interrupt-state record at every change of the events or the CPU's
+interrupt; the ESCC's accesses too), built (slack -0.376), captured
+`scratch/tr_ev1.bin`, `.txt`: the same stall, and the picture is now
+complete: a T2 interrupt is a rising-edge event (IFR 60), the nanokernel's
+clear-all, the 68k handler's T2CL read (IFR 40), the falling-edge event
+(68k mode), a clear-all, then the Time Manager's reload. **At 15.740 and
+15.771 that whole sequence, floppy poll and PrimeTime included, runs while
+the samples before, between and after show the queue walk** (30 samples
+of it between 15.743 and 15.770): 68k interrupts are dispatched inside
+PrimeTime's `ori #$700,SR` section (the table at 0x2080, set at ROM
+offset 5A44, lists FFC062A0, FFC3B366, FFC3B3D2, FFC3B432, FFC3B4B4,
+FFC3B630; entry +14 = FFC3B630 is the plain 68k mask-and-read-T2 routine).
+And right after the init (15.737) the driver's poll runs twice with **no
+interrupt event at all** between the T2 reloads: the task body runs
+synchronously there. Checked and clear: the emulator's code in RAM (the
+0x68xxxxxx PCs are RAM, the nanokernel's copy, not the ROM) has the same
+instruction word at every PC sampled on both machines (2002 common PCs).
+**a5472ac: every VIA read in the trace** (T2CH/T2CL/IFR as the Time
+Manager reads them at FFC3B630/FFC3B4D8), building (12:10); the plan: the
+same commit on the Mac (pushed; `run8` = run5's options plus the trace)
+and on the board, then diff the Time Manager's inputs (T2 readbacks) and
+outputs (reloads) around the init between the two machines.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
