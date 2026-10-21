@@ -644,6 +644,20 @@ FFCF7BCE), kept in an on-chip RAM and drained into the trace afterwards
 (the trace's path cannot take one record a cycle): the hook's code
 addresses, the handlers of `move.l (sp)+,-20(a0)` and `rts`, and the
 stack slots their loads and stores touch.
+
+**19:05, built: af1bff3**, DSPPC603 PERF's capture: from the first data
+access the cache takes with EA FFCF7BC8 (`DBG_TRIG_EA`, a localparam:
+the emulator's fetch of `tst.l 6(a0)`), every instruction leaving EX (PC,
+word, the last data access's EA and write bit) into a RAM of 1,024 pairs,
+then drained as kind 19 records (a pair each, one every 64 cycles, the
+samples paused). `syn/capview.py TRACE.txt [FIRST [COUNT]]` prints the
+stream disassembled (the words laid end to end through Retro68's
+powerpc objdump) with each instruction's access. Quartus 19:04 (~19:30),
+then a board capture; run17 (af1bff3, run5's options) on the Mac since
+19:05 for the bench's stream of the same stretch. The emulator's
+handlers can also be read from the ROM: RAM 68xxxxxx = ROM offset
+3xxxxx + 0x300000 (`objdump -b binary -EB -m powerpc:common
+--adjust-vma=0xffc00000`).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
