@@ -182,7 +182,8 @@ module DSPPC603
 	// exceptions taken since by vector, the last one's vector and address
 	input  logic        dbg_dense,       // PERF: a sample every 256 cycles instead of 8,192 (a window the machine picks)
 	output logic        dbg_ev,
-	output logic [223:0] dbg_rec
+	output logic [223:0] dbg_rec,
+	output logic [2:0]   dbg_capflags     // {the record is the capture's (kind 19), B's access a write, A's a write}
 );
 
 import DSPPC603_pkg::*;
@@ -3435,11 +3436,47 @@ if (PERF != 0) begin : g_perf
 			4'h3: dbg_cls = 3'd0;  4'h5: dbg_cls = 3'd1;  4'h6: dbg_cls = 3'd2;  4'h7: dbg_cls = 3'd3;
 			4'h8: dbg_cls = 3'd4;  4'h9: dbg_cls = 3'd5;  4'hC: dbg_cls = 3'd6;  default: dbg_cls = 3'd7;
 		endcase
+	// ---- the capture (2026-10-21, the board's stall): 2,048 instructions as they leave EX
+	// (PC, the word, the last data access the cache took: its EA and whether a write), from
+	// the first fetch of DBG_TRIG_EA, in a RAM of 1,024 pairs, drained afterwards through
+	// dbg_rec as kind 19 records (a pair each, one every 64 cycles; the samples pause)
+	localparam logic [31:0] DBG_TRIG_EA = 32'hFFCF7BC8;   // the 68k emulator's fetch of `tst.l 6(a0)` (Kinka 1.3's floppy driver, FFCF7BC2's wait)
+	logic [193:0] cap_ram [1024];
+	logic         cap_on, cap_full, cap_done, cap_half;
+	logic [10:0]  cap_wr, cap_rd;
+	logic [96:0]  cap_a;
+	logic [31:0]  cap_ea;
+	logic         cap_we;
+	logic [193:0] cap_q;
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
-		if (dbg_dense ? dbg_t[7:0] == 8'hFF : dbg_t[12:0] == 13'h1FFF) begin   // every 8,192 cycles (65,536 until 2026-10-21), 256 in the dense window
+		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; end
+		if (~cap_on & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
+			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0;
+		end
+		if (cap_on & ex_leave) begin
+			if (~cap_half) begin cap_a <= {cap_we, cap_ea, ex_insn, ex_pc}; cap_half <= 1'b1; end
+			else begin
+				cap_ram[cap_wr[9:0]] <= {cap_we, cap_ea, ex_insn, ex_pc, cap_a};
+				cap_half <= 1'b0;
+				cap_wr   <= cap_wr + 11'd1;
+				if (cap_wr == 11'd1023) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
+			end
+		end
+		cap_q <= cap_ram[cap_rd[9:0]];
+		if (cap_full) begin
+			if (dbg_t[5:0] == 6'h3F) begin
+				dbg_ev       <= 1'b1;
+				dbg_rec      <= {cap_q[192:161], cap_q[160:129], cap_q[128:97], cap_q[95:64], cap_q[63:32], cap_q[31:0], 21'd0, cap_rd};
+				dbg_capflags <= {1'b1, cap_q[193], cap_q[96]};
+				cap_rd       <= cap_rd + 11'd1;
+				if (cap_rd == 11'd1023) begin cap_full <= 1'b0; cap_done <= 1'b1; end
+			end
+		end
+		else if (dbg_dense ? dbg_t[7:0] == 8'hFF : dbg_t[12:0] == 13'h1FFF) begin   // every 8,192 cycles (65,536 until 2026-10-21), 256 in the dense window
 			dbg_ev  <= 1'b1;
+			dbg_capflags <= 3'b000;
 			// (bytes 20-23 the last load's effective address, 24-27 its physical address, since
 			// 2026-10-21; the exception counts went for them)
 			dbg_rec <= {ex_insn, dbg_ld_pa, dbg_ld_ea,
@@ -3455,6 +3492,8 @@ if (PERF != 0) begin : g_perf
 		if (reset) begin
 			dbg_t <= 16'd0;
 			for (int i = 0; i < 8; i++) dbg_n[i] <= 8'd0;
+			cap_on <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0; cap_wr <= '0; cap_rd <= '0;
+			dbg_capflags <= 3'b000;
 		end
 	end
 end
@@ -3462,6 +3501,7 @@ else begin : g_no_perf
 	assign perf_cnt = '0;
 	assign dbg_ev   = 1'b0;
 	assign dbg_rec  = '0;
+	assign dbg_capflags = '0;
 end
 endgenerate
 

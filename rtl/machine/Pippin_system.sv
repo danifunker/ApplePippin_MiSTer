@@ -247,6 +247,7 @@ always_ff @(posedge clk) begin
 	if (reset) begin dense_cnt <= 21'd0; cpu_dbg_dense <= 1'b0; swim_en_q <= 1'b0; end
 end
 logic [223:0] cpu_dbg_rec;
+logic [2:0]   cpu_dbg_capflags;     // the record is the capture's (kind 19), and its two accesses' write bits
 DSPPC603 #(.PERF(PERF)) cpu (
 	.clk, .reset(cpu_reset), .reset_pc,
 	.ext_irq, .tb_tick,
@@ -256,7 +257,7 @@ DSPPC603 #(.PERF(PERF)) cpu (
 	.trace_valid, .trace_last, .trace_pc, .trace_insn, .trace_fold, .trace_fold_insn, .trace_reg2_we, .trace_reg2_idx, .trace_reg2_val, .trace_reg_we, .trace_reg_idx, .trace_reg_val,
 	.trace_cr, .trace_xer, .trace_lr, .trace_ctr, .trace_fpscr, .trace_msr,
 	.trace_dreq, .trace_dwe, .trace_dkind, .trace_daddr, .trace_dbe, .trace_dwdata,
-	.perf_cnt, .dbg_dense(cpu_dbg_dense), .dbg_ev(cpu_dbg_ev), .dbg_rec(cpu_dbg_rec)
+	.perf_cnt, .dbg_dense(cpu_dbg_dense), .dbg_ev(cpu_dbg_ev), .dbg_rec(cpu_dbg_rec), .dbg_capflags(cpu_dbg_capflags)
 );
 
 // the VRAM's path and the video registers, between the machine and the picture side
@@ -431,7 +432,10 @@ always_ff @(posedge clk) begin
 	if (cs_ev & ~scsi_tr_ev & ~pf_ev & ~sn_ev) cs_ev <= 1'b0;
 	if (PERF != 0 && TRACE != 0 && cpu_dbg_ev) begin
 		cs_ev  <= 1'b1;
-		cs_rec <= {cpu_dbg_rec[223:32], perf_cnt[0], 24'd0, 8'd14};
+		// kind 19 (the capture): bytes 4-7 the pair's index, 8-19 instruction A (PC, word, EA),
+		// 20-31 instruction B; byte 1 bits 0 and 1: A's and B's access was a write
+		cs_rec <= cpu_dbg_capflags[2] ? {cpu_dbg_rec, 16'd0, 6'd0, cpu_dbg_capflags[1:0], 8'd19} :
+		                                {cpu_dbg_rec[223:32], perf_cnt[0], 24'd0, 8'd14};
 	end
 	if (reset) cs_ev <= 1'b0;
 end

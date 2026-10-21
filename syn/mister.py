@@ -652,6 +652,12 @@ def trace(last, first, fname=None):
             # the CPU's performance counters (syn/perf.py accounts them): part 0 starts with the cycles
             words = [int.from_bytes(r[8 + 4 * k:12 + 4 * k], "little") for k in range(6)]
             print("%5d perf part %d cycles %u: %s" % (i, r[1], us, " ".join("%u" % w for w in words)))
+        elif kind == 19:
+            # the CPU's capture (DSPPC603 PERF, kind 19): two instructions as they left EX, each
+            # with the last data access the cache took (its EA, w if a write)
+            w = lambda a: int.from_bytes(r[a:a + 4], "little")
+            print("%5d cap %4d  %08x %08x ea %08x %s | %08x %08x ea %08x %s" % (i, w(4), w(8), w(12), w(16), "w" if r[1] & 1 else "r",
+                  w(20), w(24), w(28), "w" if r[1] & 2 else "r"))
         elif kind == 14:
             # DSPPC603's PERF sample (every 8,192 cycles, 256 in the dense window): the PC and
             # instruction in the execute stage, the last exception taken, the last load's
