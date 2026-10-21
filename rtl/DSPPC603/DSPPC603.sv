@@ -3426,6 +3426,7 @@ if (PERF != 0) begin : g_perf
 	logic [7:0]  dbg_n [8];        // 300 DSI, 500 external, 600 alignment, 700 program, 800 FP unavailable, 900 decrementer, C00 sc, other
 	logic [11:0] dbg_last_vec;
 	logic [31:0] dbg_last_pc;
+	logic [31:0] dbg_ld_ea;        // the last load's effective address (a polling loop's, or the 68k emulator's fetch: r24 + 2)
 	logic [2:0]  dbg_cls;
 	always_comb
 		case (dbg_vec[11:8])
@@ -3437,10 +3438,13 @@ if (PERF != 0) begin : g_perf
 		dbg_ev <= 1'b0;
 		if (dbg_t == 16'hFFFF) begin
 			dbg_ev  <= 1'b1;
-			dbg_rec <= {ex_insn, dbg_n[7], dbg_n[6], dbg_n[5], dbg_n[4], dbg_n[3], dbg_n[2], dbg_n[1], dbg_n[0],
+			// (the counts of four classes: decrementer, external, DSI, alignment; the load's
+			// address in the other four bytes since 2026-10-21)
+			dbg_rec <= {ex_insn, dbg_n[5], dbg_n[1], dbg_n[0], dbg_n[2], dbg_ld_ea,
 			            msr[15:0], 4'd0, dbg_last_vec, dbg_last_pc, ex_pc, 32'd0};
 			for (int i = 0; i < 8; i++) dbg_n[i] <= 8'd0;
 		end
+		if (mem_payload_take & ex_dec.mem_rd) dbg_ld_ea <= ex_ea;
 		if (dbg_exc) begin
 			if (dbg_n[dbg_cls] != 8'hFF) dbg_n[dbg_cls] <= dbg_n[dbg_cls] + 8'd1;
 			dbg_last_vec <= dbg_vec;
