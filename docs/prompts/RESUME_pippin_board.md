@@ -487,6 +487,19 @@ machines: a CPU artefact, not an EE effect. **b964de2: the sample every
 `dbg_dense`, driven in Pippin_system from int_dbg[19]), building 15:38:
 the 68k trail at ~4 us through FFCF7BC2's branches. run11 (ddbf504,
 run5's options) on the Mac since 15:05 for the bench's trail at 8,192.
+
+**16:00.** b964de2's window never armed (int_dbg[19] is in the VIA field;
+the mask's bit 19 is int_dbg[115]: **b997ac4**, building 15:50). Its
+capture at 8,192 anyway (`scratch/tr_win1.bin`, `.txt`): the walk sampled
+right after the first InsTime/PrimeTime, polls before any interrupt event,
+then the nested dispatches at each T2. **run11's bench trail
+(`scratch/rep11.bin`, `.txt`)**: drv other → drv chip/drive → VIA ORB
+reads → TM reload → TM timer read → **ordinary boot code, no poll**, the
+next T2 handled normally: on the bench FFCF7BC2 stashes and returns to the
+init's caller; on the board it comes back into the poll loop at once. The
+~4 us trails of both machines through FFCF7BC2 are next: the board from
+b997ac4's capture, the bench from **run12** (b997ac4, run5's options,
+on the Mac since 15:58; `rep12.bin`, `runrep12.txt`).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
