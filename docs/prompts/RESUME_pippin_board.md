@@ -544,6 +544,26 @@ capture, `grep DBG`. If it shows errors, the lost store is reproduced in
 isolation on the board (and the same program runs in the bench with
 `--boot memtest`); if not, the pattern needs widening (the board's own
 access sequence: stores under interrupts, the emulator's mix).
+
+**17:00, the castout phase on the board (f2dd4c9, slack -0.836;
+`scratch/tr_castout1.bin`, `.txt`): 200,000 rounds in 1.04 s, no error**
+(the count stayed at pass 1's 0x40000 aliasing errors). The plain
+castout and dcbf patterns do not lose stores. The failing access is more
+particular: FFCF7BC2 begins with `movem.l d1-d3/a3,-16(a0)` (four words of
+the TMTask's line, 81C60-81C6F, back to back) and `tst.l 6(a0)` at once
+(81C76: a **misaligned** longword, words 5 and 6 of the same line): a
+load of a line while a write is landing in it, through the cache RAM
+(altsyncram, 128-bit write with byte enables, 32-bit read, mixed-port
+OLD_DATA) and DSPPC603_cache's "landed" forwarding, where the hardware
+and the Verilator model can part. **135b4fa**: pass 1 over the contiguous
+4 MB (no aliasing errors; the first-error fields then belong to the
+phase), the first error reset before the phase, and after each castout
+round the same-line patterns on a line in the cache: four stores at
+A+16..A+28 then lwz A+6 (words 1-2, untouched), lwz A+22 (words 5-6, just
+written; both expect {Y[15:0], X[31:16]}), a store at A+4 then lwz A+6 at
+once, a store at A+8 then lwz A+6 at once. Building 16:53 (~17:20): the
+same procedure (Advanced > Boot: Memory test, a capture, `grep DBG`).
+run13 (random stalls, lockstep) at 250 M at 16:54.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
