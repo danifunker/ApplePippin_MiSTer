@@ -653,14 +653,14 @@ def trace(last, first, fname=None):
             words = [int.from_bytes(r[8 + 4 * k:12 + 4 * k], "little") for k in range(6)]
             print("%5d perf part %d cycles %u: %s" % (i, r[1], us, " ".join("%u" % w for w in words)))
         elif kind == 14:
-            # DSPPC603's PERF sample every 65,536 cycles: the PC and instruction in the execute
-            # stage, the last exception taken, the last load's effective address (since
-            # 2026-10-21; older captures have exception counts there), and the counts of
-            # alignment, DSI, external and decrementer exceptions since the last sample
+            # DSPPC603's PERF sample (every 8,192 cycles, 256 in the dense window): the PC and
+            # instruction in the execute stage, the last exception taken, the last load's
+            # effective address and (since 2026-10-21 17:30; exception counts there before)
+            # the physical address it went to the cache with
             w = lambda a: int.from_bytes(r[a:a + 4], "little")
-            print("%5d cpu PC %08x ins %08x MSR %04x last exc %03x at %08x ld ea %08x  exc al %d dsi %d ext %d dec %d"
+            print("%5d cpu PC %08x ins %08x MSR %04x last exc %03x at %08x ld ea %08x pa %08x"
                   % (i, w(8), w(28), int.from_bytes(r[18:20], "little"), int.from_bytes(r[16:18], "little") & 0xFFF,
-                     w(12), w(20), r[24], r[25], r[26], r[27]))
+                     w(12), w(20), w(24)))
         else:
             print("%s kind %d %s" % (t, kind, r.hex()))
     print("%d records, %d dropped (flags: cd_ok ejected prevent cd_valid tb cdc disks hk)" % (n, drops))
