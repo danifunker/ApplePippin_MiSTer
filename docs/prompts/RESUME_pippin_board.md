@@ -198,6 +198,35 @@ flock); then `put-core` (the bbc509d .rbf kept as
 through the OSD with Super Marathon, and the decode: the SWIM3 accesses
 around 15.73 s and the sampled reads during the stall. The user said yes to
 the build and capture only (no push, no bench run yet).
+
+**The ab959c0 capture (`scratch/tr_swim1.bin`, `.txt`; built 07:54, slack
+-0.169 ns, on .92 as `_Console/BandaiPippin_20261021.rbf`): the same
+stall (mask write 15.727).** The floppy driver's init, in Linux swim3.c's
+names (register 4 is `select`: CA0-2 and LSTRB; 7 written sets control
+bits, read gives the drive's status line in bits 2-3; the status address
+is SELECT (control 0x20) as bit 3 over the CA lines): the chip probe
+(select 5/6/7 read back), mode 95, setup 4c; drive 1 (control 02):
+ONEMEG_MEDIA 0, DRIVE_PRESENT 0 (a drive), SINGLE_SIDED 1, ONEMEG_DRIVE 1;
+drive 2 (04): all 1 (no drive); a MOTOR_OFF strobe (select 0e) to drive 2;
+deselect. Then a **Time Manager task polling DISK_IN on drive 1**
+(`control -04 +02, select 03, control +20, select 20 (CA 0: address 8),
+read 0c = no disk, control -18 -06`) at 15.728, 15.728, 15.731, 15.746,
+each re-arming T2 — and after the 15.746 poll **no T2 reload**: the task
+hangs inside the Time Manager's interrupt, 68k mask raised; T2 fires at
+15.747 and the SR byte at 15.832, the nanokernel clears both, dispatches
+neither. **During the stall not one sampled read of the VIA, the
+interrupt registers or SWIM3** (before it, the usual IFR/mask/levels mix),
+so the loop polls RAM or an untraced device: a wait on Ticks or on a flag an
+interrupt would set (a deadlock inside the task) fits. The PC samples are
+the emulator's dispatch (`lhau r27,2(r24)` at 68060CC0 and 68067EF8, the
+decrementer taken at 68067F60): the 68k PC is in r24. **fa7e049**:
+DSPPC603's PERF sample carries the last load's effective address (bytes
+20-23; the counts kept: alignment, DSI, external, decrementer in 24-27);
+at the dispatch that is the 68k PC + 2, elsewhere the polled address.
+`mister.py trace` prints the sample as text (`cpu PC ... ld ea ...`);
+`scratch/k14.py` likewise. Not built yet: the next build and capture give
+the 68k PC of the loop, to be looked up in the Kinka ROM's .Sony/SWIM3
+driver.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
