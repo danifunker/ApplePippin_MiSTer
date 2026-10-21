@@ -2118,6 +2118,23 @@ def memtest_image():
           cmplw(14, 15), ("bc",) + BNE + ("ctbad",),
           D(36, 13, 8, 4), D(32, 14, 8, 6), cmplw(14, 15), ("bc",) + BNE + ("ctbad",),   # a store at +4, the load at once
           D(36, 12, 8, 8), D(32, 14, 8, 6), cmplw(14, 15), ("bc",) + BNE + ("ctbad",),   # a store at +8, the load at once
+          # ... and what the driver and the Time Manager do to the TMTask's line (the task at
+          # A+16: tmAddr at +22 and tmCount at +26 are misaligned longwords, tmWakeUp at +30
+          # crosses into the next line): the stores of FFCF7B94 (tmAddr), InsTime, PrimeTime
+          # and the `movem.l` of FFCF7BC2, then the `tst.l 6(a0)`; three times: both lines in
+          # the cache, the next line flushed first, both lines flushed first
+          X(12, 16, 13, 316),                                                          # r16 = X ^ Y, the tmAddr value
+          D(36, 16, 8, 22), D(36, 13, 8, 26), D(38, 12, 8, 20), D(32, 14, 8, 30), D(36, 12, 8, 30),
+          D(36, 13, 8, 16), D(36, 13, 8, 26), D(36, 12, 8, 0), D(36, 13, 8, 4), D(36, 12, 8, 8), D(36, 13, 8, 12),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(14, 17, 8, 32), X(0, 0, 17, 86), X(0, 0, 0, 598),                           # dcbf A+32
+          D(36, 16, 8, 22), D(36, 13, 8, 26), D(38, 12, 8, 20), D(32, 14, 8, 30), D(36, 12, 8, 30),
+          D(36, 13, 8, 16), D(36, 13, 8, 26), D(36, 12, 8, 0), D(36, 13, 8, 4), D(36, 12, 8, 8), D(36, 13, 8, 12),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          X(0, 0, 8, 86), X(0, 0, 17, 86), X(0, 0, 0, 598),                              # dcbf A, A+32
+          D(36, 16, 8, 22), D(36, 13, 8, 26), D(38, 12, 8, 20), D(32, 14, 8, 30), D(36, 12, 8, 30),
+          D(36, 13, 8, 16), D(36, 13, 8, 26), D(36, 12, 8, 0), D(36, 13, 8, 4), D(36, 12, 8, 8), D(36, 13, 8, 12),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
