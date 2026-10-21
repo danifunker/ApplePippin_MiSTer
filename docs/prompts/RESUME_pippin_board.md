@@ -11,6 +11,13 @@ downloads, other people's boards).
 
 - **One simulation at a time**, ever (machine_tb, machref, run_core, run.py).
   The box is shared (6 cores, 14 GB) with other Claude sessions.
+- **Quartus on this Linux box, Verilator on the Mac** (2026-10-21): the M1 Mac
+  mini `dani-dev.local` (`ssh dani-dev.local`, tools under `zsh -lc` for
+  Homebrew's Verilator 5.052) runs the benches; checkouts kept in step through
+  git (push here, `git pull` there; the Mac clones over HTTPS). Not in git and
+  copied to the same paths there: `scratch/pippin/` (ROMs, discs),
+  `~/repos/Main_MiSTer-pippin` (no .git), `~/.cache/applepippin/dingusppc`.
+  Bench runs there: `~/pippin_bench/` (`run.sh`, nohup).
 - **Every Quartus flow under `flock /tmp/quartus.lock ...`** (the sessions'
   agreed lock; the SPARCstation, HP9K715 and HP9K385 sessions use it too, and
   message before long runs). Verilator builds at `VJOBS=2` or `3`.
