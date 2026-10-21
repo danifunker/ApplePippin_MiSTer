@@ -284,6 +284,25 @@ second EX cycle with its compare registered (`slow_held`, `trap_hit_q`);
 `ex_first` is the sequencer's first operation, not EX's first cycle, so an
 external interrupt during a trap's second cycle annuls it with vector 500
 (SRR0 at the trap). Nothing found there yet.
+
+**10:40.** The TRACE 0 / PERF 0 build (534693e, slack -0.039) **still shows
+the logo at 100 s**: the trace machinery is out (36e7cc8 restores TRACE 1,
+PERF 1; the fa7e049 core is back on .92). run4 (`--stall 60`) was stopped
+at 250 M instructions: `--stall` adds a geometric wait only to line fills
+(443 M cycles at 250 M instructions against 439 M without), no stimulus.
+The real controller (`Pippin_sdram.sv`) takes ~24 memory clocks per 32-byte
+line (ACTIVE, two 8-beat bursts at CAS 2, PRECHARGE; single-location
+writes), against the stand-in's 1: that is the board's 1.4-1.7x slowness.
+**e08a6a5: `--mem-wait N`** sets the stand-in's latency. **Running on the
+Mac since 10:40: `run5.sh` = lockstep, `--mem-wait 20 --cpu-mhz 58.333`,
+`-GCPU_HZ=58333333 -GCPU_HZ_FAST=58333333`, trace `rep5.bin`, log
+`runrep5.txt`.** And building here: **5ab1405**, the RTL's memory-test
+boot program on the board (Advanced > Boot: Memory test, status[34],
+counted in "Changes pending"; Apply and reset starts it), its DBG writes
+(status 1 writing / 2 reading, passes, errors, first error address, read,
+expected) in the trace with TRACE_INT: a test of the real SDRAM controller
+and clock crossing with the CPU's own accesses. Each pass writes the RAM
+(ram_mb) with pass-seeded words, dcbf per line, then reads it back.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
