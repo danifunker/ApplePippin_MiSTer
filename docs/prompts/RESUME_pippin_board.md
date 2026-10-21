@@ -171,8 +171,33 @@ On the board the pattern changes right at that write: three T2 loads, then
 single, longer T2 loads (0x0357, 0x027D, 0x0440, 0x03BA), then the stall: a
 driver waiting through timeouts on the board only. Ruled out as the
 difference: a floppy image (none mounted on the board: only `config/Pippin.s4`,
-the CD), a saved NVRAM or flash (none on the board). **Nothing is running** (stopped 2026-10-21 ~07:00 at the user's word;
-the next session decides what to run, and asks before starting a simulation).
+the CD), a saved NVRAM or flash (none on the board).
+
+**2026-10-21 07:30, the comparison in detail and the next capture.** The
+bench's bbc509d trace (the old scratchpad's `rep.bin`, decoded) after its
+mask write: the Time Manager loads T2 twice (0x0bfb, 0x0ba4: 3.9 ms) and
+the steady pattern returns. The board: three loads (0x0659, 0x05b6, 0x0511:
+2.1, 1.9, 1.7 ms), a short task re-armed (0x0440 at 15.736, 0x03ba at
+15.746), the clear at 15.747 and nothing after: T2 fires at ~15.7472 (IFR 60
+later), the nanokernel's clear-all is written, the 68k VIA handler never
+runs. So a driver on the board retries something with ~1.5 ms waits, then
+sits in a 68k loop with interrupts masked. The board is also slower in
+machine time: the SCSI bus reset at 10.73 s against 5.05 s, the ADB address
+resolution 1.34 s against 0.78 s (the SDRAM's latency, or something
+time-based): a driver with a timeout would hit it on the board only.
+dingusppc's clear-all in 68k mode zeroes the events and re-raises nothing
+until the VIA's next report (grandcentral.cpp:438, viacuda.cpp:333), as the
+RTL does: no divergence there. **ab959c0** (TRACE_INT): kind 4 now records
+every access to SWIM3's registers (F3015000) and its DMA channel 1
+(F3008100), reads included, and one in 256 of the reads of the VIA or the
+interrupt registers (so the stalled loop shows what it polls); the decoder
+names SWIM3's registers; **9405b9d**: `trstream.py` no longer drops reads
+of the interrupt registers. A Quartus build of it started 07:29 (this box,
+flock); then `put-core` (the bbc509d .rbf kept as
+`scratch/BandaiPippin_bbc509d.rbf`), `trace-capture`, the core loaded
+through the OSD with Super Marathon, and the decode: the SWIM3 accesses
+around 15.73 s and the sampled reads during the stall. The user said yes to
+the build and capture only (no push, no bench run yet).
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
