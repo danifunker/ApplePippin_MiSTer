@@ -1227,7 +1227,7 @@ int main(int argc, char** argv) {
 	// CPU reads the picture side answered differently from the DDR3
 	std::deque<std::string> ddr_hist;
 	uint64_t ddr_bad = 0, vp_reads = 0, vp_writes = 0;
-	const uint32_t TR_W0 = 0x30500000u >> 3, TR_RECS = 2048;
+	const uint32_t TR_W0 = 0x30500000u >> 3, TR_RECS = 16384;
 	std::vector<uint64_t> tr_ring(TR_RECS * 4, 0);
 	uint32_t tr_done = 0;
 	FILE* tr_out = opt.trace_out.empty() ? nullptr : std::fopen(opt.trace_out.c_str(), "wb");

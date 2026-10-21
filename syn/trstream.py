@@ -10,7 +10,7 @@ the core recorded every one; since ab959c0 it records one in 256, kept.)
 """
 import mmap, os, struct, sys, time
 
-BASE, RECS = 0x30500000, 2048
+BASE, RECS = 0x30500000, 16384
 secs, out = float(sys.argv[1]), sys.argv[2]
 f = os.open('/dev/mem', os.O_RDONLY | os.O_SYNC)
 m = mmap.mmap(f, 64 + RECS * 32, mmap.MAP_SHARED, mmap.PROT_READ, offset=BASE)

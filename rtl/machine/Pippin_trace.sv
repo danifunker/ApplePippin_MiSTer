@@ -5,14 +5,14 @@
 //  CPU's clock into a ring the ARM reads (syn/mister.py trace)
 //
 //  At BASE (64-bit words): 0 {"TRCE", records written}, 1 records dropped
-//  (a queue of 16 overflowed), record n at 8 + (n mod RECS) * 4.
+//  (a queue of 16 overflowed), record n at 8 + (n mod RECS) * 4 (RECS 16384: 512 KB).
 //
 //============================================================================
 
 module Pippin_trace
 #(
 	parameter logic [31:0] BASE = 32'h3050_0000,
-	parameter int          RECS = 2048
+	parameter int          RECS = 16384             // 2048 until 2026-10-21: the ARM fell behind bursts of VIA reads
 )
 (
 	// the CPU's clock
