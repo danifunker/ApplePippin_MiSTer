@@ -73,9 +73,15 @@ $(BUILD)/%.o: $(SRC)/%.cpp $(SRC)/Makefile
 
 ifeq ($(HIDE),1)
 # One relocatable object; every global symbol except ref_* is made local.
+ifeq ($(shell uname -s),Darwin)
+# macOS: Apple's ld hides the others itself (private extern), no objcopy
+$(BUILD)/dingusref_all.o: $(OBJS)
+	$(LD) -r -exported_symbol '_ref_*' -o $@ $(OBJS)
+else
 $(BUILD)/dingusref_all.o: $(OBJS)
 	$(LD) -r --force-group-allocation -o $@ $(OBJS)
 	$(OBJCOPY) -w --keep-global-symbol='ref_*' $@
+endif
 
 $(LIB): $(BUILD)/dingusref_all.o
 	@rm -f $@

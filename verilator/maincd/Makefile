@@ -14,6 +14,12 @@ INC  := -I$(M) -I$(M)/lib/libchdr/include -I$(M)/lib/lzma -I$(M)/lib/zstd/lib -I
 DEFS := -D_7ZIP_ST -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H \
         -DHAVE_SYS_PARAM_H -DENABLE_64_BIT_WORDS=0 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
         -DZSTD_DISABLE_ASM
+ifeq ($(shell uname -s),Darwin)
+# macOS: off_t is 64 bits and there are no *64 calls (miniz takes fopen64 when
+# _LARGEFILE64_SOURCE is set); unistd.h's int reboot(int) clashes with fpga_io.h's
+# (darwin_compat.h)
+DEFS := $(filter-out -D_LARGEFILE64_SOURCE,$(DEFS)) -D__off64_t=off_t -include $(CURDIR)/darwin_compat.h
+endif
 CFLAGS   := -O2 -w -Wno-error=incompatible-pointer-types $(INC) $(DEFS)   # (libchdr: uInt for size_t, the same on the board's 32-bit ARM)
 CXXFLAGS := -O2 -w -std=gnu++17 $(INC) $(DEFS)
 
