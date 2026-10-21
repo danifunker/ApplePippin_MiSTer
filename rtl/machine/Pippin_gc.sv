@@ -831,8 +831,11 @@ always_ff @(posedge clk) begin
 	// 68k mode; in native mode a falling edge takes the event away
 	// (set_irq_line, which MAME's devices call when a line changes). An edge
 	// in the cycle of a clear is a new event and stays.
+	// (the VIA, bit 18: a rising edge only, in 68k mode too, since 2026-10-21: the falling
+	// edge's event posted a second, spurious 68k interrupt right after each service, pending
+	// while the 68k ran masked; the re-report below keeps a line left high from being lost)
 	for (int i = 0; i < 32; i++)
-		if (int_chg[i]) int_events[i] <= int_68k | int_lines[i];
+		if (int_chg[i]) int_events[i] <= (int_68k & (i != 18)) | int_lines[i];
 	if (int_68k & via_rep_q & via_irq) int_events[18] <= 1'b1;
 	via_rep_q   <= via_acc | via_set;
 	int_lines_q <= int_lines;
