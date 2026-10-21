@@ -262,6 +262,28 @@ clock, Super Marathon, to 420 M instructions, trace `rep3.bin`, log
 if the machine stalls without diverging, the problem is elsewhere (the
 nanokernel's masking under the interrupt timing); if neither, raise the
 stall rate or the clock ratio (`-GCPU_HZ=58333333`).
+
+**10:10: run3 (`scratch/rep3.bin`, `.txt`) ran to 420 M instructions in
+lockstep with `--stall 25` with no divergence and no stall: its DISK_IN
+polls at 9.206 and 9.706 s, 500 ms apart.** `--stall` only delays line
+fills (633 M cycles at 400 M instructions against 630 M without), so it is
+a weak stimulus. Running since 10:11 on the Mac: `run4.sh` = lockstep,
+`--stall 60 --cpu-mhz 58.333` (the C++ side's clock ratio: 58.33/100 as on
+the board) and `-GCPU_HZ=58333333 -GCPU_HZ_FAST=58333333` (the RTL's tick
+dividers), trace `rep4.bin`, log `runrep4.txt`. And on this box a Quartus
+build of **534693e: TRACE 0, PERF 0** (the fa7e049 .rbf kept as
+`scratch/BandaiPippin_fa7e049.rbf`), to put on .92 and watch whether the
+disc boots without the trace and the CPU's sampling: if it does, the
+trace/PERF machinery is implicated; if not, that variable is out. Then the
+remaining board-only variables are the SDRAM controller (`Pippin_sdram.sv`,
+Sorgelig's sdram.sv with a new request side, replaced in the bench by the
+C++ stand-in; the same RTL runs MacPPC7300 on the board) and the memory
+clock-domain crossing at the board's ratio. CPU-side reading so far: the
+multiplier holds its product while waiting (no hazard); a trap takes a
+second EX cycle with its compare registered (`slow_held`, `trap_hit_q`);
+`ex_first` is the sequencer's first operation, not EX's first cycle, so an
+external interrupt during a trap's second cycle annuls it with vector 500
+(SRR0 at the trap). Nothing found there yet.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
