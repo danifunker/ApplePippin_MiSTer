@@ -346,6 +346,27 @@ Manager reads them at FFC3B630/FFC3B4D8), building (12:10); the plan: the
 same commit on the Mac (pushed; `run8` = run5's options plus the trace)
 and on the board, then diff the Time Manager's inputs (T2 readbacks) and
 outputs (reloads) around the init between the two machines.
+
+**12:25.** run6 (run5 plus `--disk-latency 200000`, `scratch/rep6.bin`,
+`.txt`): identical, PASS, polls every 503 ms: the CD's latency is out.
+The ROM-resident PPC code sampled on the board (FFCxxxxx, 1061 + 1067
+samples) matches the ROM file word for word, the emulator's RAM copy
+matches the bench's: the upload is clean as far as sampled. The driver's
+scheme (ROM FFCF668E, FFCF7B8C-FFCF7BF0): PrimeTime(500 ms) on the task at
+SonyVars+1EC with tmAddr FFCF7BA2, then FFCF7BC2 pops its caller's return
+address into a slot at task-20 and returns to the init; when the task
+fires, FFCF7BA2 (in the Time Manager's dispatch) RmvTimes, clears tmAddr,
+restores d1-d3/a3 and jumps to that continuation (FFCF66A0: `ori
+#$700,SR`, the drives polled, SR restored, `bra FFCF668E`: prime again,
+return to the dispatch). So every poll + PrimeTime runs inside the T2
+interrupt, as the bench shows. On the board the continuation ran twice
+right after the init with no interrupt event between (tr_ev1 114083-114111)
+and the Time Manager's reloads in between: something entered the
+dispatch (FFC3B4B0, table entry +10) without a T2 event. `syn/tmview.py
+TRACE.txt [after] [before]` prints the Time Manager's view (VIA accesses,
+clears, events, polls, samples) from the mask write. run8 (run5's options,
+a5472ac: every VIA read) started 12:24 on the Mac; the a5472ac build here
+is due ~12:32: then the board's capture, and the diff.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
