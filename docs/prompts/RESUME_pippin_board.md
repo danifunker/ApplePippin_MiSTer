@@ -468,6 +468,25 @@ branch FFCF7BC2 takes. **Next: the sample every 8,192 cycles** (DSPPC603
 dbg_t[12:0], committed, building 14:48), a capture, and the 68k PC trail
 (the `ld ea` at the emulator's fetch) from 15.72 s on; the bench's trail
 at the same point for comparison (the Mac, after run7).
+
+**15:40.** run7 (`--clock` today, `scratch/rep7.bin`, `.txt`): identical,
+PASS, polls every 503 ms: the clock is out; every board-only input is
+now clear. The dense capture (ddbf504, slack -0.597; `scratch/tr_dense1.bin`,
+`.txt`; `syn/pctrail.py` labels the samples by ROM routine): no driver
+code runs before the mask write on either machine (the init runs once);
+after it, on the board: drv prime (FFCF7B92) → TM PrimeTime end → **a
+DISK_IN poll within 140 us, with no interrupt event** → TM timer read
+(another PrimeTime) → poll → the walk. So FFCF7BC2 returns into the
+continuation synchronously, which only its `tmAddr == 0` or `slot != 0`
+branches do. The driver's routines go through vectors at SonyVars-56..-0
+(FFCF5C9A fills them); its status reads (FFCF7A28) use two reads of VIA
+ORB as a settling delay. External interrupts land at the emulator's
+dispatch entries (68060C80, 68066160, 68060C00: branch targets) on both
+machines: a CPU artefact, not an EE effect. **b964de2: the sample every
+256 cycles for 20 ms after SWIM3's interrupt is enabled** (DSPPC603
+`dbg_dense`, driven in Pippin_system from int_dbg[19]), building 15:38:
+the 68k trail at ~4 us through FFCF7BC2's branches. run11 (ddbf504,
+run5's options) on the Mac since 15:05 for the bench's trail at 8,192.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
