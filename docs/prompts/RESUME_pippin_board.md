@@ -303,6 +303,22 @@ counted in "Changes pending"; Apply and reset starts it), its DBG writes
 expected) in the trace with TRACE_INT: a test of the real SDRAM controller
 and clock crossing with the CPU's own accesses. Each pass writes the RAM
 (ram_mb) with pass-seeded words, dcbf per line, then reads it back.
+
+**11:10, the memory test on the board (5ab1405, slack +0.081; capture
+`scratch/tr_memtest1.bin`, `.txt`, 90 M records lost to the error flood):
+363 passes in 177 s, and every pass exactly 262,144 bad words = 1 MB,
+the first at address 0 reading 00400E00 for 00000000.** That is the test's
+linear sweep of "5 MB" meeting the Pippin's map (Aspen: 4 MB at 0, the
+fifth MB at 16 MB; 4-5 MB is a 4 KB-wrapping window that aliases onto the
+first bank), not the controller: the other 4 MB are perfect on every pass.
+**The SDRAM controller and the clock crossing are sound at the board's
+clock** (for this sequential pattern). To run the test cleanly, DBG+0x20
+should report the contiguous bank (min(ram_mb, 4) MB); not done.
+The 5ab1405 core stays on .92 (Boot set back to ROM). The remaining
+board-only differences: the memory latency and clock ratio (run5), the
+Main's CD latency (the bench's `--disk-latency`, default 2000 memory
+clocks; the SD card answers in milliseconds), the real time (`--clock`),
+the DDR3 VRAM path.
 An idea not tried: the same bench run with the board's date (`--clock` with
 today in Mac seconds; the bench's default is the firmware's 1956), since the
 Main gives the board the real time; it is a guess, as are the other
