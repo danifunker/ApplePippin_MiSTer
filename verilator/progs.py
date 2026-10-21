@@ -2080,9 +2080,35 @@ def memtest_image():
           cmplw(4, 30), ("bc",) + BLT + ("zl",),
           X(0, 0, 0, 598),
           D(14, 29, 29, 1), D(36, 29, 31, 4),
-          # ... and the test stops there (status 4), the RAM zeroed, so that "Apply and reset" to
-          # the ROM boot never lands in a pass's write phase (one pass, as the bench expects)
-          D(14, 3, 0, 4), D(36, 3, 31, 0), B_SELF,
+          # the castout test (status 5; 2026-10-21, the board's stall: a store to the floppy
+          # driver's TMTask read back as zero 100 us later): 200,000 rounds over the first MB,
+          # a line A at a pseudo-random place: store X at A, five loads of the same set (A's
+          # way written back), store Y at A+4 (A refilled), read both back; then store X at
+          # A+8, dcbf A, store Y at A+12, read both back. Errors and the first one's address,
+          # word read and word expected as the memory test reports them; status 6 at the end.
+          D(14, 3, 0, 5), D(36, 3, 31, 0),
+          ] + li32(8, 0x12345) + [D(14, 9, 0, 0)] + li32(10, 200000) + [
+          ("label", "ct"),
+          D(7, 8, 8, 5), D(14, 8, 8, 0x1234),
+          (21 << 26) | (8 << 21) | (8 << 16) | (0 << 11) | (12 << 6) | (26 << 1),   # rlwinm r8,r8,0,12,26
+          X(9, 12, 8, 316), X(12, 13, 12, 124),                                   # X = r9 ^ A, Y = ~X
+          D(36, 12, 8, 0),
+          D(32, 14, 8, 4096), D(32, 14, 8, 8192), D(32, 14, 8, 12288), D(32, 14, 8, 16384), D(32, 14, 8, 20480),
+          D(36, 13, 8, 4),
+          D(32, 14, 8, 0), cmplw(14, 12), ("bc",) + BNE + ("ctbad",),
+          D(32, 14, 8, 4), cmplw(14, 13), ("bc",) + BNE + ("ctbad",),
+          D(36, 12, 8, 8), X(0, 0, 8, 86), D(36, 13, 8, 12),
+          D(32, 14, 8, 8), cmplw(14, 12), ("bc",) + BNE + ("ctbad",),
+          D(32, 14, 8, 12), cmplw(14, 13), ("bc",) + BNE + ("ctbad",),
+          ("label", "ctnext"),
+          D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
+          D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
+          ("label", "ctbad"),
+          D(14, 28, 28, 1), D(36, 28, 31, 8),
+          cmpwi(27, -1), ("bc",) + BNE + ("ctnext",),
+          X(8, 27, 8, 444), D(36, 27, 31, 0xC), D(36, 14, 31, 0x10), D(36, 12, 31, 0x14),
+          ("b", "ctnext"),
+          # (the stop with the RAM zeroed, status 4, is now after the castout test: status 6)
           ("label", "bad"),
           D(14, 28, 28, 1), D(36, 28, 31, 8),
           cmpwi(27, -1), ("bc",) + BNE + ("next",),
