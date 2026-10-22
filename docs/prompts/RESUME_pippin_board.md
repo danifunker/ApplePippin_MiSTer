@@ -352,10 +352,20 @@ test, then the disc.
   (chain b1h9rj4fj, `scratch/BandaiPippin_memtest27.rbf`): the memory test
   with the dcbz cases AND the line watch (the watch should now show NO
   dcache events for the line itself: it is uncached). Then **build 28 =
-  cd171e8** (chain bnhfpdyr8, `scratch/BandaiPippin_memtest28.rbf`): the
-  memory test with the cache-inhibited accesses — the decisive one.
-  **run23** on the Mac (efbf06e, 420 M instructions; watcher bvs0tez8q):
-  the bench's landings for the same stretch (expect none for the page). **run22** on the Mac (efbf06e, no lockstep, 290 M
+  cb0d605** (chain bnhfpdyr8, `scratch/BandaiPippin_memtest28.rbf`; the
+  chain compiles the working tree, so it has 832abbf's memory test with
+  the cache-inhibited accesses AND cb0d605's trace): (1) the memory test
+  round on the board (`grep DBG`: errors in status 5 = the uncached word
+  write path is the fault); (2) a disc capture round: the trace now has a
+  kind-4 record `RAM 00081Cxx r|w data (be)` for every uncached word
+  access to the TMTask's line as the memory port serves it, a write's with
+  the SDRAM controller's diagnostic (`sdram be X issued N col C`,
+  `after-refresh`): compare the two halves of the tmAddr store (51) with
+  tmCount's (1215) and the byte stores. **run24** on the Mac (832abbf's
+  memory test, `--memtest-passes 2`; waiter b5uku2q0r) validates the
+  uncached pattern's expected values (0 errors expected; RESULT: FAIL is
+  only the instruction limit). Build 27 (dcbz cases, the line watch) is
+  moot for an uncached page: not run on the board. **run22** on the Mac (efbf06e, no lockstep, 290 M
   instructions, `rep22.bin`; watcher bwz9tsfz2): the bench's store-landing
   stream for the same stretch, the reference to diff against.
   The Sun-2 session is done with .92 for now (22:00); it will ask first
