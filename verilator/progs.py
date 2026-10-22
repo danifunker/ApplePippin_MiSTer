@@ -2135,6 +2135,18 @@ def memtest_image():
           D(36, 16, 8, 22), D(36, 13, 8, 26), D(38, 12, 8, 20), D(32, 14, 8, 30), D(36, 12, 8, 30),
           D(36, 13, 8, 16), D(36, 13, 8, 26), D(36, 12, 8, 0), D(36, 13, 8, 4), D(36, 12, 8, 8), D(36, 13, 8, 12),
           D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          # ... and the sequence of the stall as the capture of 2026-10-21 shows it (cap2): the line
+          # not in the cache and the set's two ways dirty with other lines, a misaligned store
+          # of X at A+22 (the tmAddr: a miss, a dirty victim written back, the line filled), a
+          # delay, two byte stores at A+20, a word store at A+16, a misaligned store at A+26,
+          # then the misaligned load of A+22: X expected
+          D(14, 17, 8, 4096), D(36, 13, 17, 0), D(14, 17, 8, 8192), D(36, 13, 17, 0),         # two other lines of the set, dirty
+          D(14, 17, 8, 12288), D(36, 13, 17, 0),                                            # (a third: the set is 2-way)
+          X(0, 0, 8, 86), X(0, 0, 0, 598),                                                  # dcbf A: A out of the cache
+          D(36, 16, 8, 22),                                                                 # X at A+22: the miss
+          D(14, 18, 0, 200), ("label", "ctdl"), D(14, 18, 18, -1), cmpwi(18, 0), ("bc",) + BNE + ("ctdl",),   # a delay
+          D(38, 12, 8, 20), D(38, 12, 8, 20), D(36, 13, 8, 16), D(36, 13, 8, 26),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
