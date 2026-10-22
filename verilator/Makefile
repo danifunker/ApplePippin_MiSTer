@@ -129,11 +129,11 @@ $(BUILD)/cdc/cdc_tb: $(RTL)/$(CPU_NAME)_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Mak
 # from MacPPC7300's bench): random line and word requests, random byte enables
 sdram: $(BUILD)/sdram/sdram_tb
 
-$(BUILD)/sdram/sdram_tb: $(RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
+$(BUILD)/sdram/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
 	@mkdir -p $(BUILD)/sdram
 	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -Mdir $(BUILD)/sdram -o sdram_tb \
 		-CFLAGS "-O2 -std=c++17" \
-		$(RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
+		$(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
 		> $(BUILD)/sdram/build.log 2>&1 || (cat $(BUILD)/sdram/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/sdram/build.log || true
 
