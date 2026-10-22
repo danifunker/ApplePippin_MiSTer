@@ -291,15 +291,35 @@ capture room (8,192 entries in all), so the capture covers fewer
 instructions; the wait's load is ~1,600 instructions in and the stores of
 interest are 51, 250, 980, 1215, 1567-1580.
 
-## What is running / where things stand (21:45)
+## 22:10: build 25's memory test passes on the board too (`scratch/tr_mt5.txt`)
 
-- **Quartus: build 25 = 4c4629e** (the memory test with the emulator's
-  sequence) in its fitter (chain b19byxraa keeps the rbf as
-  `scratch/BandaiPippin_memtest25.rbf`; run it on the board: the memory
-  test, `grep DBG` for the error count in status 5); then **build 26 =
-  efbf06e** (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`; the disc
-  capture round with `syn/boardcap.sh`, then `grep "store landed"` around
-  the stores at 51/52, 250, 980, 1215). Loading the Pippin core while the
+4c4629e (slack +0.057): status 5 with the pipelined same-line pattern and
+the emulator's own sequence (`lwz B; stw X,22(A); lhz 2(B)` with A out,
+clean and dirty): **0 errors**. run19 (lockstep, `--mem-wait 48`): PASS,
+identical. So neither latency nor these sequences reproduce it; what the
+test still lacks is the line's history before the store (how it came into
+the cache: a fill by a load, a store miss, a `dcbz` — the native Memory
+Manager may clear the TMTask's block with dcbz — and in which way).
+**3cfe8dc (build 27)** adds the dcbz-allocated cases. If build 26's
+landings do not settle it, the next instrument is a **watch on the line
+from boot**: a ring capture of every access to 81C60-7F, every store
+landing there and every tag write of set 0x63 (fill, dirty, invalidate,
+write-back), stopped some entries after the trigger.
+(OSD note: after a fresh core load Boot is ROM, so ONE toggle makes the
+memory test pending; two cancel out.)
+
+## What is running / where things stand (22:15)
+
+- **Quartus: build 26 = efbf06e** (the store-landing capture) in its
+  fitter (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`): the disc
+  capture round (`syn/boardcap.sh RBF cap5`), then `grep "store landed"`
+  around the stores at 51/52, 250, 980, 1215. Then **build 27 = 3cfe8dc**
+  (chain b1h9rj4fj, `scratch/BandaiPippin_memtest27.rbf`): the memory test
+  with the dcbz cases. **run22** on the Mac (efbf06e, no lockstep, 290 M
+  instructions, `rep22.bin`; watcher bwz9tsfz2): the bench's store-landing
+  stream for the same stretch, the reference to diff against.
+  The Sun-2 session is done with .92 for now (22:00); it will ask first
+  if it needs it again. Loading the Pippin core while the
   Sun-2 core is up: the OSD's core list opens the Sun-2's folder, so go
   `..` (backspace, enter), Console, then down to BandaiPippin (the 9th
   entry), enter — `boardcap.sh`'s `F12, right, enter, enter` assumes the
