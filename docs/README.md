@@ -13,6 +13,7 @@ Downloaded third-party material (PDFs, emulator and MiSTer source excerpts, arch
 5. **[prompts/DSPPC603_build.md](prompts/DSPPC603_build.md)**: the resume prompt for building DSPPC603 from DSPPC604 against the 603e data of 2026-10-18 (milestones A-E). **[prompts/DSPPC603_tlb_reload.md](prompts/DSPPC603_tlb_reload.md)**: a resume prompt for implementing the real 603 TLB reload and checking it against a real 603 machine.
 6. **[../cputest/README.md](../cputest/README.md)**: the PowerPC 603 CPU test suite for the Performa 62xx (user-mode vectors as a Mac OS application; supervisor-mode sequences with the 603's TLB reload as a firmware-free blob, running under MAME today), built on MacPPC7300's `ppctest/`.
 7. **[rom-map.md](rom-map.md)**: byte-accurate map of the Kinka 1.0 and Dev boot ROMs (regions, landmarks, 1.0-vs-Dev differences, MMIO the startup code touches), with full disassembly in `../disasm/disasm.tar.xz` (unpack with `python3 tools/rom/pack.py unpack`) produced by `../tools/rom/`.
+8. **[web-links.md](web-links.md)**: what 31 Pippin web sources (catkicking, vintagemacworld, retrostuff, 68kmla, journaldulapin, macgeek, the Pippin Wiki, abzman) say about DRAM organisation, ROM boards and versions, the X-PCI pinout, the OF device tree and boot rules. Archived copies are in `../scratch/web-links/`.
 
 ## Layout
 
@@ -27,6 +28,7 @@ Downloaded third-party material (PDFs, emulator and MiSTer source excerpts, arch
 | `pdfs/cdrom/` | Apple CD-ROM Handbook (Apple's SCSI CD command set), Panasonic CR-501 spec |
 | `pdfs/components/` | PSU capacitor and CD firmware EPROM datasheets |
 | `pdfs/emulator_notes/` | Kaisershot's "Exploring the Pippin ROM(s)" parts 2–9 (part 5 has the Open Firmware device tree), DingusPPC dev notes |
+| `web-links/` | Archived and translated web sources for [web-links.md](web-links.md), one folder per source |
 | `retrostuff/` | Archived retrostuff.org articles with full-size photos (below) |
 
 ## retrostuff.org archive
