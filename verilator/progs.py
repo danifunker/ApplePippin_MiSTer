@@ -2161,6 +2161,20 @@ def memtest_image():
           D(36, 13, 8, 0), D(32, 14, 8, 64), D(38, 16, 8, 13), D(32, 14, 8, 12), cmplw(14, 17), ("bc",) + BNE + ("ctbad",),
           D(36, 12, 8, 12),
           D(36, 13, 8, 0), D(38, 16, 8, 13), D(32, 14, 8, 12), cmplw(14, 17), ("bc",) + BNE + ("ctbad",),
+          # ... and the misaligned store as the 68k emulator issues it (21:20, cap3: the two
+          # halves presented right, both lost): a load hit on another line in the cycle before
+          # (`lhau r6,2(r24)`, the opcode fetch), the store, a load of that other line queued
+          # behind it (`lhau r27,2(r24)`); with the line out of the cache, in it clean, in it dirty
+          D(14, 17, 8, 64), D(32, 14, 17, 0),                                              # B = A+64, resident
+          X(0, 0, 8, 86), X(0, 0, 0, 598),                                                  # A out
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),                             # lwz B; stw X,22(A); lhz B+2
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          X(0, 0, 8, 86), X(0, 0, 0, 598), D(32, 14, 8, 0),                                 # A in, clean
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 13, 8, 0),                                                                  # A dirty
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
