@@ -106,7 +106,8 @@ module DSPPC603_cache
 	// a store's word as it lands in the line (the merge of its bytes into the
 	// word read: DSPPC603's capture records it, 2026-10-21)
 	output logic        dbg_st_v,
-	output logic [31:0] dbg_st_word
+	output logic [31:0] dbg_st_word,
+	output logic [31:2] dbg_st_addr
 );
 
 import DSPPC603_pkg::*;
@@ -295,6 +296,7 @@ always_ff @(posedge clk) pending_set_match <= (rd_idx == r_idx);
 wire forward_pending = wr_pend & pending_set_match;
 assign dbg_st_v    = wr_pend & (|wr_data_we);
 assign dbg_st_word = pending_st;
+assign dbg_st_addr = {wr_tag_wd.tag, wr_idx_q, pending_wword};
 /* synthesis translate_off */
 always_ff @(posedge clk)
 	if (~reset & wr_pend & ((state == S_LOOK) | (state == S_SNOOP)) & (pending_set_match != (wr_idx_q == r_idx)))

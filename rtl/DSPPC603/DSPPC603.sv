@@ -584,6 +584,7 @@ logic         dc_wide_sure;                // the access it is answering is wide
 logic         ic_snoop_ack, dc_snoop_ack;
 logic         dc_dbg_st_v;
 logic [31:0]  dc_dbg_st_word;
+logic [31:2]  dc_dbg_st_addr;
 logic         ic_inval, dc_inval;          // HID0[ICFI], [DCFI]
 
 // ============================================================================
@@ -3071,7 +3072,8 @@ DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW), .WAYS (CACHE_WAYS)) icache
 	.mem_rdata  (mem_rdata),
 	/* verilator lint_off PINCONNECTEMPTY */
 	.dbg_st_v   (),
-	.dbg_st_word ()
+	.dbg_st_word (),
+	.dbg_st_addr ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
 
@@ -3116,7 +3118,8 @@ DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_
 	.mem_ack    (dm_ack),
 	.mem_rdata  (mem_rdata),
 	.dbg_st_v   (dc_dbg_st_v),
-	.dbg_st_word (dc_dbg_st_word)
+	.dbg_st_word (dc_dbg_st_word),
+	.dbg_st_addr (dc_dbg_st_addr)
 );
 
 // the memory port: data before instructions, a request once started keeps it
@@ -3462,22 +3465,42 @@ if (PERF != 0) begin : g_perf
 	// cache's merge of its bytes into the word read, dbg_st_word; 21:00: the window word
 	// mu_wdata before).
 	logic [31:0]  cap_data;
+	logic         st_hold_v, st_lost;
+	logic [96:0]  st_hold;
+	wire  [96:0]  st_new    = {1'b1, dc_dbg_st_addr, 2'b00, dc_dbg_st_word, 32'hDEAD0000};
+	wire  [96:0]  st_ent    = st_hold_v ? st_hold : st_new;
+	wire  [96:0]  cap_entry = ex_leave ? {cap_we, cap_ea, cap_data, ex_pc} : {st_ent[96:1], st_lost};
+	wire          cap_push  = cap_on & (ex_leave | st_hold_v | dc_dbg_st_v);
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
 		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; end
-		if (dc_dbg_st_v) cap_data <= dc_dbg_st_word;
 		if (mu_resp & (mo_valid ? mo_load : mem_load)) cap_data <= mu_rdata[31:0];
 		if (~cap_on & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
-			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0;
+			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0; st_hold_v <= 1'b0; st_lost <= 1'b0;
 		end
-		if (cap_on & ex_leave) begin
-			if (~cap_half) begin cap_a <= {cap_we, cap_ea, cap_data, ex_pc}; cap_half <= 1'b1; end
+		// An instruction's entry as it leaves EX; a store's landing in the dcache (the
+		// merged word, its address) is an entry of its own (PC DEAD0000; bit 0: a landing
+		// was lost), after the instruction's when both come in one cycle: held a cycle
+		if (cap_push) begin
+			if (~cap_half) begin cap_a <= cap_entry; cap_half <= 1'b1; end
 			else begin
-				cap_ram[cap_wr[11:0]] <= {cap_we, cap_ea, cap_data, ex_pc, cap_a};
+				cap_ram[cap_wr[11:0]] <= {cap_entry, cap_a};
 				cap_half <= 1'b0;
 				cap_wr   <= cap_wr + 13'd1;
 				if (cap_wr == 13'd4095) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
+			end
+		end
+		if (cap_on) begin
+			if (dc_dbg_st_v & (ex_leave | st_hold_v)) begin
+				st_hold   <= st_new;
+				st_hold_v <= 1'b1;
+				if (st_hold_v & ex_leave) st_lost <= 1'b1;
+				else if (~ex_leave) st_lost <= 1'b0;            // (the held one is pushed now)
+			end
+			else if (~ex_leave & (st_hold_v | dc_dbg_st_v)) begin
+				st_hold_v <= 1'b0;
+				st_lost   <= 1'b0;
 			end
 		end
 		cap_q <= cap_ram[cap_rd[11:0]];
@@ -3509,6 +3532,7 @@ if (PERF != 0) begin : g_perf
 			dbg_t <= 16'd0;
 			for (int i = 0; i < 8; i++) dbg_n[i] <= 8'd0;
 			cap_on <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0; cap_wr <= '0; cap_rd <= '0;
+			st_hold_v <= 1'b0; st_lost <= 1'b0;
 			dbg_capflags <= 3'b000;
 		end
 	end

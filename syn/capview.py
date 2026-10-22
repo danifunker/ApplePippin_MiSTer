@@ -7,7 +7,8 @@ Since 2026-10-21 20:40 the record's second word is the data of the last access
 answered (a load's value, a store's first word as merged), not the instruction: with
 --rom ROM (Kinka 1.3) the word is read back from the ROM (PCs 68xxxxxx are the 68k
 emulator's image, the ROM at +0x300000; FFxxxxxx the ROM itself) and the data is
-printed after the access (`= value`, whenever it changes).
+printed after the access (`= value`, whenever it changes). A store's landing in the dcache
+(its merged word, its address; PC DEAD0000) is an entry of its own: `** store landed`.
 """
 import os, re, struct, subprocess, sys, tempfile
 OBJDUMP = os.path.expanduser("~/repos/Retro68-build/toolchain/bin/powerpc-apple-macos-objdump")
@@ -47,6 +48,10 @@ for l in out.splitlines():
     if m: dis[int(m.group(1), 16) // 4] = m.group(2).strip()
 last_ea = None; last_data = None
 for n, pc, w, ea, rw, data in ins[first:first + count]:
+    if (pc & 0xFFFF0000) == 0xDEAD0000:
+        # a store landing in the dcache (88aa1e8+): the word as merged, its address
+        print("%4d %s        ** store landed  %08x = %08x%s" % (n, " " * 8, ea, data if data is not None else w, "  (a landing lost before this one)" if pc & 1 else ""))
+        continue
     acc = "" if (ea, rw) == last_ea else "  <- %s %08x" % ("st" if rw == "w" else "ld", ea)
     last_ea = (ea, rw)
     if data is not None and data != last_data:
