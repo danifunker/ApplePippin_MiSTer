@@ -582,6 +582,8 @@ logic         dc_slow;                     // the data cache is busy beyond a lo
 logic         dc_posted;                   // ... or has a posted write not yet in memory
 logic         dc_wide_sure;                // the access it is answering is wide and will be answered wide
 logic         ic_snoop_ack, dc_snoop_ack;
+logic         dc_dbg_st_v;
+logic [31:0]  dc_dbg_st_word;
 logic         ic_inval, dc_inval;          // HID0[ICFI], [DCFI]
 
 // ============================================================================
@@ -3066,7 +3068,11 @@ DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW), .WAYS (CACHE_WAYS)) icache
 	.mem_be     (im_be),
 	.mem_wdata  (im_wdata),
 	.mem_ack    (im_ack),
-	.mem_rdata  (mem_rdata)
+	.mem_rdata  (mem_rdata),
+	/* verilator lint_off PINCONNECTEMPTY */
+	.dbg_st_v   (),
+	.dbg_st_word ()
+	/* verilator lint_on PINCONNECTEMPTY */
 );
 
 DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_WAYS)) dcache
@@ -3108,7 +3114,9 @@ DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_
 	.mem_be     (dm_be),
 	.mem_wdata  (dm_wdata),
 	.mem_ack    (dm_ack),
-	.mem_rdata  (mem_rdata)
+	.mem_rdata  (mem_rdata),
+	.dbg_st_v   (dc_dbg_st_v),
+	.dbg_st_word (dc_dbg_st_word)
 );
 
 // the memory port: data before instructions, a request once started keeps it
@@ -3450,16 +3458,15 @@ if (PERF != 0) begin : g_perf
 	logic [193:0] cap_q;
 	// The data of the last access answered, in the word's place since 2026-10-21 20:40
 	// (the word is in the ROM: capview.py reads it back): a load's value as the register
-	// gets it (so a misaligned word whole), a store's first word as the cache merges it
-	// (the bytes in their places in the word, presented the cycle after the grant).
+	// gets it (so a misaligned word whole), a store's word as it lands in the line (the
+	// cache's merge of its bytes into the word read, dbg_st_word; 21:00: the window word
+	// mu_wdata before).
 	logic [31:0]  cap_data;
-	logic         cap_st_q;
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
 		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; end
-		cap_st_q <= mu_req & mu_gnt & mu_we;
-		if (cap_st_q) cap_data <= mu_wdata;
+		if (dc_dbg_st_v) cap_data <= dc_dbg_st_word;
 		if (mu_resp & (mo_valid ? mo_load : mem_load)) cap_data <= mu_rdata[31:0];
 		if (~cap_on & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
 			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0;
