@@ -78,7 +78,8 @@
 module Pippin_gc
 #(
 	parameter int unsigned SCSI_HZ = 25_000_000,
-	parameter int unsigned SOUND_IN_DMA = 1       // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned SOUND_IN_DMA = 1,      // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned INT_REPORT = 1         // 1: in 68k mode an access that leaves a device's line high is an event (below)
 )
 (
 	input  logic        clk,
@@ -601,6 +602,17 @@ assign via_irq = via_ifr_rd[7];
 // register set and enabled, the line high, no event: 2026-10-19 and 21). The line is
 // looked at the clock after the report, when the access has done its work on the flags.
 logic       via_rep_q;
+// the devices other than the VIA whose register window the CPU accesses, by source (INT_REPORT)
+logic [31:0] dev_rep_q;
+wire         dev_sel = sel & devs;
+wire  [31:0] dev_rep = {12'h0,
+                        dev_sel & (sub == 4'h5),                 // 13 SWIM3
+                        2'b00,                                   // 11 AWACS (no line), 12 the VIA (its own rule)
+                        {2{dev_sel & (scc_compat | scc_risc)}},  // 0F, 10 the ESCC's channels
+                        dev_sel & (sub == 4'h1),                 // 0E MACE
+                        dev_sel & (sub == 4'h8),                 // 0D MESH
+                        dev_sel & (sub == 4'h0),                 // 0C Curio
+                        12'h0};
 wire        via_acc = sel & devs & (sub == 4'h6 || sub == 4'h7) &
                       (we ? (via_reg == 4'd5 || via_reg == 4'd7 || via_reg == 4'd9 || via_reg == 4'd10 ||
                              via_reg == 4'd13 || via_reg == 4'd14)
@@ -835,6 +847,26 @@ always_ff @(posedge clk) begin
 		if (int_chg[i]) int_events[i] <= int_68k | int_lines[i];
 	if (int_68k & via_rep_q & via_irq) int_events[18] <= 1'b1;
 	via_rep_q   <= via_acc | via_set;
+	// The other devices, as the VIA (2026-10-22): an access to one whose line is still high
+	// the clock after is an event in 68k mode, so that a handler that leaves a second
+	// condition pending (the line never falls, and the NanoKernel's clear-all has taken the
+	// event) gets its interrupt back, as a 68k's level would; dingusppc reports these lines
+	// only at a change and has no case of it, the bench neither (MESH's line high with no
+	// event 124 times in a Super Marathon boot, each ended by the line falling), but the
+	// board's timing differs. And a DMA channel's interrupt is an event at every one in 68k
+	// mode, as dingusppc's ack_dma_int (the level may still be set from the last one).
+	if (INT_REPORT != 0 && int_68k)
+		for (int i = 0; i < 32; i++)
+			if (dev_rep_q[i] & int_lines[i]) int_events[i] <= 1'b1;
+	dev_rep_q <= dev_rep;
+	if (int_68k) begin
+		if (s8_irq    & dma_lvl[8])  int_events[8]  <= 1'b1;
+		if (s9_irq    & dma_lvl[9])  int_events[9]  <= 1'b1;
+		if (dma_a_irq & dma_lvl[10]) int_events[10] <= 1'b1;
+		if (e2_irq    & dma_lvl[2])  int_events[2]  <= 1'b1;
+		if (e3_irq    & dma_lvl[3])  int_events[3]  <= 1'b1;
+		if (f1_irq    & dma_lvl[1])  int_events[1]  <= 1'b1;
+	end
 	int_lines_q <= int_lines;
 
 	if (sel & dma & we & ch_ok) begin

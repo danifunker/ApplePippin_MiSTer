@@ -100,6 +100,7 @@ module Pippin_machine
 	parameter int unsigned SCSI_HZ  = 25_000_000,    // MESH's time base and Curio's clock (below CPU_HZ)
 	parameter int unsigned CUDA_FAST_BOOT = 0,      // 1: the test bench's (Pippin_cuda FAST_BOOT)
 	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
+	parameter int unsigned INT_REPORT = 1,          // Pippin_gc INT_REPORT: an access leaving a device's line high is an event (68k mode)
 	parameter int unsigned TRACE_INT = 1,           // 1: the trace takes Grand Central's interrupt and the VIA's register writes
 	parameter int unsigned TRACE_RAM = 0,           // 1: the trace takes every uncached word access to the RAM lines below
 	parameter logic [31:0] TRACE_RAM_A  = 32'h00081C60,   // TRACE_RAM: an address in the line (the board's TMTask, cap2-cap5)
@@ -653,7 +654,7 @@ logic [9:0]   fd_ra;
 logic [7:0]   fd_q;
 logic [7:0]   itr_st;
 
-Pippin_gc #(.SCSI_HZ(SCSI_HZ), .SOUND_IN_DMA(SOUND_IN_DMA)) gc (
+Pippin_gc #(.SCSI_HZ(SCSI_HZ), .SOUND_IN_DMA(SOUND_IN_DMA), .INT_REPORT(INT_REPORT)) gc (
 	.clk, .reset(board_reset), .via_tick, .rtxc_tick, .scsi_tick, .us_tick, .snd_tick,
 	.sel(p_sel & p_dev[3]), .we(p_we), .addr(p_a[16:2]), .be(p_be), .wdata(p_wd),
 	.rdata(gc_rdata), .irq(gc_irq), .int_dbg,

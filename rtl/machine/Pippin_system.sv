@@ -30,7 +30,8 @@ module Pippin_system
 	parameter int unsigned SND_TRACE = 0,           // 1: the codec's output frames into the trace (kind 13; needs TRACE)
 	parameter int unsigned CAPTURE = 0,             // 1: the CPU's instruction capture (kind 19; needs PERF and TRACE; DSPPC603 CAP_*)
 	parameter int unsigned DENSE = 0,               // 1: PERF samples every 256 cycles for 20 ms from SWIM3's interrupt being enabled
-	parameter int unsigned TRACE_RAM = 0            // 1: the memory-port trace of one RAM line (Pippin_machine TRACE_RAM_A; needs TRACE)
+	parameter int unsigned TRACE_RAM = 0,           // 1: the memory-port trace of one RAM line (Pippin_machine TRACE_RAM_A; needs TRACE)
+	parameter int unsigned INT_REPORT = 1           // Pippin_gc INT_REPORT (0: the device lines' events only at a change, as dingusppc)
 )
 (
 	input  logic         clk,             // the CPU's clock
@@ -294,7 +295,7 @@ logic         snd_frame;
 
 logic [127:0] int_dbg;                  // Grand Central's interrupt state (the trace, kind 16)
 Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUDA_FAST_BOOT(CUDA_FAST_BOOT),
-                     .SOUND_IN_DMA(SOUND_IN_DMA), .TRACE_RAM(TRACE_RAM)) machine (
+                     .SOUND_IN_DMA(SOUND_IN_DMA), .TRACE_RAM(TRACE_RAM), .INT_REPORT(INT_REPORT)) machine (
 	.clk, .cpu_fast, .reset, .ram_mb, .rom_at, .boot_memtest,
 	.c_req, .c_we, .c_line, .c_addr, .c_be, .c_wdata, .c_ack, .c_rdata,
 	.m_req, .m_we, .m_line, .m_addr, .m_be, .m_wdata, .m_ack, .m_rdata,
