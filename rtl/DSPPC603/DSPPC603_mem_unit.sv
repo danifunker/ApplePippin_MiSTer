@@ -63,6 +63,7 @@ module DSPPC603_mem_unit
 	output DSPPC603_pkg::ck_t dbus_kind,
 	output logic [29:0] dbus_addr,
 	output logic [31:0] dbus_ea,     // original byte address of this bus operation
+	output logic        dbus_cross,  // the first word of a load or store whose bytes cross into the next 4 KB page (not a string's)
 	output logic        dbus_direct, // dbus_addr is addr itself (this cycle's request, passed through)
 	output logic [29:0] dbus_addr_held, // dbus_addr when it is not: from the descriptor's registers only
 	output logic [3:0]  dbus_be,
@@ -196,6 +197,13 @@ wire       bus_we   = saved ? c.we : we;
 assign dbus_wide = ~second & ~bus_touch & (bus_ea[4:2] != 3'd7) &
                    (bus_nbytes[3] ? (bus_ea[1:0] == 2'd0) : (~bus_we & bus_last[2]));
 assign dbus_wdata_next = wwin[31:0];
+// A halfword, word or double whose bytes run into the next page: the page's last word,
+// bytes past it (a double, word-aligned here, always). The 603 takes an alignment
+// exception for it under page translation (DSPPC603_mmu); a string's bytes go in
+// pieces on the 603 (no exception), so not for those.
+wire       bus_ljust = saved ? c.ljust : ljust;
+assign dbus_cross = ~second & ~bus_touch & ~bus_ljust & (bus_ea[11:2] == 10'h3FF) &
+                    (bus_nbytes[3] | bus_last[2]);
 
 // ---- load: bytes to register value ------------------------------------------
 wire [63:0] rwin   = (state == S_RSP1) ? {word0_q, dbus_rdata} :

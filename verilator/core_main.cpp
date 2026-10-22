@@ -2043,7 +2043,29 @@ int main(int argc, char** argv) {
 							}
 #endif
 						}
-						if (known && (w >> 26) == 31 && ((w >> 1) & 0x3FF) == 1014) {
+						// ... and the 603's alignment exception of a halfword, word or double
+						// that crosses into the next page under page translation (DSPPC603
+						// CROSS_ALIGN): dingusppc performs the access; the NanoKernel emulates it
+						int xsz = 0;
+						if (known) {
+							unsigned op = w >> 26, xo = (w >> 1) & 0x3FF;
+							if (op == 32 || op == 33 || op == 36 || op == 37 || op == 48 || op == 49 || op == 52 || op == 53) xsz = 4;
+							else if (op >= 40 && op <= 45) xsz = 2;
+							else if (op >= 50 && op <= 51) xsz = 8;
+							else if (op >= 54 && op <= 55) xsz = 8;
+							else if (op == 31) {
+								switch (xo) {
+								case 23: case 55: case 151: case 183: case 534: case 662: case 535: case 567:
+								case 663: case 695: case 983: xsz = 4; break;
+								case 279: case 311: case 343: case 375: case 407: case 439: case 790: case 918: xsz = 2; break;
+								case 599: case 631: case 727: case 759: xsz = 8; break;
+								default: break;
+								}
+							}
+						}
+						uint32_t xdar = (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dar;
+						bool xcross = xsz && ((xdar & 0xFFF) + (uint32_t)xsz > 0x1000);
+						if (known && (((w >> 26) == 31 && ((w >> 1) & 0x3FF) == 1014) || xcross)) {
 							uint32_t dar = (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__dar;
 							ref_set_spr(26, before.pc);
 							ref_set_spr(27, (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__srr1);
@@ -2055,8 +2077,8 @@ int main(int argc, char** argv) {
 							ref_set_state(&t);
 							ref_get_state(&before);
 							if (dcbz_align_notes++ < 10)
-								std::printf("note: alignment exception at dcbz of %08X (DAR %08X, HID0 %08X) at %08X after %llu instructions: "
-									"the reference takes it too\n", (w >> 16 & 31 ? before.gpr[w >> 16 & 31] : 0) + before.gpr[w >> 11 & 31],
+								std::printf("note: alignment exception at %s of %08X (DAR %08X, HID0 %08X) at %08X after %llu instructions: "
+									"the reference takes it too\n", xcross ? "a page-crossing access" : "dcbz", (w >> 16 & 31 ? before.gpr[w >> 16 & 31] : 0) + before.gpr[w >> 11 & 31],
 									dar, (uint32_t)dut->rootp->Pippin_system__DOT__cpu__DOT__hid0, before.pc, (unsigned long long)retired);
 						}
 					}

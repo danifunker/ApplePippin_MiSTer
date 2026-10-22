@@ -41,7 +41,8 @@
 module DSPPC603_mmu
 #(
 	parameter int TLB_BITS = 6,               // entries in each TLB, as a power of two
-	parameter bit CANDIDATE_D_ADDR = 1'b0     // current bus address is already the candidate next request
+	parameter bit CANDIDATE_D_ADDR = 1'b0,    // current bus address is already the candidate next request
+	parameter bit CROSS_ALIGN = 1'b1          // 1: a page-crossing access under page translation is an alignment exception (the 603's rule)
 )
 (
 	input  logic        clk,
@@ -98,6 +99,7 @@ module DSPPC603_mmu
 	input  logic        d_wide,
 	input  logic [31:0] d_wdata_next,
 	input  logic [31:0] d_ea,                 // the access's effective address, for DAR
+	input  logic        d_cross,              // the access's bytes cross into the next page (DSPPC603_mem_unit)
 	input  logic        d_cancel,             // an ungranted EX request was flushed
 	input  logic        d_xl_flush,           // MSR, BAT, SDR1 or SR may have changed: drop the cached translations
 	output logic        d_gnt,
@@ -153,6 +155,7 @@ typedef struct packed {
 	logic        ok;          // pa is the physical address
 	logic        fault;       // take the exception, with info
 	logic        align;       // ... an alignment exception: dcbz on a W or I page
+	logic        bat;         // a BAT translated it (translation on)
 	logic        miss;        // no entry: walk
 	logic        cwalk;       // entry found, but a store needs the changed bit set: walk
 	logic [31:0] pa;
@@ -210,6 +213,7 @@ function automatic xl_t translate(
 			translate.wimg = 4'b0011;
 		end
 		else if (bhit) begin
+			translate.bat  = 1'b1;
 			translate.pa   = bpa;
 			translate.wimg = bwimg;
 			if (fetch ? (bpp == 2'b00) : ((bpp == 2'b00) | (store & (bpp != 2'b10)))) begin
@@ -445,6 +449,16 @@ always_comb begin
 	// Protection precedes dcbz's W/I alignment exception, which precedes a
 	// store's changed-bit walk. Keep that priority from translate().
 	if (d_cached_hit & ~dxl.fault & d_line & (dxl.wimg[3] | dxl.wimg[2])) begin
+		dxl.ok = 1'b0;
+		dxl.fault = 1'b1;
+		dxl.align = 1'b1;
+		dxl.cwalk = 1'b0;
+	end
+	// The 603's misaligned access that crosses a page: an alignment exception when
+	// the page is translated by the page table (MSR[DR], no BAT; a direct-store
+	// segment is a DSI already), before any of its bytes move (603e UM 4.5.6.1.1,
+	// Table 4-14: a halfword at xxFFF, a word at xxFFD-xxFFF, a double at xxFF9-xxFFF)
+	if (CROSS_ALIGN && d_cached_hit & ~dxl.fault & d_cross & msr_dr & ~dxl.bat) begin
 		dxl.ok = 1'b0;
 		dxl.fault = 1'b1;
 		dxl.align = 1'b1;

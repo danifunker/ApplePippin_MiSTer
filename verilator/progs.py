@@ -490,9 +490,11 @@ class PageTable:
 def mmutest(out):
     """Translation on: BATs, page tables (both hash groups), the referenced and
     changed bits, every cause of DSI and ISI with the DAR, DSISR and SRR1 it
-    must deliver, accesses that cross into an unmapped page, tlbie, the keys
-    in user mode, eciwx/ecowx. Nothing here is compared with an emulator; the
-    expectations are the architecture's and the 604 manual's."""
+    must deliver, accesses that cross into the next page (the 603's alignment
+    exception under page translation, none through a BAT or with translation
+    off; lmw goes in pieces), tlbie, the keys in user mode, eciwx/ecowx.
+    Nothing here is compared with an emulator; the expectations are the
+    architecture's, the 604 manual's and the 603e manual's (4.5.6.1.1)."""
     p = Program()
     BLR = 0x4E800020
     st = {"r": [0, 0, 0, 0], "msr": 0}
@@ -519,7 +521,7 @@ def mmutest(out):
         p.words.append(insn)
         st["r"][0] = at if pc is None else pc
         st["r"][1] = (st["msr"] & 0x87C0FFFF) | info
-        if vec == 0x300:
+        if vec in (0x300, 0x600):
             st["r"][2], st["r"][3] = dar, dsisr
         check("x%03X_%d" % (vec, len(p.checks)))
 
@@ -597,10 +599,20 @@ def mmutest(out):
     p.expect[0x00301004] = 0xABCD1234
     expect(D(32, 5, 12, 0), 0x300, 0, dar=U, dsisr=0x40000000)               # no page: load
     expect(D(36, 11, 12, 8), 0x300, 0, dar=U + 8, dsisr=0x42000000)          # ... store
-    expect(D(32, 5, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x40000000)           # crosses into it
-    expect(D(36, 11, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x42000000)          # ... the first two bytes are stored
-    p.expect[0x00301FFC] = 0x2222ABCD
+    # crossing into the next page under page translation: the 603's alignment exception,
+    # before any byte moves (CROSS_ALIGN; on the 604 these went in pieces, a DSI on U)
+    lwz_x, stw_x, lhz_x = D(32, 5, 10, 0xFFE), D(36, 11, 10, 0xFFE), D(40, 5, 10, 0xFFF)
+    expect(lwz_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(lwz_x))
+    expect(stw_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(stw_x))         # nothing stored
+    p.expect[0x00301FFC] = 0x22222222
+    expect(lhz_x, 0x600, 0, dar=B + 0xFFF, dsisr=align_dsisr(lhz_x))         # a halfword at xxFFF
+    load(5, 10, 0xFFC, 0x22222222)                                           # the page's last word: no crossing
     expect(D(46, 28, 10, 0xFF8), 0x300, 0, dar=U, dsisr=0x40000000)          # lmw r28: two words, then the fault
+    # ... through a BAT: no exception (the first 128 KB, identity)
+    p.data[0x0001EFFC] = 0x01020304
+    p.data[0x0001F000] = 0x05060708
+    p.words += li32(23, 0x0001E000)
+    load(5, 23, 0xFFE, 0x03040506)
     load(5, 13, 0, 0x33333333)                                               # read-only page
     expect(D(36, 11, 13, 0), 0x300, 0, dar=RO, dsisr=0x0A000000)             # protection, store
     expect(D(36, 11, 21, 0), 0x300, 0, dar=RO2, dsisr=0x0A000000)            # ... found by the walk itself
@@ -663,6 +675,7 @@ def mmutest(out):
     p.words += set_msr(0, 7)
     st["msr"] = 0
     load(5, 19, 0, 0x11111111)
+    load(5, 19, 0xFFE, 0x22220000)                                           # crossing, translation off: no exception
 
     p.expect.update(ptes)
     p.words.append(B_SELF)

@@ -114,6 +114,7 @@ module DSPPC603
 	parameter int          CACHE_WAYS = 2,            // ways of each cache: 2 (the 603) or 4 (the 603e, the 604)
 	parameter int          FPU_OPERAND_REG = 0,       // 1: the FPU takes its operands into a register first (a cycle each; on 2026-10-06 to 2026-10-09 for timing)
 	parameter int          PERF     = 1,              // 1: the performance counters (perf_cnt; 0 leaves them out)
+	parameter int          CROSS_ALIGN = 1,           // 1: a misaligned access crossing a page under page translation takes an alignment exception (603e UM 4.5.6.1.1)
 	parameter int          CAPTURE  = 0,              // 1 (needs PERF): the instruction capture, 4,096 x 194 bits of RAM drained as kind 19 (2026-10-21's stall hunt)
 	parameter logic [31:0] CAP_TRIG_EA = 32'hFFCF7B8C, // CAPTURE: the load EA that triggers it (Kinka 1.3: the 68k emulator's fetch of the floppy driver's prime routine)
 	parameter int          CAP_WATCH   = 1,           // CAPTURE: 1 records the watched line's history from reset, then everything from the trigger
@@ -2844,6 +2845,7 @@ wire [2:0] le_data = ~le_on | (ex_dec.cop != CK_WORD) ? 3'b000 :
                      (ex_dec.mem_n == 4'd2) ? 3'b110 :
                      (ex_dec.mem_n == 4'd4) ? 3'b100 : 3'b000;
 logic        mu_direct;      // the memory unit passes EX's effective address straight through
+logic        mu_cross;       // ... its access crosses into the next page (CROSS_ALIGN)
 logic [29:0] mu_addr_held;   // ... and its address otherwise, from its registers
 
 DSPPC603_mem_unit mem_unit
@@ -2873,6 +2875,7 @@ DSPPC603_mem_unit mem_unit
 	.dbus_kind   (mu_kind),
 	.dbus_addr   (mu_addr),
 	.dbus_ea     (mu_ea),
+	.dbus_cross  (mu_cross),
 	.dbus_direct (mu_direct),
 	.dbus_addr_held (mu_addr_held),
 	.dbus_be     (mu_be),
@@ -2905,7 +2908,7 @@ assign mem_leave = mo_valid ? mu_resp : mem_valid & (~mem_mem | mu_resp | mem_ir
 assign mem_dsi = ~mo_valid & mem_valid & mu_bfault;
 assign mem_fault = mem_dsi | mem_irq;
 
-DSPPC603_mmu #(.TLB_BITS (TLB_BITS), .CANDIDATE_D_ADDR (1'b1)) mmu
+DSPPC603_mmu #(.TLB_BITS (TLB_BITS), .CANDIDATE_D_ADDR (1'b1), .CROSS_ALIGN (CROSS_ALIGN != 0)) mmu
 (
 	.clk         (clk),
 	.reset       (reset),
@@ -2954,6 +2957,7 @@ DSPPC603_mmu #(.TLB_BITS (TLB_BITS), .CANDIDATE_D_ADDR (1'b1)) mmu
 	.d_wide      (mu_wide),
 	.d_wdata_next (mu_wdata_next),
 	.d_ea        (mu_ea),
+	.d_cross     (mu_cross),
 	.d_cancel    (redir),
 	.d_xl_flush  (mem_fault | (ex_leave & (ex_exc | (ex_last & (is_rfi | is_mtmsr | is_xlate))))),
 	.d_gnt       (mu_gnt),
