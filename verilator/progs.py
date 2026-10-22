@@ -2209,6 +2209,14 @@ def memtest_image():
           (21 << 26) | (14 << 21) | (14 << 16) | (0 << 11) | (0 << 6) | (15 << 1),         # rlwinm r14,r14,0,0,15: the upper half, X's
           (21 << 26) | (16 << 21) | (15 << 16) | (0 << 11) | (0 << 6) | (15 << 1),         # rlwinm r15,r16,0,0,15
           cmplw(14, 15), ("bc",) + BNE + ("ctbad",),
+          # ... the misaligned uncached store followed at once by what the emulator does next:
+          # a device read (the debug register: a word through the device path), a cached
+          # load that misses with a dirty victim (a write-back and a fill on the port), a
+          # cached store and load of the ROM line's neighbour; each read back
+          D(36, 16, 18, 22), D(32, 14, 31, 0x20), D(32, 14, 18, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 13, 8, 4096), D(36, 13, 8, 8192), D(36, 13, 8, 12288),                     # the set's ways dirty with other lines
+          D(36, 16, 18, 22), D(32, 14, 8, 16384), D(32, 14, 18, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 16, 18, 22), D(36, 13, 8, 64), D(32, 14, 8, 68), D(32, 14, 18, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
