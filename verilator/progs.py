@@ -2147,6 +2147,20 @@ def memtest_image():
           D(14, 18, 0, 200), ("label", "ctdl"), D(14, 18, 18, -1), cmpwi(18, 0), ("bc",) + BNE + ("ctdl",),   # a delay
           D(38, 12, 8, 20), D(38, 12, 8, 20), D(36, 13, 8, 16), D(36, 13, 8, 26),
           D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          # ... and accesses pipelined through the cache onto one line (2026-10-21 20:50: a
+          # store hit's write lands one edge after its lookup, at the edge the request after
+          # the next reads its set; the cache forwards the words written and takes the rest
+          # of the row from the RAM, read during that write): a store at A, a load, then a
+          # load of A+12 (X stored there before); the same with a byte store at A+13 in the
+          # third place, and in the second; the word at A+12 read back each time (an error
+          # reports X as the word expected; the byte store's cases expect X with byte 1 = r16)
+          D(36, 12, 8, 12),                                                                 # X at A+12
+          D(36, 13, 8, 0), D(32, 14, 8, 4), D(32, 14, 8, 12), cmplw(14, 12), ("bc",) + BNE + ("ctbad",),
+          X(12, 17, 12, 444),                                                               # r17 = X with byte 1 = r16[7:0]
+          (20 << 26) | (16 << 21) | (17 << 16) | (16 << 11) | (8 << 6) | (15 << 1),         # rlwimi r17,r16,16,8,15
+          D(36, 13, 8, 0), D(32, 14, 8, 64), D(38, 16, 8, 13), D(32, 14, 8, 12), cmplw(14, 17), ("bc",) + BNE + ("ctbad",),
+          D(36, 12, 8, 12),
+          D(36, 13, 8, 0), D(38, 16, 8, 13), D(32, 14, 8, 12), cmplw(14, 17), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
