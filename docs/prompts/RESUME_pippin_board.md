@@ -313,16 +313,49 @@ and what every write to it did, before and through the stall.
 (OSD note: after a fresh core load Boot is ROM, so ONE toggle makes the
 memory test pending; two cancel out.)
 
-## What is running / where things stand (22:15)
+## 22:45: build 26's landings (`scratch/tr_cap5.bin`, `cap5_stream.txt`; efbf06e, slack -0.235) — THE TMTASK'S PAGE IS NOT CACHED
+
+(cap5's `** dcache` lines are build 26's older entry format decoded by the
+newer viewer: read them as `store landed EA = merged word`; the scratch
+script in the log groups them.) Stores to the 68k stack page (003FF000)
+and the low-memory page (00007000) land in the dcache; **none of the 22
+stores to page 00081000 does** (nor to the device pages F3015000/F3017000,
+as expected). So the TMTask's page is cache-inhibited (I = 1; a write-
+through page would still land once a load had filled the line): every
+access to it is an uncached word with byte enables, straight through
+Pippin_machine, DSPPC603_memcdc and Pippin_sdram (a word = two halfword
+WRITEs with DQM, or a READ burst). The dcache was never involved; the
+memory test never exercised partial-word SDRAM writes (its data goes
+through the cache as whole lines). The lost bytes are the two halves of
+the misaligned tmAddr store (81C74 be=0011, 81C78 be=1100, two posted
+writes back to back, crossing an 8-byte boundary); tmCount's halves (81C78
+be=0011 — unprovable, the block was zero — and 81C7C be=1100, read back)
+and the byte stores (be=1000) land. Read and found nothing by inspection:
+Pippin_sdram's word write (two WRITEs on consecutive clocks, DQM with the
+command, PRECHARGE 2 clocks after), DSPPC603_memcdc, the CPU's port
+arbitration (data before instructions, the owner kept until the ack), the
+dcache's posted-write rules (S_PWAIT while one is out).
+**cd171e8 (build 28)**: the memory test does the TMTask's accesses through
+DBAT2's cache-inhibited alias of RAM (EA 10000000 + A): the misaligned
+stores as two partial words, the byte stores, the misaligned load, alone
+and in the driver's order. If it fails: the fault is in the uncached word
+write path (most likely the SDRAM controller's back-to-back partial
+writes, or the posted write's hand-over on the port); fix, verify with the
+test, then the disc.
+
+## What is running / where things stand (22:55)
 
 - **Quartus: build 26 = efbf06e** (the store-landing capture) in its
   fitter (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`): the disc
   capture round (`syn/boardcap.sh RBF cap5`), then `grep "store landed"`
   around the stores at 51/52, 250, 980, 1215. Then **build 27 = eadc78c**
   (chain b1h9rj4fj, `scratch/BandaiPippin_memtest27.rbf`): the memory test
-  with the dcbz cases AND the line watch: the memory test round, then the
-  disc capture round (`boardcap.sh`), then read the `** dcache` entries of
-  the line's set before the trigger. **run22** on the Mac (efbf06e, no lockstep, 290 M
+  with the dcbz cases AND the line watch (the watch should now show NO
+  dcache events for the line itself: it is uncached). Then **build 28 =
+  cd171e8** (chain bnhfpdyr8, `scratch/BandaiPippin_memtest28.rbf`): the
+  memory test with the cache-inhibited accesses — the decisive one.
+  **run23** on the Mac (efbf06e, 420 M instructions; watcher bvs0tez8q):
+  the bench's landings for the same stretch (expect none for the page). **run22** on the Mac (efbf06e, no lockstep, 290 M
   instructions, `rep22.bin`; watcher bwz9tsfz2): the bench's store-landing
   stream for the same stretch, the reference to diff against.
   The Sun-2 session is done with .92 for now (22:00); it will ask first
