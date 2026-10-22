@@ -300,11 +300,16 @@ identical. So neither latency nor these sequences reproduce it; what the
 test still lacks is the line's history before the store (how it came into
 the cache: a fill by a load, a store miss, a `dcbz` — the native Memory
 Manager may clear the TMTask's block with dcbz — and in which way).
-**3cfe8dc (build 27)** adds the dcbz-allocated cases. If build 26's
-landings do not settle it, the next instrument is a **watch on the line
-from boot**: a ring capture of every access to 81C60-7F, every store
-landing there and every tag write of set 0x63 (fill, dirty, invalidate,
-write-back), stopped some entries after the trigger.
+**3cfe8dc (build 27)** adds the dcbz-allocated cases, and **eadc78c (in
+build 27 too, lint clean)** is the **line watch**: `DBG_WATCH = 1` in
+DSPPC603.sv's g_perf turns the capture into a ring (4,096 pairs) running
+from reset that records only what concerns `DBG_WATCH_LINE` (81C60): the
+first instruction to leave EX after each access to the line, and every
+write of the dcache's RAMs in its set 0x63 (a fill, a store's landing with
+the merged word, a tag write: valid/dirty/way/state), then everything from
+the trigger for DBG_AFTER = 1,800 pairs; capview prints the writes as
+`** dcache store|fill|tag ...`. It shows how the line came into the cache
+and what every write to it did, before and through the stall.
 (OSD note: after a fresh core load Boot is ROM, so ONE toggle makes the
 memory test pending; two cancel out.)
 
@@ -313,9 +318,11 @@ memory test pending; two cancel out.)
 - **Quartus: build 26 = efbf06e** (the store-landing capture) in its
   fitter (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`): the disc
   capture round (`syn/boardcap.sh RBF cap5`), then `grep "store landed"`
-  around the stores at 51/52, 250, 980, 1215. Then **build 27 = 3cfe8dc**
+  around the stores at 51/52, 250, 980, 1215. Then **build 27 = eadc78c**
   (chain b1h9rj4fj, `scratch/BandaiPippin_memtest27.rbf`): the memory test
-  with the dcbz cases. **run22** on the Mac (efbf06e, no lockstep, 290 M
+  with the dcbz cases AND the line watch: the memory test round, then the
+  disc capture round (`boardcap.sh`), then read the `** dcache` entries of
+  the line's set before the trigger. **run22** on the Mac (efbf06e, no lockstep, 290 M
   instructions, `rep22.bin`; watcher bwz9tsfz2): the bench's store-landing
   stream for the same stretch, the reference to diff against.
   The Sun-2 session is done with .92 for now (22:00); it will ask first
