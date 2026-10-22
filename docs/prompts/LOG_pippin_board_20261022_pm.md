@@ -71,7 +71,11 @@ with its status-5 patterns already has PASS/FAIL in the bench (`--boot memtest`,
 - **CD audio is silent**: Racing Days sends PLAY AUDIO MSF 1B:34:34-1B:3A:33 at ~17 s and
   1C:04:34-23:2E:05 (the menu music, 7.7 min) at ~27 s, both status 00, then polls READ
   SUB-CHANNEL; the car-select screen's audio records as zeros. Not investigated (the
-  compatibility sweep).
+  compatibility sweep). A first look (`scratch/tr_rd1.txt`): the target forwards the
+  commands to the Main (blocks 7D47xxxx for PLAY AUDIO MSF, 7E42xxxx for READ SUB-CHANNEL,
+  the trace's flags b4: cd_ok, the disc mounted), but no AUDIO STATUS (7ECC0000) or frame
+  (7C000000) block appears; whether Pippin_cdaudio's channel requests are traced at all
+  (kind 18 is the target's `t_rq`) is the first thing to check.
 
 ## Saves (the flash): what happens
 
