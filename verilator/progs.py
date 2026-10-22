@@ -2051,6 +2051,8 @@ def memtest_image():
     p += li32(3, batl(0x00000000, 2, wimg=0b0010)) + [mtspr(537, 3)]
     p += li32(3, batu(0xF0000000, 2048)) + [mtspr(538, 3)]            # DBAT1: devices, inhibited, guarded
     p += li32(3, batl(0xF0000000, 2, wimg=0b0101)) + [mtspr(539, 3)]
+    p += li32(3, batu(0x10000000, 32)) + [mtspr(540, 3)]              # DBAT2: RAM again at 10000000, 4 MB, cache-inhibited (22:50)
+    p += li32(3, batl(0x00000000, 2, wimg=0b0100)) + [mtspr(541, 3)]
     p += [0x4C00012C] + li32(3, 0x50) + [mtmsr(3), 0x4C00012C]        # data translation on
     p += [D(15, 31, 0, DBG >> 16), D(32, 30, 31, 0x20)]                # r31 debug registers, r30 RAM size
     p += li32(3, 0x400000) + [cmplw(30, 3), ("bc",) + (4, 1) + ("ram4",), X(3, 30, 3, 444), ("label", "ram4")]   # at most 4 MB (the Pippin's map: 2026-10-21)
@@ -2190,6 +2192,23 @@ def memtest_image():
           D(36, 13, 8, 0), X(0, 0, 8, 1014),                                                # A dirty, dcbz
           D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
           D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          # ... and the same accesses cache-inhibited (22:45, cap5: no store to the TMTask's
+          # page ever lands in the dcache, so its accesses are uncached words with byte
+          # enables, straight to the SDRAM): through DBAT2's alias of RAM at 10000000 with
+          # I = 1, U = A + 10000000: the line flushed first (so the cache holds no copy), the
+          # misaligned store at U+22 (two partial words, 81C74/81C78's pattern), the byte
+          # stores, the word store, the misaligned store at U+26, the misaligned load of U+22;
+          # then the word at U+20 whole read back; then the stores alone
+          X(0, 0, 8, 86), X(0, 0, 0, 598),
+          (15 << 26) | (18 << 21) | (8 << 16) | 0x1000,                                    # addis r18, r8, 0x1000: U
+          D(36, 13, 18, 16), D(36, 16, 18, 22), D(38, 12, 18, 20), D(38, 12, 18, 20), D(36, 13, 18, 16), D(36, 13, 18, 26),
+          D(32, 14, 18, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 16, 18, 22), D(32, 14, 18, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 16, 18, 26), D(32, 14, 18, 26), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 16, 18, 22), D(36, 13, 18, 26), D(32, 14, 18, 22),                        # the two stores back to back, as the driver's
+          (21 << 26) | (14 << 21) | (14 << 16) | (0 << 11) | (0 << 6) | (15 << 1),         # rlwinm r14,r14,0,0,15: the upper half, X's
+          (21 << 26) | (16 << 21) | (15 << 16) | (0 << 11) | (0 << 6) | (15 << 1),         # rlwinm r15,r16,0,0,15
+          cmplw(14, 15), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
