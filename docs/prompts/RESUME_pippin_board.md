@@ -278,11 +278,32 @@ load hit on the ROM line just before, the next opcode fetch queued behind).
   sequence: `lwz B; stw X,22(A); lhz 2(B)` with A out of the cache, in it
   clean, in it dirty (B another resident line).
 
-## What is running / where things stand (21:25)
+## 21:40: build 24's capture (`scratch/tr_cap4.bin`, `cap4_stream.txt`; 88aa1e8, slack -0.332) — the instrument was too coarse
 
-- **Quartus: build 24 = 88aa1e8** in its fitter (chain bg3cj4nrt keeps
-  the rbf as `scratch/BandaiPippin_88aa1e8.rbf`), then **build 25 =
-  4c4629e** (chain b19byxraa, `scratch/BandaiPippin_memtest25.rbf`). For
+The same stall a third time, the PPC stream identical to cap3's (the
+fault is deterministic). But the merged word never shows: the data field
+is overwritten by the next load's value (the opcode fetch follows every
+store within a cycle or two) before an instruction samples it. **efbf06e
+(build 26)** records each store's landing as an entry of its own (`**
+store landed ADDR = word` in capview; PC DEAD0000, bit 0 = a landing was
+lost; one held a cycle behind an instruction's entry). The entries cost
+capture room (8,192 entries in all), so the capture covers fewer
+instructions; the wait's load is ~1,600 instructions in and the stores of
+interest are 51, 250, 980, 1215, 1567-1580.
+
+## What is running / where things stand (21:45)
+
+- **Quartus: build 25 = 4c4629e** (the memory test with the emulator's
+  sequence) in its fitter (chain b19byxraa keeps the rbf as
+  `scratch/BandaiPippin_memtest25.rbf`; run it on the board: the memory
+  test, `grep DBG` for the error count in status 5); then **build 26 =
+  efbf06e** (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`; the disc
+  capture round with `syn/boardcap.sh`, then `grep "store landed"` around
+  the stores at 51/52, 250, 980, 1215). Loading the Pippin core while the
+  Sun-2 core is up: the OSD's core list opens the Sun-2's folder, so go
+  `..` (backspace, enter), Console, then down to BandaiPippin (the 9th
+  entry), enter — `boardcap.sh`'s `F12, right, enter, enter` assumes the
+  Pippin core is the one loaded. For
   each: `syn/boardcap.sh RBF NAME` does a disc capture round (put the
   core, stream, load through the OSD, fetch, decode, the stream with
   `--rom`). The memory test on the board: `trace-capture` first, then OSD
