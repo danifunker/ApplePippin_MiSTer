@@ -583,6 +583,18 @@ def trace(last, first, fname=None):
                 reg = "RAM %08x" % addr
                 if we:
                     reg += "  sdram be %x%s issued %d col %03x" % (d >> 28, " after-refresh" if d & 0x08000000 else "", (d >> 16) & 31, d & 0x1FF)
+            elif (addr >> 24) == 0x4F:
+                # TRACE_FL (2026-10-22): the save flash's image port, the flash address in the low bits
+                what = {1: "image block loaded", 2: "image block read (save)", 3: "CPU programmed/erased"}.get((addr >> 20) & 15, "?")
+                print("%s FLASH %-24s at %05x  data %02x" % (t, what, addr & 0x1FFFF, data & 0xFF))
+                continue
+            elif (addr >> 19) == 0x800:
+                # TRACE_FL: a CPU word access to the save flash (40000000-4007FFFF): byte (addr >> 2)
+                # in the top lane, its data lines reversed
+                b = (data >> 24) & 0xFF
+                rb = int("{:08b}".format(b)[::-1], 2)
+                print("%s FLASH %s %05x  %02x (flash's %02x)  (be %x)" % (t, "w" if we else "r", (addr & 0x7FFFF) >> 2, b, rb, be))
+                continue
             elif (addr >> 8) == 0xF90000:
                 # the memory test's progress (Pippin_machine dbg_reg)
                 reg = "DBG " + {0: "status", 4: "passes", 8: "errors", 0xC: "first addr", 0x10: "read", 0x14: "expected"}.get(addr & 0xFF, "%02x" % (addr & 0xFF))

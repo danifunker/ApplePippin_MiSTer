@@ -905,12 +905,12 @@ always_ff @(posedge clk) begin
 		bt_us  <= bt_us + 32'd1;
 	end
 	else bt_div <= bt_div + 16'd1;
-	if (dev_take & ~q_line) begin
+	if (dev_take & (~q_line | (TRACE_FL != 0 && q_is_fl))) begin   // (the flash's line accesses too: their first word, be 0)
 		bt_pend <= bt_hit;
 		bt_a    <= qa;
 		bt_we   <= q_we;
 		bt_wd   <= c_wdata[31:0];
-		bt_be   <= c_be;
+		bt_be   <= q_line ? 4'h0 : c_be;
 	end
 	else if (dev_ack) bt_pend <= 1'b0;
 	if (reset) bt_pend <= 1'b0;
@@ -944,10 +944,11 @@ wire   itr_tr = itr_ev & tr_mesh;
 // TRACE_FL: the save flash's image port, as kind 4 records at 4F000000 + what: 1 a block of the
 // image loaded into the flash (its first byte written, the address in the low bits), 2 a block
 // read out for a save (its first byte), 3 the CPU programmed or erased the flash
-logic        fl_re_q;
-always_ff @(posedge clk) fl_re_q <= fl_ld_re;
+// (3 only at the first of a run: an erase sweep changes a byte every clock and flooded the trace)
+logic        fl_re_q, fl_ch_q;
+always_ff @(posedge clk) begin fl_re_q <= fl_ld_re; fl_ch_q <= fl_changed; end
 wire         fl_tev  = TRACE_FL != 0 &&
-                       ((fl_ld_we && fl_ld_addr[8:0] == 9'd0) || (fl_ld_re && !fl_re_q && fl_ld_addr[8:0] == 9'd0) || fl_changed);
+                       ((fl_ld_we && fl_ld_addr[8:0] == 9'd0) || (fl_ld_re && !fl_re_q && fl_ld_addr[8:0] == 9'd0) || (fl_changed && !fl_ch_q));
 wire  [31:0] fl_ta   = {8'h4F, fl_changed ? 4'd3 : fl_ld_we ? 4'd1 : 4'd2, 3'd0, fl_ld_addr};
 assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev | fl_tev;
 assign tr_rec = sd_tr_ev ? sd_tr_rec :
