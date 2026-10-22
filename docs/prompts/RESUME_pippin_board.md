@@ -343,7 +343,68 @@ write path (most likely the SDRAM controller's back-to-back partial
 writes, or the posted write's hand-over on the port); fix, verify with the
 test, then the disc.
 
-## What is running / where things stand (23:15)
+## 2026-10-22 00:00: REPRODUCED AND LOCALIZED — masked halfwords are written as zeros (`scratch/tr_mt6.bin`, `.txt`)
+
+Build 28 (832abbf's memory test + cb0d605's trace, slack +0.329) on the
+board: **the cache-inhibited pattern fails from the first round**, 200,001
+errors (one per round: the first failing check), the first at A = 5C280,
+read 00000000. The memory test's pseudo-random A fell on the watched lines
+81C60 and 81AC0 six times each, so the trace has the complete rounds with
+the memory port's records and the SDRAM controller's diagnostic:
+
+    stw Y,16(U)    RAM 81C70 sdram be f issued 2 col 038  w fff7c0ac
+    stw X',22(U)   RAM 81C74 sdram be 3 issued 2 col 03a  w 0000ffff   <- lost
+                   RAM 81C78 sdram be c issued 2 col 03c  w ffff0000   <- lost
+    stb X,20(U) x2 RAM 81C74 sdram be 8 issued 2 col 03a  w 53000000
+    stw Y,16(U)    RAM 81C70 ...
+    stw Y,26(U)    RAM 81C78 sdram be 3 issued 2 col 03c  w 0000fff7
+                   RAM 81C7C sdram be c issued 2 col 03e  w c0ac0000
+    lwz 22(U)      RAM 81C74 r 53000000     RAM 81C78 r 0000fff7
+
+The controller served every write with the byte enables as given (two
+WRITEs, the right column). The read-backs fit exactly one rule: **a masked
+halfword (DQM = 11) is written with the zeros the window carries in its
+place instead of being skipped** — the byte store's masked second halfword
+zeroes 81C74's bytes 2-3 (X' lost), the later misaligned store's masked
+first halfword zeroes 81C78's bytes 0-1 (X' lost), while FFF7 and 53 land.
+Replaying the driver's sequence with that rule: InsTime's `move.b
+d0,4(a0)` (be 8) zeroes tmAddr's FFCF, PrimeTime's tmCount store (be 3 at
+81C78) zeroes 7BA2, `tst.l 6(a0)` reads 0 — the stall. Everything else
+checked out: Pippin_sdram and DSPPC603_memcdc are byte-identical to
+MacPPC7300's (whose bench covered random byte enables against a chip
+model), the dqm register is packed in the I/O cells, the datasheet report
+(quartus_sta, `scratchpad/datasheet.txt`) has every SDRAM output changing
+12.6-13.0 ns after the reference with the SDRAM_CLK edge 5 ns later, the
+mode word sets single writes, DQMH/DQML are on AF13/AG13 as in sys.qsf.
+So either DQM does not reach the chip on MiSTerss1's module (a hardware
+fault would look exactly like this; .94 has SSH open but gave a host-key
+warning and has no KVM, so it was not tried), or something subtler in the
+I/O; cores that do not mask bytes (line and full-word writes: the memory
+test's own sweep, MacPPC7300's Mac OS?) never see it.
+**The fix (bfcfb4f, build 29): Pippin_sdram writes a partial word by
+read-modify-write** (RMW = 1: READ the word in the open row, merge the
+enabled bytes, WRITE both halfwords unmasked, ~12 clocks more per partial
+write; RMW = 0 masks with DQM as before). The SDRAM bench (`make sdram`,
+from MacPPC7300, with the chip model) passes with it on 32 and 128 MB
+boards. run25 (the bench with the memory-port trace) shows the same page
+uncached in the bench with every write landing.
+
+## What is running / where things stand (00:15)
+
+- **Quartus: build 29** = bfcfb4f + the Makefile fix (the RMW controller,
+  the memory test with the uncached pattern, the traces), started 00:12
+  (waiter: `scratch/BandaiPippin_rmw29.rbf`). Then on .92: the memory test
+  (expect 0 errors in status 5), then **Super Marathon** (`syn/boardcap.sh
+  scratch/BandaiPippin_rmw29.rbf cap6` — the capture still triggers at the
+  prime routine; what matters is the screen: does the disc boot?). If it
+  boots: the fix is confirmed; clean up (the instruments can stay, PERF's
+  capture costs RAM: consider DBG_WATCH/the capture off for a release),
+  rerun the CPU's and the machine's regression (`make lint`, the sdram
+  bench, the lockstep boot run5), update the notes, save the memory.
+  If the memory test passes but the disc still stalls: capture and read
+  the `RAM 00081C7x` records around 15.74 s.
+
+## What was running (23:15)
 
 - **The Quartus lock**: the Sun-2 session's compile took it at 23:04; build
   28 (chain bnhfpdyr8, pid file quartus28.pid) waits on the flock and starts
