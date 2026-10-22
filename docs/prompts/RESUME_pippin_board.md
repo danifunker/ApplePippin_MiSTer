@@ -418,7 +418,7 @@ Loose ends for the morning:
 - Regression done: `make lint` clean, `make sdram` (the controller against
   the chip model, random byte enables) PASS on 32 and 128 MB boards, run25
   (the bench boot, 420 M instructions) PASS; run26 = the lockstep boot
-  (run5) on the final tree started 00:45 (`runrep26.txt`).
+  (run5) on the final tree: PASS (01:41, `runrep26.txt`).
 - Then: the game itself (controller input through the AppleJack, sound),
   and open problem 2 (Athens's video clock) below.
 
