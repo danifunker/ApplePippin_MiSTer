@@ -389,6 +389,32 @@ from MacPPC7300, with the chip model) passes with it on 32 and 128 MB
 boards. run25 (the bench with the memory-port trace) shows the same page
 uncached in the bench with every write landing.
 
+## 04:00: v0.1.0 released; four titles boot; input verified
+
+- **Release v0.1.0** (`releases/BandaiPippin_20261022.rbf`, tag v0.1.0,
+  the GitHub release with the rbf): build 30 = 64bdeb2 (TRACE 0, PERF 0;
+  slack +0.201). Verified on the board: Macintosh on Pippin boots to the
+  desktop with it. Its notes: `releases/README.md`.
+- **Compatibility** (`docs/compatibility.md`): Super Marathon (launcher),
+  Racing Days (car select, animating), Power Rangers Zeo (menu), Macintosh
+  on Pippin (the Finder) all boot with build 29/30 (screenshots in
+  `scratch/*_boots_20261022*.png`). Mounting another disc: the OSD's first
+  item (the file browser), then reload the core; the core list opens on
+  the last entry used (BandaiPippin), so `F12, right, enter, enter` loads it.
+- **Input**: in the Finder the mouse moves the pointer (Mac OS accelerates
+  misterkvms-cli's relative moves ~5x; `mouse pos` is not absolute here),
+  its button selects an icon, the keyboard selects icons by name. The
+  AppleJack path (OSD Input > Controller) needs a real gamepad to test.
+  In the games the system pointer sits at the top-left; they take the pad.
+- **Sound**: not verifiable remotely (the KVM stream carries no audio);
+  the path is MacPPC7300's (AWACS + CD audio mixed to HDMI, MT32-pi
+  option) and the boot chime's DMA runs. Racing Days' menu runs no sound
+  DMA (its music is probably CD audio: Pippin_cdaudio, untested). Listen
+  on the board.
+- The debug builds' instruments stay in the tree behind TRACE/PERF (the
+  release has them off); the capture (DBG_WATCH, DBG_TRIG_EA) and the
+  memory-port trace (TRACE_RAM_LINE) are hard-wired to the TMTask hunt.
+
 ## 00:41: FIXED — Super Marathon boots on the board
 
 Build 29 (bfcfb4f + the Makefile fix, slack -0.647): the memory test's
