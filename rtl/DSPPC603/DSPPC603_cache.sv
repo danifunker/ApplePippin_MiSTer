@@ -103,11 +103,14 @@ module DSPPC603_cache
 	input  logic        mem_ack,
 	input  logic [255:0] mem_rdata,
 
-	// a store's word as it lands in the line (the merge of its bytes into the
-	// word read: DSPPC603's capture records it, 2026-10-21)
-	output logic        dbg_st_v,
-	output logic [31:0] dbg_st_word,
-	output logic [31:2] dbg_st_addr
+	// a write of the tag or data RAMs at this edge (DSPPC603's capture records
+	// those of a watched set, 2026-10-21): the line's address with a pending
+	// store's word, that store's word as merged, and {state, data_we[1:0],
+	// tag_we[1:0], the tag written valid, dirty, a pending write, 5'b0}
+	output logic        dbg_wr_v,
+	output logic [15:0] dbg_wr_info,
+	output logic [31:2] dbg_wr_addr,
+	output logic [31:0] dbg_wr_data
 );
 
 import DSPPC603_pkg::*;
@@ -294,9 +297,10 @@ always_comb
 logic pending_set_match;
 always_ff @(posedge clk) pending_set_match <= (rd_idx == r_idx);
 wire forward_pending = wr_pend & pending_set_match;
-assign dbg_st_v    = wr_pend & (|wr_data_we);
-assign dbg_st_word = pending_st;
-assign dbg_st_addr = {wr_tag_wd.tag, wr_idx_q, pending_wword};
+assign dbg_wr_v    = (|tag_we) | (|data_we);
+assign dbg_wr_info = {4'(state), 2'(data_we), 2'(tag_we), tag_wd.valid, tag_wd.dirty, wr_pend, 5'd0};
+assign dbg_wr_addr = {tag_wd.tag, wr_idx, pending_wword};
+assign dbg_wr_data = pending_st;
 /* synthesis translate_off */
 always_ff @(posedge clk)
 	if (~reset & wr_pend & ((state == S_LOOK) | (state == S_SNOOP)) & (pending_set_match != (wr_idx_q == r_idx)))

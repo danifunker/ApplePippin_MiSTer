@@ -7,8 +7,9 @@ Since 2026-10-21 20:40 the record's second word is the data of the last access
 answered (a load's value, a store's first word as merged), not the instruction: with
 --rom ROM (Kinka 1.3) the word is read back from the ROM (PCs 68xxxxxx are the 68k
 emulator's image, the ROM at +0x300000; FFxxxxxx the ROM itself) and the data is
-printed after the access (`= value`, whenever it changes). A store's landing in the dcache
-(its merged word, its address; PC DEAD0000) is an entry of its own: `** store landed`.
+printed after the access (`= value`, whenever it changes). A write of the dcache's RAMs (the line watch:
+a store's landing with its merged word, a fill, a tag write; PC DEAD0000 | info) is an
+entry of its own: `** dcache ...`.
 """
 import os, re, struct, subprocess, sys, tempfile
 OBJDUMP = os.path.expanduser("~/repos/Retro68-build/toolchain/bin/powerpc-apple-macos-objdump")
@@ -49,8 +50,19 @@ for l in out.splitlines():
 last_ea = None; last_data = None
 for n, pc, w, ea, rw, data in ins[first:first + count]:
     if (pc & 0xFFFF0000) == 0xDEAD0000:
-        # a store landing in the dcache (88aa1e8+): the word as merged, its address
-        print("%4d %s        ** store landed  %08x = %08x%s" % (n, " " * 8, ea, data if data is not None else w, "  (a landing lost before this one)" if pc & 1 else ""))
+        # a write of the dcache's RAMs (the line watch, 22:30): PC DEAD | {state[3:0],
+        # data_we[1:0], tag_we[1:0], valid, dirty, pending, 4'b0, lost}; the EA is the line
+        # (the tag written, the set, a pending store's word), the data a pending store's
+        # merged word
+        st = ("SWEEP", "IDLE", "LOOK", "UNC", "WB", "FILL", "RETRY", "ICBI", "SNOOP", "PWAIT", "WBREAD", "UANS")[(pc >> 12) & 15]
+        dwe, twe = (pc >> 10) & 3, (pc >> 8) & 3
+        kind = ("store" if dwe else "tag") if pc & 0x20 else ("fill" if dwe else "tag")
+        print("%4d %s        ** dcache %-5s %s%s way%s%s%s  %08x%s%s" % (
+            n, " " * 8, kind, "data " if dwe else "", "tag " if twe else "",
+            "".join(str(k) for k in range(2) if (dwe | twe) >> k & 1),
+            " valid" if pc & 0x80 else " INVALID", " dirty" if pc & 0x40 else " clean", ea,
+            " = %08x" % data if (pc & 0x20) and dwe and data is not None else "",
+            "  in %s%s" % (st, "  (one lost before this)" if pc & 1 else "")))
         continue
     acc = "" if (ea, rw) == last_ea else "  <- %s %08x" % ("st" if rw == "w" else "ld", ea)
     last_ea = (ea, rw)

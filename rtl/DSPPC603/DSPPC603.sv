@@ -582,9 +582,10 @@ logic         dc_slow;                     // the data cache is busy beyond a lo
 logic         dc_posted;                   // ... or has a posted write not yet in memory
 logic         dc_wide_sure;                // the access it is answering is wide and will be answered wide
 logic         ic_snoop_ack, dc_snoop_ack;
-logic         dc_dbg_st_v;
-logic [31:0]  dc_dbg_st_word;
-logic [31:2]  dc_dbg_st_addr;
+logic         dc_dbg_wr_v;
+logic [15:0]  dc_dbg_wr_info;
+logic [31:2]  dc_dbg_wr_addr;
+logic [31:0]  dc_dbg_wr_data;
 logic         ic_inval, dc_inval;          // HID0[ICFI], [DCFI]
 
 // ============================================================================
@@ -3071,9 +3072,10 @@ DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW), .WAYS (CACHE_WAYS)) icache
 	.mem_ack    (im_ack),
 	.mem_rdata  (mem_rdata),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.dbg_st_v   (),
-	.dbg_st_word (),
-	.dbg_st_addr ()
+	.dbg_wr_v    (),
+	.dbg_wr_info (),
+	.dbg_wr_addr (),
+	.dbg_wr_data ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
 
@@ -3117,9 +3119,10 @@ DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_
 	.mem_wdata  (dm_wdata),
 	.mem_ack    (dm_ack),
 	.mem_rdata  (mem_rdata),
-	.dbg_st_v   (dc_dbg_st_v),
-	.dbg_st_word (dc_dbg_st_word),
-	.dbg_st_addr (dc_dbg_st_addr)
+	.dbg_wr_v    (dc_dbg_wr_v),
+	.dbg_wr_info (dc_dbg_wr_info),
+	.dbg_wr_addr (dc_dbg_wr_addr),
+	.dbg_wr_data (dc_dbg_wr_data)
 );
 
 // the memory port: data before instructions, a request once started keeps it
@@ -3447,70 +3450,90 @@ if (PERF != 0) begin : g_perf
 			4'h3: dbg_cls = 3'd0;  4'h5: dbg_cls = 3'd1;  4'h6: dbg_cls = 3'd2;  4'h7: dbg_cls = 3'd3;
 			4'h8: dbg_cls = 3'd4;  4'h9: dbg_cls = 3'd5;  4'hC: dbg_cls = 3'd6;  default: dbg_cls = 3'd7;
 		endcase
-	// ---- the capture (2026-10-21, the board's stall): 2,048 instructions as they leave EX
-	// (PC, the word, the last data access the cache took: its EA and whether a write), from
-	// the first fetch of DBG_TRIG_EA, in a RAM of 1,024 pairs, drained afterwards through
-	// dbg_rec as kind 19 records (a pair each, one every 64 cycles; the samples pause)
+	// ---- the capture (2026-10-21, the board's stall): instructions as they leave EX (PC,
+	// the last data access the cache took: its EA, whether a write, the last access's
+	// data) and the dcache's RAM writes (a store's landing with its merged word, a fill,
+	// a write-back's or an invalidate's tag; PC DEAD0000 | info), as entries of 97 bits in
+	// a ring of 4,096 pairs, drained afterwards through dbg_rec as kind 19 records (a
+	// pair each, one every 64 cycles; the samples pause).
+	// DBG_WATCH = 0: everything from the first fetch of DBG_TRIG_EA, 8,192 entries.
+	// DBG_WATCH = 1 (22:30): from reset, only what concerns the watched line (the first
+	// instruction to leave EX after each access to it; the RAM writes of its set, all
+	// ways), then everything from the trigger for DBG_AFTER more pairs: the line's
+	// history before the stall and the stall itself.
 	localparam logic [31:0] DBG_TRIG_EA = 32'hFFCF7B8C;   // the 68k emulator's fetch of the floppy driver's prime routine (Kinka 1.3: its store of tmAddr, InsTime, PrimeTime, the wait)
-	logic [193:0] cap_ram [4096];       // 8,192 instructions
-	logic         cap_on, cap_full, cap_done, cap_half;
-	logic [12:0]  cap_wr, cap_rd;
+	localparam bit          DBG_WATCH   = 1'b1;
+	localparam logic [31:5] DBG_WATCH_LINE = 27'(32'h00081C60 >> 5);   // the TMTask's line (cap2-cap4)
+	localparam logic [12:0] DBG_AFTER   = DBG_WATCH ? 13'd1800 : 13'd4096;
+	logic [193:0] cap_ram [4096];
+	logic         cap_on, cap_trig, cap_full, cap_done, cap_half, cap_wrapped, cap_seen;
+	logic [11:0]  cap_wr, cap_rd;
+	logic [12:0]  cap_after, cap_n, cap_cnt;
 	logic [96:0]  cap_a;
 	logic [31:0]  cap_ea;
 	logic         cap_we;
 	logic [193:0] cap_q;
-	// The data of the last access answered, in the word's place since 2026-10-21 20:40
-	// (the word is in the ROM: capview.py reads it back): a load's value as the register
-	// gets it (so a misaligned word whole), a store's word as it lands in the line (the
-	// cache's merge of its bytes into the word read, dbg_st_word; 21:00: the window word
-	// mu_wdata before).
+	// the data of the last access answered (a load's value as the register gets it)
 	logic [31:0]  cap_data;
-	logic         st_hold_v, st_lost;
-	logic [96:0]  st_hold;
-	wire  [96:0]  st_new    = {1'b1, dc_dbg_st_addr, 2'b00, dc_dbg_st_word, 32'hDEAD0000};
-	wire  [96:0]  st_ent    = st_hold_v ? st_hold : st_new;
-	wire  [96:0]  cap_entry = ex_leave ? {cap_we, cap_ea, cap_data, ex_pc} : {st_ent[96:1], st_lost};
-	wire          cap_push  = cap_on & (ex_leave | st_hold_v | dc_dbg_st_v);
+	logic         ev_hold_v, ev_lost;
+	logic [96:0]  ev_hold;
+	wire          ev_match  = dc_dbg_wr_v & (dc_dbg_wr_addr[DC_IDXW+4:5] == DBG_WATCH_LINE[DC_IDXW+4:5]);
+	wire  [96:0]  ev_new    = {1'b0, dc_dbg_wr_addr, 2'b00, dc_dbg_wr_data, 16'hDEAD, dc_dbg_wr_info};
+	wire  [96:0]  ev_ent    = ev_hold_v ? ev_hold : ev_new;
+	wire          ins_match = (cap_ea[31:5] == DBG_WATCH_LINE) & ~cap_seen;
+	wire          ins_push  = ex_leave & (cap_trig | ~DBG_WATCH | ins_match);
+	wire  [96:0]  cap_entry = ins_push ? {cap_we, cap_ea, cap_data, ex_pc} : {ev_ent[96:1], ev_lost};
+	wire          cap_push  = cap_on & (ins_push | ev_hold_v | ev_match);
+	wire          cap_stop  = cap_trig & (cap_after == DBG_AFTER);
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
-		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; end
+		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; cap_seen <= 1'b0; end
 		if (mu_resp & (mo_valid ? mo_load : mem_load)) cap_data <= mu_rdata[31:0];
-		if (~cap_on & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
-			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0; st_hold_v <= 1'b0; st_lost <= 1'b0;
+		if (~cap_trig & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
+			cap_trig <= 1'b1; cap_after <= '0;
+			if (~DBG_WATCH) begin cap_on <= 1'b1; cap_wr <= '0; cap_wrapped <= 1'b0; cap_half <= 1'b0; ev_hold_v <= 1'b0; ev_lost <= 1'b0; end
 		end
-		// An instruction's entry as it leaves EX; a store's landing in the dcache (the
-		// merged word, its address) is an entry of its own (PC DEAD0000; bit 0: a landing
-		// was lost), after the instruction's when both come in one cycle: held a cycle
+		// An instruction's entry as it leaves EX; a RAM write's entry after it when both
+		// come in one cycle: held a cycle (bit 0 of its PC: one was lost under the hold)
 		if (cap_push) begin
+			if (ins_push & ins_match) cap_seen <= 1'b1;
 			if (~cap_half) begin cap_a <= cap_entry; cap_half <= 1'b1; end
 			else begin
-				cap_ram[cap_wr[11:0]] <= {cap_entry, cap_a};
+				cap_ram[cap_wr] <= {cap_entry, cap_a};
 				cap_half <= 1'b0;
-				cap_wr   <= cap_wr + 13'd1;
-				if (cap_wr == 13'd4095) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
+				cap_wr   <= cap_wr + 12'd1;
+				if (cap_wr == 12'd4095) cap_wrapped <= 1'b1;
+				if (cap_trig) cap_after <= cap_after + 13'd1;
 			end
+		end
+		if (cap_on & cap_stop) begin
+			cap_on   <= 1'b0; cap_full <= 1'b1;
+			cap_rd   <= cap_wrapped ? cap_wr : 12'd0;
+			cap_cnt  <= cap_wrapped ? 13'd4096 : {1'b0, cap_wr};
+			cap_n    <= '0;
 		end
 		if (cap_on) begin
-			if (dc_dbg_st_v & (ex_leave | st_hold_v)) begin
-				st_hold   <= st_new;
-				st_hold_v <= 1'b1;
-				if (st_hold_v & ex_leave) st_lost <= 1'b1;
-				else if (~ex_leave) st_lost <= 1'b0;            // (the held one is pushed now)
+			if (ev_match & (ins_push | ev_hold_v)) begin
+				ev_hold   <= ev_new;
+				ev_hold_v <= 1'b1;
+				if (ev_hold_v & ins_push) ev_lost <= 1'b1;
+				else if (~ins_push) ev_lost <= 1'b0;            // (the held one is pushed now)
 			end
-			else if (~ex_leave & (st_hold_v | dc_dbg_st_v)) begin
-				st_hold_v <= 1'b0;
-				st_lost   <= 1'b0;
+			else if (~ins_push & (ev_hold_v | ev_match)) begin
+				ev_hold_v <= 1'b0;
+				ev_lost   <= 1'b0;
 			end
 		end
-		cap_q <= cap_ram[cap_rd[11:0]];
+		cap_q <= cap_ram[cap_rd];
 		if (cap_full) begin
 			if (dbg_t[5:0] == 6'h3F) begin
 				dbg_ev       <= 1'b1;
-				dbg_rec      <= {cap_q[192:161], cap_q[160:129], cap_q[128:97], cap_q[95:64], cap_q[63:32], cap_q[31:0], 19'd0, cap_rd};
+				dbg_rec      <= {cap_q[192:161], cap_q[160:129], cap_q[128:97], cap_q[95:64], cap_q[63:32], cap_q[31:0], 19'd0, cap_n};
 				dbg_capflags <= {1'b1, cap_q[193], cap_q[96]};
-				cap_rd       <= cap_rd + 13'd1;
-				if (cap_rd == 13'd4095) begin cap_full <= 1'b0; cap_done <= 1'b1; end
+				cap_rd       <= cap_rd + 12'd1;
+				cap_n        <= cap_n + 13'd1;
+				if (cap_n == cap_cnt - 13'd1) begin cap_full <= 1'b0; cap_done <= 1'b1; end
 			end
 		end
 		else if (dbg_dense ? dbg_t[7:0] == 8'hFF : dbg_t[12:0] == 13'h1FFF) begin   // every 8,192 cycles (65,536 until 2026-10-21), 256 in the dense window
@@ -3531,8 +3554,9 @@ if (PERF != 0) begin : g_perf
 		if (reset) begin
 			dbg_t <= 16'd0;
 			for (int i = 0; i < 8; i++) dbg_n[i] <= 8'd0;
-			cap_on <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0; cap_wr <= '0; cap_rd <= '0;
-			st_hold_v <= 1'b0; st_lost <= 1'b0;
+			cap_on <= DBG_WATCH; cap_trig <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0;
+			cap_wr <= '0; cap_rd <= '0; cap_wrapped <= 1'b0; cap_after <= '0; cap_n <= '0; cap_cnt <= '0; cap_seen <= 1'b0;
+			ev_hold_v <= 1'b0; ev_lost <= 1'b0;
 			dbg_capflags <= 3'b000;
 		end
 	end
