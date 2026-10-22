@@ -47,6 +47,23 @@ int main(int argc, char** argv) {
 	unlock(); wr(0x5555, 0x80); unlock(); wr(0x5555, 0x10); erase_wait();
 	expect("chip erase", 0x00123, 0xFF);
 	expect("chip erase", 0x08010, 0xFF);
+	// during an erase a read is the status (DQ7 0, DQ6 toggling, DQ3 1) and writes are
+	// ignored; Mac OS's driver (ROM FFCCEB60) polls for FF, then programs (FFCCEA50)
+	program(0x00010, 0x00);
+	unlock(); wr(0x5555, 0x80); unlock(); wr(0x00000, 0x30);
+	{
+		uint8_t s1 = rd(0x00000), s2 = rd(0x00000);
+		if ((s1 & 0x80) || !(s1 & 0x08) || ((s1 ^ s2) & 0x40) != 0x40) {
+			std::printf("FAIL erase status: %02X then %02X, want DQ7 0, DQ3 1, DQ6 toggling\n", s1, s2); fails++;
+		}
+		program(0x00020, 0x00);          // ignored: the erase is running
+		int polls = 0;
+		while (rd(0x00000) != 0xFF && polls < 100000) polls++;
+		if (polls == 0 || polls >= 100000) { std::printf("FAIL erase poll: %d reads\n", polls); fails++; }
+	}
+	expect("the write during the erase was ignored", 0x00020, 0xFF);
+	expect("sector erase by the driver", 0x00010, 0xFF);
+	program(0x00000, 0x00);  expect("program after the poll", 0x00000, 0x00);
 	// the image port: load a byte, the CPU reads it
 	d->ld_we = 1; d->ld_addr = 0x00200; d->ld_data = 0x3C; tick(); d->ld_we = 0; tick();
 	expect("loaded through the image port", 0x00200, 0x3C);

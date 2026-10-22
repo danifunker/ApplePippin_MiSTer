@@ -18,9 +18,15 @@
 //    90 at 5555: autoselect: address 0 reads 01 (AMD), 1 reads 20 (Am29F010),
 //                until reset
 //    F0 anywhere, any time (but as a program's data): back to reading the array
-//  Programming and erasing finish at once (a status read then shows the data
-//  itself, which ends any DQ7 or DQ6 polling at its first read). A write out
-//  of sequence goes back to reading the array.
+//  Programming finishes at once (a status read then shows the data itself,
+//  which ends any DQ7 or DQ6 polling at its first read). An erase sweeps its
+//  bytes, one a clock (16 KB or 128 KB); meanwhile a read answers the
+//  embedded algorithm's status, as the data sheet's: DQ7 0 (the complement of
+//  the erased byte's), DQ6 toggling at each read, DQ3 1 (the erase has begun),
+//  the rest 0; writes are ignored. (Until 2026-10-22 a read answered FF during
+//  the sweep: Mac OS's driver took the erase as done at its first poll, and its
+//  program, arriving while the sweep held the RAM, was lost: no save at Shut
+//  Down.) A write out of sequence goes back to reading the array.
 //
 //  The second port loads and saves the image (Pippin_nvsave's kind): a byte a
 //  cycle by flash address; ext_wr marks the CPU's changes.
@@ -106,6 +112,7 @@ assign ld_q = ~ld_q_n;
 
 logic       rd_id, rd_er;
 logic [7:0] id_q;
+logic       er_tog;                     // DQ6: toggles at each read during an erase
 
 always_ff @(posedge clk) begin
 	changed <= 1'b0;
@@ -120,10 +127,11 @@ always_ff @(posedge clk) begin
 	if (sel & ~we) begin
 		rd_id <= st == F_ID;
 		rd_er <= er_on;
+		if (er_on) er_tog <= ~er_tog;
 		id_q  <= (fa[0] == 1'b0) ? MFR_ID : DEV_ID;
 	end
 
-	if (wr) begin
+	if (wr && !er_on) begin
 		// F0 resets, except as a program's data byte (any byte is data there)
 		if (d == 8'hF0 && st != F_PROG) st <= F_READ;
 		else case (st)
@@ -160,10 +168,11 @@ always_ff @(posedge clk) begin
 		prog_q <= 1'b0;
 		rd_id  <= 1'b0;
 		rd_er  <= 1'b0;
+		er_tog <= 1'b0;
 	end
 end
 
-wire [7:0] byte_q = rd_id ? id_q : rd_er ? 8'hFF : m_q;
+wire [7:0] byte_q = rd_id ? id_q : rd_er ? {1'b0, er_tog, 2'b00, 1'b1, 3'b000} : m_q;
 assign rdata = {rev8(byte_q), 24'h0};
 
 endmodule
