@@ -125,6 +125,18 @@ $(BUILD)/cdc/cdc_tb: $(RTL)/$(CPU_NAME)_memcdc.sv $(HERE)cdc_main.cpp $(HERE)Mak
 		> $(BUILD)/cdc/build.log 2>&1 || (cat $(BUILD)/cdc/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/cdc/build.log || true
 
+# The SDRAM controller against a behavioural model of the board (sdram_main.cpp,
+# from MacPPC7300's bench): random line and word requests, random byte enables
+sdram: $(BUILD)/sdram/sdram_tb
+
+$(BUILD)/sdram/sdram_tb: $(RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
+	@mkdir -p $(BUILD)/sdram
+	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -Mdir $(BUILD)/sdram -o sdram_tb \
+		-CFLAGS "-O2 -std=c++17" \
+		$(RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
+		> $(BUILD)/sdram/build.log 2>&1 || (cat $(BUILD)/sdram/build.log; false)
+	@grep -E '^%Warning' $(BUILD)/sdram/build.log || true
+
 lint:
 	@mkdir -p $(BUILD)
 	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)vector_dut.sv > $(BUILD)/vector_dut.sv

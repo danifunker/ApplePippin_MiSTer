@@ -45,7 +45,10 @@
 
 module Pippin_sdram
 #(
-	parameter int CLK_MHZ = 100                // the memory clock
+	parameter int CLK_MHZ = 100,               // the memory clock
+	parameter bit RMW     = 1'b1               // a partial word written by read-modify-write, both halfwords
+	                                           // unmasked (2026-10-22: on MiSTerss1 a masked halfword is written
+	                                           // as the zeros in its place, as if DQM did nothing); 0 masks with DQM
 )
 (
 	input  logic         clk,
@@ -175,6 +178,8 @@ logic [15:0] r_ud;
 logic [4:0]  beat;                     // beats captured
 logic [4:0]  issued;                   // WRITEs or READs issued
 logic        last_ref;                 // a refresh came between the last request and this one (the diagnostic word)
+logic        r_rmw;                    // a partial word: read first, then write it merged
+logic [3:0]  r_be0;                    // ... and the byte enables as given (the diagnostic word)
 
 wire [4:0]  nbeats  = r_line ? 5'd16 : 5'd2;
 
@@ -224,6 +229,8 @@ always_ff @(posedge clk) begin
 				r_line <= cpu_req & line;
 				r_hw   <= cpu_req ? {addr[26:5], line ? 3'b000 : addr[4:2], 1'b0} : up_hw;
 				r_be   <= be;
+				r_rmw  <= RMW & cpu_req & we & ~line & (be != 4'hF);
+				r_be0  <= be;
 				r_wd   <= wdata;
 				r_ud   <= up_d;
 				// ACTIVE: rank, bank, row
@@ -243,7 +250,7 @@ always_ff @(posedge clk) begin
 		S_ACT: begin
 			beat   <= 5'd0;
 			issued <= 5'd0;
-			if (t == 16'(T_RCD - 2)) state <= r_we ? S_WRITE : S_READ;
+			if (t == 16'(T_RCD - 2)) state <= (r_we & ~r_rmw) ? S_WRITE : S_READ;
 		end
 
 		// READ at the first column, and for a line again eight clocks later at
@@ -261,17 +268,29 @@ always_ff @(posedge clk) begin
 				if (r_line) rdata[255 - 16 * beat -: 16] <= dq_q;
 				else        rdata[31 - 16 * beat[0] -: 16] <= dq_q;
 				beat <= beat + 5'd1;
-				if (beat == nbeats - 5'd1) begin
+				if (beat == nbeats - 5'd1 && ~r_rmw) begin
 					ack   <= 1'b1;
 					acked <= 1'b1;
 				end
 			end
-			// precharge once the burst has left the bus (8 or 16 beats)
+			// precharge once the burst has left the bus (8 or 16 beats); a read-modify-
+			// write goes on to write the word, the enabled bytes replaced, in the open row
 			if (t == 16'(CAP) + (r_line ? 16'd16 : 16'd8)) begin
-				command     <= CMD_PRECHARGE;
-				SDRAM_A[10] <= 1'b0;
-				t           <= 16'd0;
-				state       <= S_PRE;
+				if (r_rmw) begin
+					r_wd[31:0] <= {r_be[3] ? r_wd[31:24] : rdata[31:24], r_be[2] ? r_wd[23:16] : rdata[23:16],
+					               r_be[1] ? r_wd[15:8]  : rdata[15:8],  r_be[0] ? r_wd[7:0]   : rdata[7:0]};
+					r_be   <= 4'hF;
+					r_rmw  <= 1'b0;
+					issued <= 5'd0;
+					t      <= 16'd0;
+					state  <= S_WRITE;
+				end
+				else begin
+					command     <= CMD_PRECHARGE;
+					SDRAM_A[10] <= 1'b0;
+					t           <= 16'd0;
+					state       <= S_PRE;
+				end
 			end
 		end
 
@@ -305,7 +324,7 @@ always_ff @(posedge clk) begin
 					// a word write answers with a diagnostic word (2026-10-21 22:50, the lost
 					// partial writes): the byte enables as served, a refresh before it, the
 					// WRITEs issued, the first column
-					if (~r_line) rdata[63:32] <= {r_be, last_ref, r_line, 2'b00, 3'b000, issued, 7'd0, r_hw[9:1]};
+					if (~r_line) rdata[63:32] <= {r_be0, last_ref, r_line, RMW, 1'b0, 3'b000, issued, 7'd0, r_hw[9:1]};
 					last_ref <= 1'b0;
 				end
 				command     <= CMD_PRECHARGE;
