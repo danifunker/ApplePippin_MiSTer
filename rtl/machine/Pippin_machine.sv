@@ -734,8 +734,9 @@ Pippin_adb adb (
 // answers, E2 when not; with E1 the early set-up (FFF04818) programs the one at 29 to 14.375 MHz
 // and nothing else, and Mac OS's Taos driver (FFE54F9C) talks to the one at 28 (I2C byte 50),
 // with E2 to 29 (52). dingusppc has no flash (E2) and one Athens at 29; MAME forces E1 and does
-// not use the pixel clock. Our flash answers as the real one, so 28 is the dot clock's: it was
-// missing, the driver's first write went unacknowledged and it gave up.
+// not use the pixel clock. Our flash answers as the real one, so the driver talks to 28: it was
+// missing, the driver's first write went unacknowledged and it gave up. Acknowledged, it writes
+// that one's P2_MUX2 = 02 and nothing else (the bench, 2026-10-22); Pippin_taosvideo's STD_DOT.
 logic [7:0] athens29_d2, athens29_n2, athens29_p2;
 logic       athens29_set;
 Pippin_athens #(.ADDR(7'h29)) athens (

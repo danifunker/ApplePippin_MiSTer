@@ -41,8 +41,9 @@ module Pippin_taosvideo
 	parameter int unsigned CLKV_HZ  = 100_000_000,
 	parameter logic [28:0] DDR_BASE = 29'h0600_0000,    // byte 3000_0000, in 64-bit words
 	// 1: the dot clock is always the console's standard line rate times Taos's line (below);
-	// 0: that until Mac OS programs Athens (athens_set), then half Athens's output
-	parameter bit          STD_DOT  = 1'b0
+	// 0: that until Mac OS programs Athens (athens_set), then half Athens's output (not yet
+	// right: the driver writes only P2_MUX2, below)
+	parameter bit          STD_DOT  = 1'b1
 )
 (
 	input  logic         clk,             // the video clock: the memory clock
@@ -129,6 +130,10 @@ wire [11:0] pitch = row_words[31:20];
 // is the clock / (horizontal total x vertical total in half-lines)), and ours step two half-lines
 // a line, so our dot is half Athens's output: 12.27 MHz, 15,734 Hz on 780. Until the driver has
 // written it (the boot logo; that chip's power-up output is not known) the standard rate as above.
+// The bench (run28) shows the driver writing only P2_MUX2 = 02 to it (PLL, post-divider 2) and
+// 07 = 82 to the one at 29: D2 and N2 stay at power-up, which nobody models (dingusppc 2 and 2:
+// 5 MHz here; MAME 0). Power-up values of D2 0B, N2 1B (what the E2 path writes) would make the
+// NTSC clock exactly (20 x 27 / 11 / 2 = 24.545 MHz), unproven; so STD_DOT stays 1 for now.
 localparam longint unsigned XTAL = 20_000_000;
 logic [1:0]  set_s;
 always_ff @(posedge clk) set_s <= {set_s[0], athens_set};
