@@ -137,6 +137,18 @@ $(BUILD)/sdram/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv 
 		> $(BUILD)/sdram/build.log 2>&1 || (cat $(BUILD)/sdram/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/sdram/build.log || true
 
+# The same with the controller's RMW off (DQM masking): against the model's --dqm-quirk it
+# must fail, which shows the quirk test can see the board's fault
+sdram-normw: $(BUILD)/sdram-normw/sdram_tb
+
+$(BUILD)/sdram-normw/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
+	@mkdir -p $(BUILD)/sdram-normw
+	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -GRMW=0 -Mdir $(BUILD)/sdram-normw -o sdram_tb \
+		-CFLAGS "-O2 -std=c++17" \
+		$(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
+		> $(BUILD)/sdram-normw/build.log 2>&1 || (cat $(BUILD)/sdram-normw/build.log; false)
+	@grep -E '^%Warning' $(BUILD)/sdram-normw/build.log || true
+
 lint:
 	@mkdir -p $(BUILD)
 	@sed 's/DSPPC604/$(CPU_NAME)/g' $(HERE)vector_dut.sv > $(BUILD)/vector_dut.sv
@@ -150,4 +162,4 @@ lint-machine:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all core machine flash cdc lint clean
+.PHONY: all core machine flash cdc sdram sdram-normw lint clean

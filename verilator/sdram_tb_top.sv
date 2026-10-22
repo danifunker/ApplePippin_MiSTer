@@ -3,6 +3,9 @@
 // sdram_main.cpp (the data bus split into its two directions).
 
 module sdram_tb_top
+#(
+	parameter bit RMW = 1'b1                 // Pippin_sdram's (0: partial words masked with DQM)
+)
 (
 	// the CPU's side of the crossing
 	input  logic         clk_a,
@@ -51,7 +54,7 @@ DSPPC603_memcdc cdc (
 	.b_req, .b_we, .b_line, .b_addr, .b_be, .b_wdata, .b_ack, .b_rdata
 );
 
-Pippin_sdram #(.CLK_MHZ(100)) sdram (
+Pippin_sdram #(.CLK_MHZ(100), .RMW(RMW)) sdram (
 	.clk(clk_b), .init, .ready,
 	.req(b_req), .we(b_we), .line(b_line), .addr(b_addr[26:2]), .be(b_be), .wdata(b_wdata),
 	.ack(b_ack), .rdata(b_rdata),

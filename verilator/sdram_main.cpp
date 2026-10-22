@@ -4,7 +4,13 @@
 // written byte by byte, against a behavioural model of the SDRAM board.
 //
 //   sdram_tb [--count N] [--pa PS] [--pb PS] [--upload BYTES] [--seed S] [--show N]
-//            [--module 32|64|128]
+//            [--module 32|64|128] [--dqm-quirk]
+//
+// --dqm-quirk: a WRITE beat with both DQMs high writes zeros in place of
+// leaving the halfword alone, as MiSTerss1's module does (2026-10-22, the
+// Pippin's stall: docs/prompts/LOG_pippin_board_20261022.md). With the
+// controller's RMW (the default) no such beat is issued and the bench
+// passes; built with RMW = 0 (make sdram-normw) it must fail.
 //
 // The model is a MiSTer SDRAM board (--module, 128 MB by default): 128 MB is
 // two ranks of 4 banks x 8192 rows x 1024 columns x 16 bits, nCS low
@@ -69,6 +75,8 @@ void fail(long cyc, const char* fmt, ...) {
 }
 
 uint8_t init_byte(uint32_t a) { return (uint8_t)((a * 2654435761u) >> 24); }
+
+static bool dqm_quirk = false;
 
 struct Chip {
 	double tck;                                   // SDRAM clock period, ns
@@ -152,6 +160,7 @@ struct Chip {
 			} else {
 				if (!fpga_drives) fail(n, "WRITE without the data bus driven");
 				uint16_t& w = mem[index(r, ba, B.row, col)];
+				if (dqm_quirk && dqm == 3) w = 0;
 				if (!(dqm & 2)) w = (uint16_t)((w & 0x00FF) | (fpga_dq & 0xFF00));
 				if (!(dqm & 1)) w = (uint16_t)((w & 0xFF00) | (fpga_dq & 0x00FF));
 				B.t_wr = n;
@@ -233,7 +242,8 @@ int main(int argc, char** argv) {
 			RANKS = mb == 128 ? 2 : 1;
 			COLS = mb == 32 ? 512 : 1024;
 		}
-		else { std::printf("usage: sdram_tb [--count N] [--pa ps] [--pb ps] [--upload BYTES] [--seed S] [--show N] [--module 32|64|128]\n"); return 2; }
+		else if (a == "--dqm-quirk") dqm_quirk = true;
+		else { std::printf("usage: sdram_tb [--count N] [--pa ps] [--pb ps] [--upload BYTES] [--seed S] [--show N] [--module 32|64|128] [--dqm-quirk]\n"); return 2; }
 	}
 	if (pb != 10000) std::printf("note: the controller is built for 100 MHz; its timings scale with CLK_MHZ\n");
 
