@@ -389,7 +389,36 @@ from MacPPC7300, with the chip model) passes with it on 32 and 128 MB
 boards. run25 (the bench with the memory-port trace) shows the same page
 uncached in the bench with every write landing.
 
-## What is running / where things stand (00:15)
+## 00:41: FIXED — Super Marathon boots on the board
+
+Build 29 (bfcfb4f + the Makefile fix, slack -0.647): the memory test's
+cache-inhibited pattern passes (`scratch/tr_mt7.txt`: status 5, 0 errors;
+200,001 with DQM masking), and **Super Marathon boots to its "CHOOSE ONE:
+Marathon / Marathon 2" launcher** (`scratch/marathon_boots_20261022_0041.png`,
+`scratch/tr_boot29.bin`, `.txt`: at 15.791 s the TMTask's line reads
+`8000ffcf` after InsTime's byte store — tmAddr's FFCF survives the masked
+half that used to zero it). The core is on .92 (`_Console/BandaiPippin_
+20261022.rbf` = `scratch/BandaiPippin_rmw29.rbf`), the disc running.
+
+Loose ends for the morning:
+- The instruments are all still in (PERF's 4,096-pair capture RAM with the
+  line watch, the kind-19 drain, the memory-port trace, the dense window,
+  the extra kind-4 records, the RAM-sized memory test): a release build
+  wants PERF's capture off (or DBG_WATCH 0 and a smaller RAM) and TRACE_INT
+  0; the slack went from +0.3 to -0.65 with them (the fault never depended
+  on timing, but the margin should come back).
+- Why DQM does nothing on MiSTerss1 is not explained (the logic, the
+  timing and the pins all check out; see 00:00 above): a second board or
+  a scope on DQML/DQMH would say whether it is this module. MacPPC7300's
+  identical controller has the same latent problem on this board.
+- Regression done: `make lint` clean, `make sdram` (the controller against
+  the chip model, random byte enables) PASS on 32 and 128 MB boards, run25
+  (the bench boot, 420 M instructions) PASS; run26 = the lockstep boot
+  (run5) on the final tree started 00:45 (`runrep26.txt`).
+- Then: the game itself (controller input through the AppleJack, sound),
+  and open problem 2 (Athens's video clock) below.
+
+## What is running / where things stand (00:15, superseded)
 
 - **Quartus: build 29** = bfcfb4f + the Makefile fix (the RMW controller,
   the memory test with the uncached pattern, the traces), started 00:12
