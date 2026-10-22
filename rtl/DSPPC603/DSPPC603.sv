@@ -3448,17 +3448,26 @@ if (PERF != 0) begin : g_perf
 	logic [31:0]  cap_ea;
 	logic         cap_we;
 	logic [193:0] cap_q;
+	// The data of the last access answered, in the word's place since 2026-10-21 20:40
+	// (the word is in the ROM: capview.py reads it back): a load's value as the register
+	// gets it (so a misaligned word whole), a store's first word as the cache merges it
+	// (the bytes in their places in the word, presented the cycle after the grant).
+	logic [31:0]  cap_data;
+	logic         cap_st_q;
 	always_ff @(posedge clk) begin
 		dbg_t  <= dbg_t + 16'd1;
 		dbg_ev <= 1'b0;
 		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; end
+		cap_st_q <= mu_req & mu_gnt & mu_we;
+		if (cap_st_q) cap_data <= mu_wdata;
+		if (mu_resp & (mo_valid ? mo_load : mem_load)) cap_data <= mu_rdata[31:0];
 		if (~cap_on & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
 			cap_on <= 1'b1; cap_wr <= '0; cap_half <= 1'b0;
 		end
 		if (cap_on & ex_leave) begin
-			if (~cap_half) begin cap_a <= {cap_we, cap_ea, ex_insn, ex_pc}; cap_half <= 1'b1; end
+			if (~cap_half) begin cap_a <= {cap_we, cap_ea, cap_data, ex_pc}; cap_half <= 1'b1; end
 			else begin
-				cap_ram[cap_wr[11:0]] <= {cap_we, cap_ea, ex_insn, ex_pc, cap_a};
+				cap_ram[cap_wr[11:0]] <= {cap_we, cap_ea, cap_data, ex_pc, cap_a};
 				cap_half <= 1'b0;
 				cap_wr   <= cap_wr + 13'd1;
 				if (cap_wr == 13'd4095) begin cap_on <= 1'b0; cap_full <= 1'b1; cap_rd <= '0; end
