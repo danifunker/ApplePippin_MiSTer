@@ -2175,6 +2175,21 @@ def memtest_image():
           D(36, 13, 8, 0),                                                                  # A dirty
           D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
           D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          # ... and on a line a dcbz allocated (22:10: the Memory Manager's native BlockZero
+          # may have cleared the TMTask's block so): A out then dcbz, the misaligned store at
+          # once, read back; A out then dcbz, the emulator's sequence; A in (clean, then dirty)
+          # then dcbz, the emulator's sequence
+          X(0, 0, 8, 86), X(0, 0, 0, 598), X(0, 0, 8, 1014),                                # A out, dcbz A
+          D(36, 16, 8, 22), D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          X(0, 0, 8, 86), X(0, 0, 0, 598), X(0, 0, 8, 1014),
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          X(0, 0, 8, 86), X(0, 0, 0, 598), D(32, 14, 8, 0), X(0, 0, 8, 1014),               # A in clean, dcbz
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
+          D(36, 13, 8, 0), X(0, 0, 8, 1014),                                                # A dirty, dcbz
+          D(32, 14, 17, 0), D(36, 16, 8, 22), D(40, 15, 17, 2),
+          D(32, 14, 8, 22), cmplw(14, 16), ("bc",) + BNE + ("ctbad",),
           ("label", "ctnext"),
           D(14, 9, 9, 1), cmplw(9, 10), ("bc",) + BLT + ("ct",),
           D(14, 3, 0, 6), D(36, 3, 31, 0), B_SELF,
