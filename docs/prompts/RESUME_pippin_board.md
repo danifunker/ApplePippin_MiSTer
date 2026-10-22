@@ -1,14 +1,11 @@
-# Resume: the Pippin on the board (rewritten 2026-10-22 04:10, at v0.1.0)
+# Resume: the Pippin on the board (rewritten 2026-10-22 19:00)
 
-Resume the Bandai Pippin MiSTer core's work on the board. **State: released
-v0.1.0.** The stall that blocked every disc (~16 s into the boot) is found
-and fixed; Super Marathon, Racing Days, Power Rangers Zeo and Macintosh on
-Pippin boot to their first interactive screen; the keyboard and the mouse
-reach Mac OS. Read this file first. The hunt's evidence, entry by entry,
-is in `LOG_pippin_board_20261021.md` (the morning) and
-`LOG_pippin_board_20261022.md` (the evening and the night); the plan is
-`docs/pippin_plan.md`, the titles tried `docs/compatibility.md`, the
-MacPPC7300 candidate fixes `docs/fix_macppc7300.md`.
+Resume the Bandai Pippin MiSTer core's work. **State: v0.1.0 released
+(04:00); since then the afternoon's work below, not yet a release.** Read
+this file first. The afternoon's evidence is in `LOG_pippin_board_20261022_pm.md`;
+the stall's hunt in `LOG_pippin_board_20261021.md` and `LOG_pippin_board_20261022.md`;
+the plan is `docs/pippin_plan.md`, the titles and tests `docs/compatibility.md`,
+the MacPPC7300 candidate fixes `docs/fix_macppc7300.md`.
 
 ## Rules the user set (follow them)
 
@@ -53,155 +50,126 @@ MacPPC7300 candidate fixes `docs/fix_macppc7300.md`.
   `python3 syn/mister.py trace-capture SECONDS` before loading, then
   `scp root@192.168.99.92:/tmp/trace.bin OUT.bin` once `/tmp/trstream.log`
   says `records`, then `python3 syn/mister.py trace --file OUT.bin > OUT.txt`.
+  The OSD reopens on the page last used: screenshot before navigating. The
+  KVM records the HDMI audio (`record 25s F.wav`, no ffmpeg): sound is
+  checkable remotely. It cannot hold a mouse button (no Mac menus); Alt is
+  Command; `key compose` (the PC Menu key) is the ADB power key (Mac OS's
+  shut-down dialog, Return = Shut Down). The DDR3 trace ring survives core
+  reloads, so a capture holds older sessions' records too.
+- **Boards are shared**: the Sun-3 session uses .143 (MiSTerPi) and stays
+  off .92; Quartus builds queue on the same lock.
 - Do not modify the MacPPC7300 repository; candidate fixes go to
   `docs/fix_macppc7300.md`.
 - The core is **BandaiPippin** (Quartus project, `_Console/BandaiPippin_
   <date>.rbf`); its OSD name is **Pippin** (`games/Pippin`, `config/Pippin.*`).
 
+## The user's priorities (2026-10-22, after v0.1.0)
+
+Phase 0 the instruments behind switches (done) → 1 Grand Central's other
+interrupt sources (done) → 2 Athens's video clock (cause found, one value
+open) → 3 the 603's page-crossing alignment rule (branch `align603`, in
+test) and regression tests (done). Then other ROMs, RAM sizes, saves (done,
+saves fixed). The compatibility sweep (playing, CD audio) later. The clock
+goes up (66/70 MHz) later. **The user is away from the board and will say
+when they are there** (gamepad: the AppleJack; listening).
+
 ## Where things are
 
-- Repo `~/repos/ApplePippin_MiSTer`, branch `pippin`, pushed to origin and
-  pulled on the Mac. Main_MiSTer worktree `~/repos/Main_MiSTer-pippin`
-  (`pippin-cdrom`; never switch the shared `~/repos/Main_MiSTer`). On .92:
-  `/media/fat/MiSTer` is the consolidated Main; `games/Pippin` has boot.rom
-  (Kinka 1.3), the other ROMs, Super Marathon (CUE/BIN), Racing Days,
-  Macintosh on Pippin, Power Rangers Zeo (CHD); `config/Pippin.s4` mounts
-  the last disc chosen at every core start (Macintosh on Pippin now).
-- Build settings (`BandaiPippin.sv`): `CPU_MHZ = 58` (58.333 MHz); the
-  tree is at the release's `TRACE = 0`, `PERF = 0` (slack +0.201). A
-  debug build sets `TRACE = 1`, `PERF = 1` (the instruments below; slack
-  then -0.3 to -0.65, which never mattered to the fault but is no release).
-  `Pippin_machine` `TRACE_INT = 1` stays (it only gates trace records).
-- Releases: `releases/<rbf>` committed, a tag, `gh release create` with the
-  rbf and `releases/README.md` as the notes (v0.1.0 = build 30 = 64bdeb2).
+- Repo `~/repos/ApplePippin_MiSTer`, branch `pippin` (pushed; the Mac pulls),
+  plus `align603` (pushed, under test on the Mac). Main_MiSTer worktree
+  `~/repos/Main_MiSTer-pippin` (`pippin-cdrom`). On .92: `games/Pippin` has
+  boot.rom (Kinka 1.3), Kinka 1.0/1.2/1.3/GM flash, the four discs, and
+  `Pippin flash.sav` (128 KB, mounted on slot 2 through Advanced > Save flash;
+  `config/Pippin.s2`); `config/Pippin.s4` mounts the last disc (Macintosh on
+  Pippin now). `_Console/BandaiPippin_20261022.rbf` on .92 is **build 34**
+  (53670e3, a debug build), not v0.1.0 (that is `releases/` and
+  `scratch/BandaiPippin_release30.rbf`).
+- Builds today (`scratch/BandaiPippin_<commit>.rbf`, logs `scratch/buildNN_*.log`):
+  31 2f9b0eb release flags (-0.039, not on the board); 32 9f5e92b debug
+  (+0.274); 33 3731652 debug (+0.128); 34 53670e3 debug (-0.023, on .92).
+- `BandaiPippin.sv` now: `TRACE = 1`, `TRACE_FL = 1` (debug). **A release sets
+  `TRACE = 0`, `TRACE_FL = 0`** (and keeps `PERF`, `CAPTURE`, `DENSE`,
+  `TRACE_RAM` at 0).
+- The Mac (`~/pippin_bench`): `chainram.sh` (the bench at 5/13/21 MB to 400 M,
+  `ram5/13/21.txt`, MemTop at 108: 5 MB gives 004EC000 = 5,040K, Kickstart's
+  figure), then `chainalign.sh` (checks out `align603`: `run_core.py` →
+  `runcore_align.txt`, then the lockstep boot run29; back to `pippin`;
+  `chainalign.txt` ends with `done`).
 
-## The instruments (all in the working tree, all decoded by `syn/mister.py trace`)
+## The instruments (switches in `BandaiPippin.sv`; all decoded by `syn/mister.py trace`)
 
-- Kind 4: with TRACE_INT, every write to Grand Central's interrupt registers
-  and the VIA, **every VIA read**, every SWIM3 and ESCC access and the
-  floppy DMA channel, the memory test's DBG registers, and one in 256 of
-  the interrupt registers' reads. Kind 16: the interrupt state every 2^22
-  cycles; **kind 17: the same at every change of the events or the CPU's
-  interrupt line**. Kind 18: every block of the card the SCSI target gets
-  (LBA, XOR: `syn/cdxor.py IMAGE.BIN --check TRACE.txt`). The trace ring
-  holds 16,384 records (`Pippin_trace`, `trstream.py`, `mister.py`,
-  `core_main.cpp`).
-- Kind 14: DSPPC603's PERF sample every 8,192 cycles (256 in the dense
-  window: 20 ms after SWIM3's interrupt is enabled, `Pippin_system`
-  `cpu_dbg_dense` from int_dbg[115]): PC, instruction, MSR, the last
-  exception, **the last load's effective and physical address**.
-  `syn/tmview.py TRACE.txt [after] [before]` (the Time Manager's view from
-  the SWIM3 mask write), `syn/pctrail.py TRACE.txt [after] [before]` (the
-  samples labelled by ROM routine: the Time Manager, the floppy driver).
-- **Kind 19: the capture** (DSPPC603 g_perf): from the first data access
-  the cache takes with EA `DBG_TRIG_EA` (a localparam, now 0xFFCF7B8C, the
-  emulator's fetch of the floppy driver's prime routine), every instruction
-  leaving EX (PC, word, the last data access's EA and write bit), 8,192 of
-  them in a RAM of 4,096 pairs, drained afterwards as one record per 64
-  cycles. `syn/capview.py TRACE.txt [FIRST [COUNT]]` prints the stream
-  disassembled (Retro68's `powerpc-apple-macos-objdump`). The 68k
-  emulator's RAM image (PCs 68xxxxxx) is the ROM at offset +0x300000;
-  the ROM is disassembled with `objdump -b binary -EB -m powerpc:common
-  --adjust-vma=0xffc00000` (PPC) and `m68k-apple-macos-objdump -b binary
-  -m m68k --adjust-vma=0xffc00000` (68k), both in
-  `~/repos/Retro68-build/toolchain/bin/`.
-- The board's memory test (Advanced > Boot: Memory test, Apply and reset;
-  `verilator/progs.py memtest` generates `Pippin_bootrom.sv`): one pass
-  over the contiguous 4 MB, the RAM zeroed, then the castout phase
-  (status 5: castout and dcbf patterns, same-line misaligned loads, the
-  TMTask line's own store sequence), status 6 at the end; its DBG writes
-  are in the trace.
-- The bench (`verilator/run_machine.py`, the Mac): `--mem-wait N` (the
-  SDRAM stand-in's latency; the real controller takes ~24 memory clocks a
-  line), `--stall P`, `--cpu-mhz`, `--disk-latency`, `--clock`, `--ram-fill
-  SEED`, `--joy MODE` (5 = the AppleJack), `--boot memtest` (with
-  `--rom ""`), `--trace-out` (the same records as the board's trace).
+- `TRACE` (the DDR3 trace) with `TRACE_INT` (Pippin_machine, always 1: GC's
+  interrupt registers, the VIA, SWIM3, ESCC, the memory test's DBG; kinds 4,
+  16, 17), the SCSI target's blocks (kind 18).
+- `TRACE_FL` (2026-10-22): the save flash's CPU accesses (word and line), and
+  at 4F000000 + kind (1 an image block loaded, 2 an image block read for a
+  save, 3 the CPU programmed/erased, once per run): `FLASH` lines.
+- `PERF` (kind 14 samples), `DENSE` (256-cycle samples for 20 ms from
+  SWIM3's interrupt enable), `CAPTURE` (DSPPC603's instruction capture, kind
+  19, `syn/capview.py`; `CAP_TRIG_EA`, `CAP_WATCH`, `CAP_WATCH_A`), `TRACE_RAM`
+  (one RAM line at the memory port, `TRACE_RAM_A`, with Pippin_sdram's `DIAG`
+  word). All 0 now.
+- The memory test (Advanced > Boot), the bench (`verilator/run_machine.py`,
+  options as before), `make sdram` / `make sdram-normw` with `--dqm-quirk`,
+  `make flash`, machref (`~/.cache/applepippin/machref/machref`, here; with
+  `--machine pippin --cpu 603 --pvr 00030302 --ram 4 --set rambank1_size=4
+  --set rambank2_size=1 --set rambank3_size=0 --set rambank4_size=0`;
+  `--trace-from 1`, not 0; `MACHREF_LOG=0` shows INFO lines such as
+  ATHENSLOG, the logging still in the cached dingusppc clone's athens.cpp).
 
-## The stall, resolved (the whole story in LOG_pippin_board_20261022.md)
+## What changed today (details in the pm log)
 
-Every title stalled ~16 s in: the floppy driver's init primed a Time
-Manager task (the 500 ms disk-insertion poll), then its wait found the
-task's `tmAddr` zero ("already fired"), primed it again, and the second
-InsTime linked the task to itself: the Time Manager's walk looped with
-interrupts masked. `tmAddr` was zero because **the TMTask lives in a
-cache-inhibited page**, so its byte and misaligned stores are partial
-SDRAM word writes, and **on MiSTerss1 a WRITE beat with both DQMs high is
-executed anyway, as zeros** (a single-byte mask works; the Sun-2 core's
-controller never issues a fully masked halfword): InsTime's byte store
-zeroed `FFCF`, the tmCount store zeroed `7BA2`. Proven by the memory test's
-cache-inhibited pattern (200,001 failing rounds with DQM masking, 0 with
-the fix) and the memory-port trace of the line. **The fix: `Pippin_sdram`
-writes a partial word by read-modify-write (`RMW = 1`, bfcfb4f).** Why the
-chip ignores a fully masked beat is not explained (the logic, the timing
-report and the pins all check out); MacPPC7300's identical controller has
-the same latent problem on this board. The hunt's instruments remain in
-the tree: the capture (`DBG_WATCH`, `DBG_TRIG_EA`, hard-wired to the
-TMTask), the memory-port trace (`TRACE_RAM_LINE`), the memory test's
-status-5 patterns, the SDRAM bench (`make sdram`), `syn/boardcap.sh`.
-
-## What works, what is missing (2026-10-22)
-
-- **Boots** (build 29/30): the four titles above; mount another disc from
-  the OSD's first item (the file browser), then reload the core (the core
-  list opens on the last entry used, so `F12, right, enter, enter`).
-- **Input**: keyboard and mouse verified in the Finder (misterkvms-cli's
-  `key`, `mouse move`; Mac OS accelerates relative moves ~5x; `mouse pos`
-  is not absolute on this core). The **AppleJack** (OSD Input >
-  Controller, the MiSTer gamepad through Pippin_adb) is implemented but
-  untested: it needs a real gamepad. In the games the system pointer
-  sits at the top-left; they take the pad.
-- **Sound**: AWACS and CD audio (Pippin_cdaudio, through the Main's Mac
-  CD layer) mixed to HDMI, the MT32-pi option — MacPPC7300's path; the
-  boot chime's DMA runs. **Not verifiable remotely** (the KVM stream
-  carries no audio): listen on the board. Racing Days' menu runs no sound
-  DMA, so its music would be CD audio, untested.
-- **Not yet done**: playing a title through, CD audio, the flash save,
-  Kickstart (needs the signed `pippin-kickstart-1.1.iso`; not downloaded).
-- **Open problem: Athens never gets Mac OS's video clock** (below).
-- **Timing**: 58 MHz; 70 MHz fails by 1.8-2.7 ns (Pippin_sdram's and the
-  CPU's fq_a_mem_r/cr[5] paths). RAM 5 MB; the OSD's 13/21 MB are
-  MacPPC7300's, untested on the Pippin's map.
+- **Phase 0** (2f9b0eb): the hunt's instruments behind the switches above.
+- **1, interrupts** (1156710, `INT_REPORT`): in 68k mode an access leaving
+  MESH's, SWIM3's, the ESCC's, MACE's or Curio's line high is an event (the
+  VIA's rule); every DMA interrupt is an event (dingusppc's ack_dma_int).
+  run28 (lockstep boot) PASS; the titles boot.
+- **2, Athens** (cd2424d, 9f5e92b): the ROM's flash probe (E1 at F00DFFFA
+  when the save flash answers) sends Mac OS's Taos driver to the **second
+  Athens at I2C 28**, which we lacked. Now present; the driver writes only
+  its P2_MUX2 = 02. Its power-up D2/N2 are unknown (0B/1B would give NTSC's
+  24.545 MHz exactly), so `STD_DOT = 1` (the standard rate) stays.
+- **3, regressions** (88ba866): the SDRAM bench's `--dqm-quirk` (PASS with
+  RMW, FAIL without: 1,255 differences).
+- **Saves fixed**: the Flash! volume lives in VRAM (F00E0000-F00FFFFF; the
+  68k driver FFCCE4A0-FFCCEC26) and is written back at Shut Down (erase,
+  poll, program). Our flash answered FF during its erase sweep, so the
+  driver's program was lost (38ac0a1 answers the status: DQ7 0, DQ6
+  toggling, DQ3 1). And the DDR3 kept the VRAM over core reloads, so an
+  unsaved volume survived (53670e3 `VRAM_CLEAR` at FPGA configuration).
+  Build 34: folder made, Shut Down, image written, core reloaded, folder
+  back.
+- **Board results**: all four ROMs boot Macintosh on Pippin; 13 and 21 MB
+  boot (Super Marathon at 21 MB too); the chime plays on HDMI
+  (`scratch/boot_chime_v0.1.0_20261022.wav`); **CD audio is silent** (Racing
+  Days's PLAY AUDIO MSF accepted, the menu records as zeros).
 
 ## Next steps
 
-1. With a gamepad on the board: the AppleJack in Super Marathon / Racing
-   Days (does the pad steer, do the buttons work; "Stick moves pointer").
-   Listen for sound (the chime, Racing Days' CD audio).
-2. Play each title a few minutes; note what breaks in `docs/compatibility.md`.
-3. Athens's video clock (open problem below).
-4. The DQM quirk: a scope on DQML/DQMH at the module during a fully masked
-   WRITE, or the same memory test on another MiSTer (.94 answers SSH with
-   a changed host key and has no KVM), to know whether it is this module;
-   then MacPPC7300's controller gets the same RMW.
-5. Housekeeping: the hunt's instruments could move behind a parameter
-   (the capture RAM costs 4,096 x 194 bits), the memory test's status-5
-   patterns are permanent regression tests.
-
-## Open problem 2: Athens never gets Mac OS's video clock
-
-On the board and in the bench the ROM sends Cuda `01 22 52 03 01`, `01 22
-52 01 10`, `01 22 52 02 2E` (14.375 MHz) at the start, then one write to
-I2C 0x28 (no device) and `07 82`, and no Athens write after that; Mac OS's
-driver never reprograms Athens. dingusppc's Pippin takes a different early
-branch because it finds no save flash (ours has the AMD ID at 40000000, as
-the real machine). `STD_DOT` in `Pippin_taosvideo` keeps the picture right
-meanwhile. A logging change sits in the cached dingusppc clone
-(`~/.cache/applepippin/dingusppc/devices/common/clockgen/athens.cpp`,
-"ATHENSLOG"): revert with `git -C ... checkout` when done.
+1. When `chainalign.txt` says `done`: `run_core.py` and run29 PASS → merge
+   `align603` into `pippin` (fast-forward or merge commit), push. If
+   run_core's lockstep random programs with translation trip on the new
+   exception (dingusppc does not take it), hand it to the reference there
+   as `core_main.cpp`'s machine branch does.
+2. The RAM-size numbers (`ram13.txt`, `ram21.txt`: MemTop) into
+   `docs/compatibility.md` (targets 13,312K and 21,504K, About This Mac).
+3. A release build: `TRACE = 0`, `TRACE_FL = 0`, commit, build, the four
+   titles and a save round trip on .92, then v0.2.0 (`releases/`, tag,
+   `gh release create` with `releases/README.md` updated: saves, ROMs, RAM,
+   the chime; CD audio silent).
+4. CD audio (the compatibility sweep): why Racing Days's PLAY AUDIO is silent
+   (Pippin_cdaudio, the Main's Mac CD layer, AWACS's CD input).
+5. Athens 28's power-up D2/N2 (a real Pippin, or Apple's data), then
+   `STD_DOT = 0`.
+6. With the user at the board: the AppleJack in the games.
+7. Later: the clock (70 MHz fails by 1.8-2.7 ns), Kickstart (needs the user's
+   yes to download), the DQM quirk on another board, the PVR (the real unit's
+   is 00030302; ours 00030100; nothing in the ROM depends on the revision).
 
 ## Other open items
 
-- The AppleJack changes the ROM's ADB address resolution (a side effect seen
-  in the bench, `LOG_pippin_board_20261021.md`); harmless so far.
-- Kickstart (`~/repos/Pippin_Kickstart`) needs the signed
-  `pippin-kickstart-1.1.iso` from blitter.net; the user has not said yes to
-  downloading it.
-- The 603e's page-crossing alignment rule (`docs/DSPPC603_notes.md`), not
-  implemented.
-- Grand Central's other sources (MESH, SCCs) have the same "event only at a
-  line change" exposure the VIA had.
-- Timing: 70 MHz fails by 1.8-2.7 ns; the worst paths are Pippin_sdram's at
-  100 MHz (0.012 ns) and the CPU's fq_a_mem_r/cr[5] (0.14 ns).
-- The plan's remaining days (`docs/pippin_plan.md`): CD audio (Racing Days)
-  and compatibility; the release is done (v0.1.0).
-
+- The AppleJack changes the ROM's ADB address resolution (bench side effect,
+  `LOG_pippin_board_20261021.md`); harmless so far.
+- MacPPC7300's controller has the same latent DQM problem (`docs/fix_macppc7300.md`).
+- Two untracked screenshots in the repo root (`s7_boot.png`, `s7_rom_70s.png`,
+  2026-10-21): the user has not said whether to keep them.

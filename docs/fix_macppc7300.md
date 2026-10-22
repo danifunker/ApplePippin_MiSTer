@@ -28,6 +28,8 @@ Newest last.
 | 13 | ppctest's supervisor PTEs: WIMG shifted twice (`super603.py`'s copy fixed) | test generator | Check MacPPC7300's own PTE helpers |
 | 14 | Main_MiSTer: a CHD with an unstored pregap mounts unlike its CUE | Main (Mac CD layer) | Yes: the same Main code serves MacPPC7300's CD |
 | 15 | Grand Central in 68k mode: the VIA's line, high, must keep reporting events (a VIA interrupt was lost) | machine | Yes: the same Pippin_gc/MacPPC7300_gc code |
+| 16 | Grand Central in 68k mode: the other devices' lines (MESH, SWIM3, ESCC, MACE, Curio) reported at an access, every DMA interrupt an event | machine | Yes: the same code; untested there |
+| 17 | The SDRAM bench's `--dqm-quirk` (a fully masked WRITE beat writes zeros, as on MiSTerss1) | bench | Yes: MacPPC7300's controller has the same latent problem |
 
 ## The items
 
@@ -207,6 +209,31 @@ Newest last.
   line looked at the clock after the report) in place of `via_new`.
 - MacPPC7300: the same code (`MacPPC7300_gc`): the same hazard, timing-
   dependent (the bench never hit it here either).
+
+### 16. Grand Central: the other sources' events in 68k mode (1156710)
+
+- What: `Pippin_gc` `INT_REPORT` (default 1): in 68k mode an access to MESH,
+  SWIM3, the ESCC's channels, MACE or Curio that leaves the device's line high
+  the clock after is an event (item 15's rule for the VIA), so a handler that
+  leaves a second condition pending is interrupted again after the
+  NanoKernel's clear-all; and a DMA channel's interrupt is an event at every
+  one, also while its level is still set (dingusppc's `ack_dma_int`).
+- Why: dingusppc reports these lines only at a change, so it never shows the
+  hazard; the Pippin's bench saw MESH's line high with no event 124 times in a
+  boot, each ended by the line falling, so it is a latent exposure, not a seen
+  failure.
+- Checked: the Pippin's lockstep boot (run28) PASS; four titles boot on the
+  board.
+- MacPPC7300: the same code; the same exposure.
+
+### 17. The SDRAM bench's DQM quirk (88ba866)
+
+- What: `sdram_main.cpp --dqm-quirk`: a WRITE beat with both DQMs high writes
+  zeros (MiSTerss1's module, `LOG_pippin_board_20261022.md`); `make sdram-normw`
+  builds the controller with `RMW = 0`.
+- Checked: RMW passes it (32, 128 MB); RMW = 0 fails it (1,255 differences).
+- MacPPC7300: its controller masks with DQM; with this model its bench would
+  show the board's fault.
 
 ## Not for MacPPC7300
 
