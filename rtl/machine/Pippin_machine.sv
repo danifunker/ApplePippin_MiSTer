@@ -895,12 +895,34 @@ always_ff @(posedge clk) begin
 	if (reset) bt_pend <= 1'b0;
 end
 wire bt_ev = dev_ack & bt_pend;
+// ... and every word access (not a line: uncached) the CPU makes to one RAM line, as the
+// memory port serves it (2026-10-21 22:50: the floppy driver's TMTask is in a cache-
+// inhibited page and two halves of a misaligned store never reach the SDRAM): the
+// request as granted, the answer's data for a read, the SDRAM controller's diagnostic
+// word (its rdata[63:32]) for a write, in bytes 16-19 of the record
+localparam logic [31:5] TRACE_RAM_LINE = 27'(32'h00081C60 >> 5);
+logic        mw_pend, mw_we;
+logic [31:0] mw_a, mw_wd;
+logic [3:0]  mw_be;
+always_ff @(posedge clk) begin
+	if (grant_cpu & ~c_line & (a[31:5] == TRACE_RAM_LINE)) begin
+		mw_pend <= TRACE_INT != 0;
+		mw_a    <= a;
+		mw_we   <= c_we;
+		mw_wd   <= c_wdata[31:0];
+		mw_be   <= c_be;
+	end
+	else if (cpu_m_ack) mw_pend <= 1'b0;
+	if (reset) mw_pend <= 1'b0;
+end
+wire mw_ev = cpu_m_ack & mw_pend;
 // kind 5: a command of DMA channel 2, 3 or 8 finished (8 fetched, 9 stopped); 6: the ADB
 // keyboard; 10: MESH's interrupt (with tr_mesh); 11: channel 8's interrupt
 wire   itr_tr = itr_ev & tr_mesh;
-assign tr_ev  = sd_tr_ev | bt_ev | dfin | adb_tr_ev | itr_tr | itr8_ev;
+assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev;
 assign tr_rec = sd_tr_ev ? sd_tr_rec :
                 bt_ev    ? {128'd0, bt_we ? bt_wd : line_buf[0], bt_a, bt_us, 19'd0, bt_we, bt_be, 8'd4} :
+                mw_ev    ? {96'd0, m_rdata[63:32], mw_we ? mw_wd : m_rdata[31:0], mw_a, bt_us, 19'd0, mw_we, mw_be, 8'd4} :
                 dfin     ? {64'd0, dfin_info, bt_us, 16'd0, 4'd0, dfin_ch,
                             (dfin_type == 2'd0) ? 8'd5 : (dfin_type == 2'd1) ? 8'd8 : 8'd9} :
                 itr_tr   ? {192'd0, bt_us, 16'd0, itr_st, 8'd10} :

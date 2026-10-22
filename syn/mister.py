@@ -576,7 +576,14 @@ def trace(last, first, fname=None):
             addr = int.from_bytes(r[8:12], "little")
             data = int.from_bytes(r[12:16], "little")
             blk = (addr >> 8) & 0x1FF
-            if (addr >> 8) == 0xF90000:
+            if addr < 0x01000000:
+                # an uncached word access to the watched RAM line (Pippin_machine mw_*, 22:50):
+                # for a write, the SDRAM controller's diagnostic word in bytes 16-19
+                d = int.from_bytes(r[16:20], "little")
+                reg = "RAM %08x" % addr
+                if we:
+                    reg += "  sdram be %x%s issued %d col %03x" % (d >> 28, " after-refresh" if d & 0x08000000 else "", (d >> 16) & 31, d & 0x1FF)
+            elif (addr >> 8) == 0xF90000:
                 # the memory test's progress (Pippin_machine dbg_reg)
                 reg = "DBG " + {0: "status", 4: "passes", 8: "errors", 0xC: "first addr", 0x10: "read", 0x14: "expected"}.get(addr & 0xFF, "%02x" % (addr & 0xFF))
             elif blk in (0x180, 0x110, 0x111):

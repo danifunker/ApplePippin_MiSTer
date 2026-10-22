@@ -174,6 +174,7 @@ logic [255:0] r_wd;
 logic [15:0] r_ud;
 logic [4:0]  beat;                     // beats captured
 logic [4:0]  issued;                   // WRITEs or READs issued
+logic        last_ref;                 // a refresh came between the last request and this one (the diagnostic word)
 
 wire [4:0]  nbeats  = r_line ? 5'd16 : 5'd2;
 
@@ -212,6 +213,7 @@ always_ff @(posedge clk) begin
 			dqm <= 2'b00;
 			if (ref_take) begin
 				// both ranks, one after the other
+				last_ref <= 1'b1;
 				chip     <= 1'b0;
 				command  <= CMD_REFRESH;
 				state    <= S_REF;
@@ -300,6 +302,11 @@ always_ff @(posedge clk) begin
 				if (~r_up) begin
 					ack   <= 1'b1;
 					acked <= 1'b1;
+					// a word write answers with a diagnostic word (2026-10-21 22:50, the lost
+					// partial writes): the byte enables as served, a refresh before it, the
+					// WRITEs issued, the first column
+					if (~r_line) rdata[63:32] <= {r_be, last_ref, r_line, 2'b00, 3'b000, issued, 7'd0, r_hw[9:1]};
+					last_ref <= 1'b0;
 				end
 				command     <= CMD_PRECHARGE;
 				SDRAM_A[10] <= 1'b0;
@@ -317,6 +324,7 @@ always_ff @(posedge clk) begin
 	endcase
 
 	if (init) begin
+		last_ref <= 1'b0;
 		state   <= S_INIT;
 		t       <= 16'd0;
 		ready   <= 1'b0;
