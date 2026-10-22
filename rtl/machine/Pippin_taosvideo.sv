@@ -43,7 +43,10 @@ module Pippin_taosvideo
 	// 1: the dot clock is always the console's standard line rate times Taos's line (below);
 	// 0: that until Mac OS programs Athens (athens_set), then half Athens's output (not yet
 	// right: the driver writes only P2_MUX2, below)
-	parameter bit          STD_DOT  = 1'b1
+	parameter bit          STD_DOT  = 1'b1,
+	// 1: the VRAM (its 1 MB of DDR3) is cleared once when the FPGA is configured, as a power-up
+	// loses a real Pippin's VRAM; a reset keeps it, as the Pippin's own reset does (below)
+	parameter bit          VRAM_CLEAR = 1'b1
 )
 (
 	input  logic         clk,             // the video clock: the memory clock
@@ -256,8 +259,16 @@ wire [14:0] lpix   = color16 ? {2'd0, width, 1'b0} : {3'd0, width};
 wire [14:0] lbytes = lpix + 15'd7;
 wire [11:0] lwords = 12'(lbytes >> 3);
 
-typedef enum logic [2:0] {D_IDLE, D_FREAD, D_FWAIT, D_CREAD, D_CWAIT, D_CWRITE} ds_t;
+typedef enum logic [2:0] {D_IDLE, D_FREAD, D_FWAIT, D_CREAD, D_CWAIT, D_CWRITE, D_CLEAR} ds_t;
 ds_t         ds;
+// VRAM_CLEAR (2026-10-22): the DDR3 keeps the VRAM over a core reload, and Mac OS's Flash! driver
+// keeps its volume in VRAM (F00E0000-F00FFFFF, loaded from the save flash at boot only when the
+// flash holds a volume, written back at Shut Down): without the clear, a volume never saved
+// survived a reload, as if saved. 1 MB of zeros in bursts of 128 words, before anything else
+// gets the port (the CPU is held meanwhile for the ROM's download).
+logic        clr_on = VRAM_CLEAR;
+logic [16:0] clr_a  = 17'd0;               // the next 64-bit word
+logic [6:0]  clr_beat;
 logic        f_pend;                   // a line is being fetched
 logic        f_calc;                   // its address is being made
 logic [21:0] f_line;                   // the frame buffer line's first byte
@@ -337,7 +348,16 @@ always_ff @(posedge clk) begin
 		D_IDLE: begin
 			ddr_rd <= 1'b0;
 			ddr_we <= 1'b0;
-			if (f_pend && !f_issue && !f_calc && !(c_req && !c_ack && f_last)) begin
+			if (clr_on) begin
+				ddr_addr     <= DDR_BASE + {12'd0, clr_a};
+				ddr_burstcnt <= 8'd128;
+				ddr_din      <= 64'd0;
+				ddr_be       <= 8'hFF;
+				ddr_we       <= 1'b1;
+				clr_beat     <= 7'd0;
+				ds           <= D_CLEAR;
+			end
+			else if (f_pend && !f_issue && !f_calc && !(c_req && !c_ack && f_last)) begin
 				f_last       <= 1'b1;
 				f_burst      <= f_next;
 				ddr_addr     <= DDR_BASE + {10'd0, f_addr[21:3]};
@@ -401,9 +421,18 @@ always_ff @(posedge clk) begin
 				ddr_be  <= beat_be(c_be, 2'(c_beat + 3'd1));
 			end
 		end
+		D_CLEAR: if (!ddr_busy) begin
+			clr_beat <= clr_beat + 7'd1;
+			if (clr_beat == 7'd127) begin
+				ddr_we <= 1'b0;
+				clr_a  <= clr_a + 17'd128;
+				if (clr_a == 17'h1FF80) clr_on <= 1'b0;
+				ds     <= D_IDLE;
+			end
+		end
 		default: ds <= D_IDLE;
 	endcase
-	if (reset) begin
+	if (reset & ~clr_on) begin
 		ds     <= D_IDLE;
 		ddr_rd <= 1'b0;
 		ddr_we <= 1'b0;
