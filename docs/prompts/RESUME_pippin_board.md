@@ -184,7 +184,7 @@ lockstep. If the memtest pattern fails on the board, the fix is in
 DSPPC603_cache's miss-with-store path (the merge of a misaligned store's
 halves against the fill); verify it with the pattern, then the disc.
 
-## 20:50: the two captures compared (`scratch/cap2_stream.txt` the board, `scratch/rep18_stream.txt` the bench, run18)
+## 20:30: the two captures compared (`scratch/cap2_stream.txt` the board, `scratch/rep18_stream.txt` the bench, run18)
 
 The bench's capture of the same stretch (rep18, `--mem-wait 20`, no
 lockstep) **runs the identical 68k code and PPC handlers** until the floppy
@@ -231,22 +231,40 @@ Instruments added:
   Verilator model gives old data; if the M10K does not, that is the board-
   only fault). run20 on the Mac checks the pattern's expected values.
 
-## What is running / where things stand (20:50)
+## 20:45: the stall's own sequence passes on the board
 
-- **Quartus: f089ba8** (the memory test with the stall's own sequence),
-  started 20:10, in its fitter (waiter bqn8bf7gq prints the slack). Then:
-  `cp output_files/BandaiPippin.rbf scratch/BandaiPippin_f089ba8.rbf`,
-  put the core on .92, OSD Advanced > Boot: Memory test, Apply and reset
-  under `trace-capture`, decode, `grep DBG` for errors in status 5. Then
-  **build cac11e1+864f43f** (the data capture and the pipelined pattern),
-  run both on the board: the memory test, then Super Marathon with the
-  capture (`capview.py scratch/tr_cap3.txt 0 8192 --rom "scratch/pippin/
+f089ba8's memory test on the board (slack +0.063; `scratch/tr_mt4.bin`,
+`.txt`): pass 1 over 4 MB clean, status 5 (the castout patterns, the
+TMTask-line sequence in three cache states, and the stall's own sequence:
+the line out of the cache, the set's ways dirty, the misaligned store, a
+delay, the byte and word stores, the misaligned load) 200,000 rounds with
+**0 errors**, status 6. The write-allocate race hypothesis is out. run21 on
+the Mac (864f43f's test, `--memtest-passes 2`, `runrep21.txt`): 0 errors
+through the castout phase, so the pipelined pattern's expected values are
+right (RESULT: FAIL there only means the 120 M instruction limit; the test
+stops at status 6 and never reaches pass 2). Also checked: an interrupt is
+taken only before an access's first grant (`mem_irq`), so a misaligned
+store's second half cannot be dropped by one; the exception sites in the
+samples match between the board and the bench; the Pippin build has no L2;
+no other line of set 0x63 is touched between the store and the load.
+
+## What is running / where things stand (20:55)
+
+- **Quartus: 175d96a = cac11e1 + 864f43f** (the data capture and the
+  pipelined pattern), started 20:37 (waiter begu7gwmg prints the slack and
+  keeps the rbf as `scratch/BandaiPippin_175d96a.rbf`). Then put the core
+  on .92 and run both on the board: the memory test (`trace-capture` first,
+  then OSD Advanced > Boot: toggle twice to Memory test, backspace, down,
+  enter = Apply and reset; the test is over in ~3 s and the ring holds
+  only 2 s, so the streamer must run before the apply), then Super Marathon
+  with the capture (`capview.py scratch/tr_cap3.txt 0 8192 --rom "scratch/pippin/
   bandai pippin,19960920 - kinka 1.3,- 3e6b3ee4-a52528e9ce8c.rom"`), and
   read the data at the stores to 81C74/81C7A and the load of 81C76.
-- **The Mac: run18** ending (420 M instructions); `chain20.sh` then runs
-  **run20** (864f43f's memory test, `--boot memtest`, `runrep20.txt`; waiter
-  baln2d3ek) and then **run19** (run5 with `--mem-wait 48`, lockstep).
-- The board holds the bc28258 core; earlier cores in `scratch/BandaiPippin_<commit>.rbf`.
+- **The Mac: run19** (run5 with `--mem-wait 48`, lockstep; `rep19.bin`,
+  `runrep19.txt`), since 20:52, ~1.5 h: a DIVERGED/MISMATCH or a stall
+  there would be the race in simulation. (`--memtest-passes 1` stops before
+  the castout phase: use 2 and read the error count, as run21.)
+- The board holds the f089ba8 core; earlier cores in `scratch/BandaiPippin_<commit>.rbf`.
 - If every memory-test pattern passes on the board, the data capture
   decides; if it shows a merge against stale data, the next step is to
   reproduce that access timing in the memory test (the exact sequence of
