@@ -102,6 +102,7 @@ module Pippin_machine
 	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
 	parameter int unsigned INT_REPORT = 1,          // Pippin_gc INT_REPORT: an access leaving a device's line high is an event (68k mode)
 	parameter int unsigned TRACE_INT = 1,           // 1: the trace takes Grand Central's interrupt and the VIA's register writes
+	parameter int unsigned TRACE_FL = 0,            // 1: the trace takes the save flash's CPU accesses and its image's load and save (kind 4)
 	parameter int unsigned TRACE_RAM = 0,           // 1: the trace takes every uncached word access to the RAM lines below
 	parameter logic [31:0] TRACE_RAM_A  = 32'h00081C60,   // TRACE_RAM: an address in the line (the board's TMTask, cap2-cap5)
 	parameter logic [31:0] TRACE_RAM_A2 = 32'h00081AC0    // ... and a second line (the bench's TMTask, rep18)
@@ -887,6 +888,7 @@ logic [15:0] bt_div = 16'd0;
 logic [7:0]  bt_rdn = 8'd0;
 wire         bt_rd_sample = q_is_gc && ~q_we && qa[16:8] == 9'h000;   // (the VIA's reads: every one, since 2026-10-21 14:00)
 wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory test's progress (DBG)
+                      (TRACE_FL != 0 && q_is_fl) ||               // the save flash (2026-10-22: does Mac OS program it?)
                       q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
                                 (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
@@ -938,8 +940,17 @@ wire mw_ev = cpu_m_ack & mw_pend;
 // kind 5: a command of DMA channel 2, 3 or 8 finished (8 fetched, 9 stopped); 6: the ADB
 // keyboard; 10: MESH's interrupt (with tr_mesh); 11: channel 8's interrupt
 wire   itr_tr = itr_ev & tr_mesh;
-assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev;
+// TRACE_FL: the save flash's image port, as kind 4 records at 4F000000 + what: 1 a block of the
+// image loaded into the flash (its first byte written, the address in the low bits), 2 a block
+// read out for a save (its first byte), 3 the CPU programmed or erased the flash
+logic        fl_re_q;
+always_ff @(posedge clk) fl_re_q <= fl_ld_re;
+wire         fl_tev  = TRACE_FL != 0 &&
+                       ((fl_ld_we && fl_ld_addr[8:0] == 9'd0) || (fl_ld_re && !fl_re_q && fl_ld_addr[8:0] == 9'd0) || fl_changed);
+wire  [31:0] fl_ta   = {8'h4F, fl_changed ? 4'd3 : fl_ld_we ? 4'd1 : 4'd2, 3'd0, fl_ld_addr};
+assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev | fl_tev;
 assign tr_rec = sd_tr_ev ? sd_tr_rec :
+                fl_tev & ~bt_ev & ~mw_ev ? {128'd0, 24'd0, fl_ld_data, fl_ta, bt_us, 19'd0, 1'b1, 4'hF, 8'd4} :
                 bt_ev    ? {128'd0, bt_we ? bt_wd : line_buf[0], bt_a, bt_us, 19'd0, bt_we, bt_be, 8'd4} :
                 mw_ev    ? {96'd0, m_rdata[63:32], mw_we ? mw_wd : m_rdata[31:0], mw_a, bt_us, 19'd0, mw_we, mw_be, 8'd4} :
                 dfin     ? {64'd0, dfin_info, bt_us, 16'd0, 4'd0, dfin_ch,
