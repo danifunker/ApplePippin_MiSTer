@@ -343,7 +343,17 @@ write path (most likely the SDRAM controller's back-to-back partial
 writes, or the posted write's hand-over on the port); fix, verify with the
 test, then the disc.
 
-## What is running / where things stand (22:55)
+## What is running / where things stand (23:15)
+
+- **The Quartus lock**: the Sun-2 session's compile took it at 23:04; build
+  28 (chain bnhfpdyr8, pid file quartus28.pid) waits on the flock and starts
+  when it ends (~23:45), done ~00:20. run24 (the bench): 0 errors through
+  the uncached pattern. **run25** on the Mac (38ea07b: the memory-port
+  trace watching both TMTask lines, 81C60 and the bench's 81AC0; 420 M
+  instructions; watcher bxqnoixq3): the bench's `RAM 00081ACx` records for
+  the same stretch, the reference for the board's `RAM 00081C7x` ones.
+
+## What was running (22:55)
 
 - **Quartus: build 26 = efbf06e** (the store-landing capture) in its
   fitter (chain b4khbc21z, `scratch/BandaiPippin_efbf06e.rbf`): the disc
