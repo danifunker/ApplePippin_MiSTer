@@ -184,32 +184,74 @@ lockstep. If the memtest pattern fails on the board, the fix is in
 DSPPC603_cache's miss-with-store path (the merge of a misaligned store's
 halves against the fill); verify it with the pattern, then the disc.
 
-## What is running / where things stand (19:50)
+## 20:50: the two captures compared (`scratch/cap2_stream.txt` the board, `scratch/rep18_stream.txt` the bench, run18)
 
-- **Quartus: bc28258** (the capture from FFCF7B8C, 8,192 instructions),
-  started 19:40, in its fitter; its waiter prints the slack. Then: put the
-  core on .92 (`put-core`), `trace-capture 150`, load it through the OSD,
-  fetch, decode, `python3 syn/capview.py scratch/tr_cap2.txt 0 8192 >
-  scratch/cap2_stream.txt`, and read: the `stw` of tmAddr at 81C76 (is it
-  there, what EA), every later access to 81C6x-81C7x and the stack
-  (3FFExxx), the A-trap dispatch of InsTime/PrimeTime, PrimeTime's stores
-  to the task (+0, +4, +10, +14: the last crosses into 81C80), until the
-  `lwzx` of 81C76 that gives zero.
-- **The Mac: run18** (bc28258, `run5.sh`'s options; `rep18.bin`,
-  `runrep18.txt`), since 19:42, ~1 h; its capture of the same stretch is
-  the reference stream: diff the two (`capview.py` on both; the 68k
-  instruction sequence should match exactly, the PPC handlers too; where
-  they part is the fault).
-- The board holds the af1bff3 core (the first capture build); the
-  previous cores are in `scratch/BandaiPippin_<commit>.rbf`.
-- If the lost store is visible in the capture (e.g. the `stw` to 81C76 is
-  there and a later store or the trap dispatcher's path overwrites it, or
-  the `stw` goes to another EA), the fault is named: a CPU bug if the PPC
-  stream itself differs from the bench's at identical instructions (then
-  the lockstep bench should be made to replay the board's interrupt
-  timing), or a nanokernel/emulator path the board's timing provokes.
-  If the capture window ends before the load, raise the RAM again or
-  trigger a second capture at FFC3B432 (PrimeTime's insertion).
+The bench's capture of the same stretch (rep18, `--mem-wait 20`, no
+lockstep) **runs the identical 68k code and PPC handlers** until the floppy
+driver's wait: only the heap addresses differ (the TMTask at 81AC0 in the
+bench, 81C70 on the board; the 68k stack 76DA / 24E4A), and the Time
+Manager's walk passes one task more on the board (a different queue, not a
+fault). The driver (Kinka 1.3, the ROM the board and the bench run —
+**do not disassemble the 1.0 ROM**; `scratch/pippin/...kinka 1.3...rom`):
+
+    FFCF7B8C  movem.l d0/a1,-(sp); lea 7BA2,a1; move.l a1,6(a0)   ; tmAddr   <- st 81C76 (line 51)
+              InsTime (A058); movem.l (sp)+; PrimeTime (A05A); rts
+    FFCF7BA2  the task: move.l a1,a0; RmvTime; clr.l 6(a0); move.l -20(a0),d0; beq; clr.l -20(a0); ...jump to it
+    FFCF7BC2  the wait: movem.l d1-d3/a3,-16(a0)                  <- st 81C60..6C
+              tst.l 6(a0); beq.s 7BD8                            <- ld 81C76 (line 1588)
+              tst.l -20(a0); bne.s 7BDC (DEBUGGER)
+              move.l (sp)+,-20(a0); moveq #0,d0; rts             ; the continuation stashed, returns to the caller's caller
+    FFCF7BD8  moveq #0,d0; rts                                   ; "the task already fired": return at once
+
+On the board `tst.l 6(a0)` reads **zero** and the wait returns at once
+(FFCF7BD8 -> the poll loop FFCF66A2 -> prime again, the same task InsTime'd
+twice: the self-link at the second PrimeTime, FFC3B4AA `move.l a0,(a1)` with
+a1 == a0, lines 3653-3664). The bench reads FFCF7BA2 and stashes the
+continuation (FFCF5D34.. afterwards). **Nothing stored zero at 81C76**: the
+task (7BA6 `clr.l 6(a0)`) never ran; the writes to tmAddr's two words after
+line 51 are the merges of InsTime's `move.b d0,4(a0)` (FFC3B3CA, st 81C74,
+line 250), PrimeTime's byte store at 81C74 (FFC3B43A, 980) and the
+misaligned tmCount store at 81C7A (FFC3B4A6, 1215; words 6 and 7). So **the
+dcache merged those stores against stale words** (the line's pre-store
+contents: zeros, NewPtr's fresh block) — a cache fault the bench does not
+show. Which merge, and what it merged, is what the next capture shows.
+
+Instruments added:
+- **cac11e1: the capture carries the data** of the last access answered in
+  the instruction word's place (a load's value as the register gets it, a
+  store's first word as the cache merges it); `capview.py --rom ROM` reads
+  the word back from the ROM and prints `= value` when the data changes.
+  Not built yet.
+- **864f43f: the memory test's pipelined same-line pattern** (status 5):
+  `stw A; lwz; lwz A+12`, `stw A; lwz; stb A+13; lwz A+12`, `stw A; stb
+  A+13; lwz A+12` — a store hit's write lands one edge after its lookup, at
+  the edge the request after the next reads the row; the cache forwards
+  the written words and takes the rest from the RAM read during that write
+  (DSPPC603_cache_ram: altsyncram, mixed width 128/32, OLD_DATA; the
+  Verilator model gives old data; if the M10K does not, that is the board-
+  only fault). run20 on the Mac checks the pattern's expected values.
+
+## What is running / where things stand (20:50)
+
+- **Quartus: f089ba8** (the memory test with the stall's own sequence),
+  started 20:10, in its fitter (waiter bqn8bf7gq prints the slack). Then:
+  `cp output_files/BandaiPippin.rbf scratch/BandaiPippin_f089ba8.rbf`,
+  put the core on .92, OSD Advanced > Boot: Memory test, Apply and reset
+  under `trace-capture`, decode, `grep DBG` for errors in status 5. Then
+  **build cac11e1+864f43f** (the data capture and the pipelined pattern),
+  run both on the board: the memory test, then Super Marathon with the
+  capture (`capview.py scratch/tr_cap3.txt 0 8192 --rom "scratch/pippin/
+  bandai pippin,19960920 - kinka 1.3,- 3e6b3ee4-a52528e9ce8c.rom"`), and
+  read the data at the stores to 81C74/81C7A and the load of 81C76.
+- **The Mac: run18** ending (420 M instructions); `chain20.sh` then runs
+  **run20** (864f43f's memory test, `--boot memtest`, `runrep20.txt`; waiter
+  baln2d3ek) and then **run19** (run5 with `--mem-wait 48`, lockstep).
+- The board holds the bc28258 core; earlier cores in `scratch/BandaiPippin_<commit>.rbf`.
+- If every memory-test pattern passes on the board, the data capture
+  decides; if it shows a merge against stale data, the next step is to
+  reproduce that access timing in the memory test (the exact sequence of
+  the 68k handlers between the stores: ROM fetches of other sets between
+  same-line stores).
 
 ## Open problem 2: Athens never gets Mac OS's video clock
 
