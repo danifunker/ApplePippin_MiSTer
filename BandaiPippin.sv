@@ -64,6 +64,14 @@ localparam int TRACE = 0;               // 1: the DDR3 trace (syn\mister.py trac
 localparam int SOUND_IN_DMA = 0;        // 1: DMA channel 9 (sound in, which records silence) a real channel
 localparam int PERF = 0;                // 1: the CPU's performance counters, into the trace (syn\perf.py; needs TRACE)
 localparam int SND_TRACE = 0;           // 1: the codec's output frames into the trace (syn\sndtrace.py; needs TRACE)
+// The stall hunt's instruments (2026-10-21/22), each its own switch so that a PERF build does not
+// carry them: the CPU's instruction capture (kind 19, syn\capview.py; needs PERF; its trigger and
+// watched line are DSPPC603's CAP_* parameters), the dense PERF window (256-cycle samples for 20 ms
+// from SWIM3's interrupt being enabled; needs PERF), the memory-port trace of one RAM line
+// (Pippin_machine TRACE_RAM_A) and the SDRAM controller's diagnostic word that goes with it
+localparam int CAPTURE = 0;
+localparam int DENSE = 0;
+localparam int TRACE_RAM = 0;
 
 ///////// Default values for ports not used in this core /////////
 
@@ -727,7 +735,8 @@ wire   [7:0] mac_r, mac_g, mac_b;
 assign DDRAM_CLK = clk_mem;
 
 Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(16500000),
-                    .TRACE(TRACE), .SOUND_IN_DMA(SOUND_IN_DMA), .PERF(PERF), .SND_TRACE(SND_TRACE)) system
+                    .TRACE(TRACE), .SOUND_IN_DMA(SOUND_IN_DMA), .PERF(PERF), .SND_TRACE(SND_TRACE),
+                    .CAPTURE(CAPTURE), .DENSE(DENSE), .TRACE_RAM(TRACE_RAM)) system
 (
 	.clk(clk_cpu),
 	.cpu_fast(cpu_fast_c[1]),
@@ -775,7 +784,7 @@ wire [15:0] sd_dq_out;
 wire        sd_dq_oe;
 assign SDRAM_DQ = sd_dq_oe ? sd_dq_out : 16'hZZZZ;
 
-Pippin_sdram #(.CLK_MHZ(100)) sdram
+Pippin_sdram #(.CLK_MHZ(100), .DIAG(TRACE_RAM != 0)) sdram
 (
 	.clk(clk_mem),
 	.init(sdram_init),

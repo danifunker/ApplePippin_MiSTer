@@ -46,9 +46,11 @@
 module Pippin_sdram
 #(
 	parameter int CLK_MHZ = 100,               // the memory clock
-	parameter bit RMW     = 1'b1               // a partial word written by read-modify-write, both halfwords
+	parameter bit RMW     = 1'b1,              // a partial word written by read-modify-write, both halfwords
 	                                           // unmasked (2026-10-22: on MiSTerss1 a masked halfword is written
 	                                           // as the zeros in its place, as if DQM did nothing); 0 masks with DQM
+	parameter bit DIAG    = 1'b0               // 1: a word write answers with a diagnostic word in rdata[63:32]
+	                                           // (Pippin_machine TRACE_RAM puts it in the trace)
 )
 (
 	input  logic         clk,
@@ -324,7 +326,7 @@ always_ff @(posedge clk) begin
 					// a word write answers with a diagnostic word (2026-10-21 22:50, the lost
 					// partial writes): the byte enables as served, a refresh before it, the
 					// WRITEs issued, the first column
-					if (~r_line) rdata[63:32] <= {r_be0, last_ref, r_line, RMW, 1'b0, 3'b000, issued, 7'd0, r_hw[9:1]};
+					if (DIAG & ~r_line) rdata[63:32] <= {r_be0, last_ref, r_line, RMW, 1'b0, 3'b000, issued, 7'd0, r_hw[9:1]};
 					last_ref <= 1'b0;
 				end
 				command     <= CMD_PRECHARGE;

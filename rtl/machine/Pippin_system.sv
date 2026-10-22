@@ -27,7 +27,10 @@ module Pippin_system
 	parameter int unsigned TRACE = 1,               // 0: no DDR3 trace (Pippin_trace)
 	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
 	parameter int unsigned PERF = 1,                // 0: no performance counters in the CPU (with TRACE, they go into the trace)
-	parameter int unsigned SND_TRACE = 0            // 1: the codec's output frames into the trace (kind 13; needs TRACE)
+	parameter int unsigned SND_TRACE = 0,           // 1: the codec's output frames into the trace (kind 13; needs TRACE)
+	parameter int unsigned CAPTURE = 0,             // 1: the CPU's instruction capture (kind 19; needs PERF and TRACE; DSPPC603 CAP_*)
+	parameter int unsigned DENSE = 0,               // 1: PERF samples every 256 cycles for 20 ms from SWIM3's interrupt being enabled
+	parameter int unsigned TRACE_RAM = 0            // 1: the memory-port trace of one RAM line (Pippin_machine TRACE_RAM_A; needs TRACE)
 )
 (
 	input  logic         clk,             // the CPU's clock
@@ -243,12 +246,12 @@ always_ff @(posedge clk) begin
 	swim_en_q <= int_dbg[115];                                        // the mask's bit 19 (int_dbg[127:96] is the mask)
 	if (int_dbg[115] & ~swim_en_q) dense_cnt <= 21'd1;
 	else if (dense_cnt != 21'd0 && dense_cnt != 21'h1FFFFF) dense_cnt <= dense_cnt + 21'd1;
-	cpu_dbg_dense <= dense_cnt != 21'd0 && dense_cnt < 21'd1_170_000;   // 20 ms at 58.33 MHz
+	cpu_dbg_dense <= DENSE != 0 && dense_cnt != 21'd0 && dense_cnt < 21'd1_170_000;   // 20 ms at 58.33 MHz
 	if (reset) begin dense_cnt <= 21'd0; cpu_dbg_dense <= 1'b0; swim_en_q <= 1'b0; end
 end
 logic [223:0] cpu_dbg_rec;
 logic [2:0]   cpu_dbg_capflags;     // the record is the capture's (kind 19), and its two accesses' write bits
-DSPPC603 #(.PERF(PERF)) cpu (
+DSPPC603 #(.PERF(PERF), .CAPTURE(CAPTURE)) cpu (
 	.clk, .reset(cpu_reset), .reset_pc,
 	.ext_irq, .tb_tick,
 	.mem_req(c_req), .mem_we(c_we), .mem_line(c_line), .mem_addr(c_addr), .mem_be(c_be),
@@ -291,7 +294,7 @@ logic         snd_frame;
 
 logic [127:0] int_dbg;                  // Grand Central's interrupt state (the trace, kind 16)
 Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUDA_FAST_BOOT(CUDA_FAST_BOOT),
-                     .SOUND_IN_DMA(SOUND_IN_DMA)) machine (
+                     .SOUND_IN_DMA(SOUND_IN_DMA), .TRACE_RAM(TRACE_RAM)) machine (
 	.clk, .cpu_fast, .reset, .ram_mb, .rom_at, .boot_memtest,
 	.c_req, .c_we, .c_line, .c_addr, .c_be, .c_wdata, .c_ack, .c_rdata,
 	.m_req, .m_we, .m_line, .m_addr, .m_be, .m_wdata, .m_ack, .m_rdata,

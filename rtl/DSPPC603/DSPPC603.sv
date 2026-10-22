@@ -114,6 +114,10 @@ module DSPPC603
 	parameter int          CACHE_WAYS = 2,            // ways of each cache: 2 (the 603) or 4 (the 603e, the 604)
 	parameter int          FPU_OPERAND_REG = 0,       // 1: the FPU takes its operands into a register first (a cycle each; on 2026-10-06 to 2026-10-09 for timing)
 	parameter int          PERF     = 1,              // 1: the performance counters (perf_cnt; 0 leaves them out)
+	parameter int          CAPTURE  = 0,              // 1 (needs PERF): the instruction capture, 4,096 x 194 bits of RAM drained as kind 19 (2026-10-21's stall hunt)
+	parameter logic [31:0] CAP_TRIG_EA = 32'hFFCF7B8C, // CAPTURE: the load EA that triggers it (Kinka 1.3: the 68k emulator's fetch of the floppy driver's prime routine)
+	parameter int          CAP_WATCH   = 1,           // CAPTURE: 1 records the watched line's history from reset, then everything from the trigger
+	parameter logic [31:0] CAP_WATCH_A = 32'h00081C60, // CAPTURE with CAP_WATCH: an address in the watched line (the board's TMTask)
 	parameter int          COMPLETION_QUEUE = 1,      // 1: the completion queue is built: operations admitted behind a long one in EX, committed in order (since 2026-10-16 the FPU's overlap needs it)
 	parameter int          COMPLETION_ALU   = 0,      // 1: simple ALU operations are admitted to it too (0 since 2026-10-11: no gain once the dividers and FPU got faster, 1,100 ALMs, 5 % slower ROM boot)
 	parameter int          LE_MODE  = 0,              // 1: little-endian mode (MSR[LE], the 604's address munging); 0: MSR[LE] is kept but ignored, as before
@@ -3461,9 +3465,12 @@ if (PERF != 0) begin : g_perf
 	// instruction to leave EX after each access to it; the RAM writes of its set, all
 	// ways), then everything from the trigger for DBG_AFTER more pairs: the line's
 	// history before the stall and the stall itself.
-	localparam logic [31:0] DBG_TRIG_EA = 32'hFFCF7B8C;   // the 68k emulator's fetch of the floppy driver's prime routine (Kinka 1.3: its store of tmAddr, InsTime, PrimeTime, the wait)
-	localparam bit          DBG_WATCH   = 1'b1;
-	localparam logic [31:5] DBG_WATCH_LINE = 27'(32'h00081C60 >> 5);   // the TMTask's line (cap2-cap4)
+	// All of it only with CAPTURE (the parameters above); without it the registers stay
+	// at reset, nothing writes the RAM, and synthesis leaves it out.
+	localparam bit          CAP         = CAPTURE != 0;
+	localparam logic [31:0] DBG_TRIG_EA = CAP_TRIG_EA;
+	localparam bit          DBG_WATCH   = CAP_WATCH != 0;
+	localparam logic [31:5] DBG_WATCH_LINE = CAP_WATCH_A[31:5];
 	localparam logic [12:0] DBG_AFTER   = DBG_WATCH ? 13'd1800 : 13'd4096;
 	logic [193:0] cap_ram [4096];
 	logic         cap_on, cap_trig, cap_full, cap_done, cap_half, cap_wrapped, cap_seen;
@@ -3490,7 +3497,7 @@ if (PERF != 0) begin : g_perf
 		dbg_ev <= 1'b0;
 		if (mu_req & mu_gnt) begin cap_ea <= mu_ea; cap_we <= mu_we; cap_seen <= 1'b0; end
 		if (mu_resp & (mo_valid ? mo_load : mem_load)) cap_data <= mu_rdata[31:0];
-		if (~cap_trig & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
+		if (CAP & ~cap_trig & ~cap_full & ~cap_done & mu_req & mu_gnt & ~mu_we & (mu_ea == DBG_TRIG_EA)) begin
 			cap_trig <= 1'b1; cap_after <= '0;
 			if (~DBG_WATCH) begin cap_on <= 1'b1; cap_wr <= '0; cap_wrapped <= 1'b0; cap_half <= 1'b0; ev_hold_v <= 1'b0; ev_lost <= 1'b0; end
 		end
@@ -3554,7 +3561,7 @@ if (PERF != 0) begin : g_perf
 		if (reset) begin
 			dbg_t <= 16'd0;
 			for (int i = 0; i < 8; i++) dbg_n[i] <= 8'd0;
-			cap_on <= DBG_WATCH; cap_trig <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0;
+			cap_on <= CAP & DBG_WATCH; cap_trig <= 1'b0; cap_full <= 1'b0; cap_done <= 1'b0; cap_half <= 1'b0;
 			cap_wr <= '0; cap_rd <= '0; cap_wrapped <= 1'b0; cap_after <= '0; cap_n <= '0; cap_cnt <= '0; cap_seen <= 1'b0;
 			ev_hold_v <= 1'b0; ev_lost <= 1'b0;
 			dbg_capflags <= 3'b000;

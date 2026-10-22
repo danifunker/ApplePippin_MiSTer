@@ -100,7 +100,10 @@ module Pippin_machine
 	parameter int unsigned SCSI_HZ  = 25_000_000,    // MESH's time base and Curio's clock (below CPU_HZ)
 	parameter int unsigned CUDA_FAST_BOOT = 0,      // 1: the test bench's (Pippin_cuda FAST_BOOT)
 	parameter int unsigned SOUND_IN_DMA = 1,        // 0: DMA channel 9 (sound in) its registers alone
-	parameter int unsigned TRACE_INT = 1            // 1: the trace takes Grand Central's interrupt and the VIA's register writes
+	parameter int unsigned TRACE_INT = 1,           // 1: the trace takes Grand Central's interrupt and the VIA's register writes
+	parameter int unsigned TRACE_RAM = 0,           // 1: the trace takes every uncached word access to the RAM lines below
+	parameter logic [31:0] TRACE_RAM_A  = 32'h00081C60,   // TRACE_RAM: an address in the line (the board's TMTask, cap2-cap5)
+	parameter logic [31:0] TRACE_RAM_A2 = 32'h00081AC0    // ... and a second line (the bench's TMTask, rep18)
 )
 (
 	input  logic         clk,
@@ -900,14 +903,14 @@ wire bt_ev = dev_ack & bt_pend;
 // inhibited page and two halves of a misaligned store never reach the SDRAM): the
 // request as granted, the answer's data for a read, the SDRAM controller's diagnostic
 // word (its rdata[63:32]) for a write, in bytes 16-19 of the record
-localparam logic [31:5] TRACE_RAM_LINE  = 27'(32'h00081C60 >> 5);   // the board's TMTask (cap2-cap5)
-localparam logic [31:5] TRACE_RAM_LINE2 = 27'(32'h00081AC0 >> 5);   // the bench's (rep18)
+localparam logic [31:5] TRACE_RAM_LINE  = TRACE_RAM_A[31:5];
+localparam logic [31:5] TRACE_RAM_LINE2 = TRACE_RAM_A2[31:5];
 logic        mw_pend, mw_we;
 logic [31:0] mw_a, mw_wd;
 logic [3:0]  mw_be;
 always_ff @(posedge clk) begin
-	if (grant_cpu & ~c_line & ((a[31:5] == TRACE_RAM_LINE) | (a[31:5] == TRACE_RAM_LINE2))) begin
-		mw_pend <= TRACE_INT != 0;
+	if (TRACE_RAM != 0 && grant_cpu & ~c_line & ((a[31:5] == TRACE_RAM_LINE) | (a[31:5] == TRACE_RAM_LINE2))) begin
+		mw_pend <= 1'b1;
 		mw_a    <= a;
 		mw_we   <= c_we;
 		mw_wd   <= c_wdata[31:0];
