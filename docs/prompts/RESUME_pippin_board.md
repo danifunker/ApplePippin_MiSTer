@@ -160,6 +160,30 @@ The bench with the board's CPU clock ratio, memory latency, random extra
 stalls, garbage RAM, the AppleJack, the CD latency and today's date runs
 in lockstep with dingusppc, identical, and boots the disc every time.
 
+## 20:10: the big capture read (`scratch/tr_cap2.bin`, `.txt`, stream `scratch/cap2_stream.txt`)
+
+From FFCF7B8C: line 50 `stwx r4,r16,r27` **st 81C76** (tmAddr = FFCF7BA2, a
+misaligned word store: r16 = a0, r27 = 6); InsTime (ROM FFC139xx, the trap
+dispatcher, FFC3B3BC..) with `stbx` **st 81C74** (line 249, qType's byte);
+PrimeTime (FFC3B3EA.., the timer read FFC3B630.., the insertion) with `stb`
+**st 81C74** (979), `stw` **st 81C70** (1211, qLink), `stwx` **st 81C7A**
+(1214, tmCount, misaligned); the `movem.l` **st 81C60..6C** (1567-1580);
+then `lwzx r4,r16,r27` **ld 81C76** (1588) and the `beq` taken: **zero**.
+Between 50 and 1588: 409 data accesses, 48 distinct lines, **no other line
+of the TMTask line's cache set (index 0x63)**, no stack access on the
+line. So the dcache returns zeros for bytes 76-79 after that sequence of
+hits — most plausibly because the first store **missed** (the line was not
+resident before line 50) and its two halves' merge lost against the
+write-allocate fill's row write under the board's longer fill (a
+latency-ordered race the bench's stand-in does not show). Under test:
+**the memory test's new pattern** (the line flushed, the set's ways
+dirty, the misaligned store, a delay, the byte and word stores, the
+misaligned load; building 20:10), and **run19** (run5 with
+`--mem-wait 48`, queued after run18 on the Mac) to flip the race in
+lockstep. If the memtest pattern fails on the board, the fix is in
+DSPPC603_cache's miss-with-store path (the merge of a misaligned store's
+halves against the fill); verify it with the pattern, then the disc.
+
 ## What is running / where things stand (19:50)
 
 - **Quartus: bc28258** (the capture from FFCF7B8C, 8,192 instructions),
