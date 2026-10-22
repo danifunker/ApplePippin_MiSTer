@@ -13,8 +13,25 @@ boots the disc.
 | Macintosh on Pippin (USA) | chd | The Mac OS Finder desktop; the mouse moves the pointer and its button selects an icon, the keyboard selects icons by name (misterkvms-cli's keyboard and mouse through the MiSTer's input) | 2026-10-22, build 29 |
 
 Not yet tried past the first screen: playing (the AppleJack through a
-gamepad), sound (the HDMI capture used for these tests carries no audio;
-the boot chime's DMA runs), CD audio (Racing Days), saving to the flash.
+gamepad).
+
+## ROMs, RAM, sound, saves (2026-10-22 afternoon, v0.1.0 and builds 32-33)
+
+| What | Result |
+|---|---|
+| Kinka 1.0, 1.2, 1.3, GM flash (OSD Load ROM) | each boots Macintosh on Pippin to the Finder (5 MB) |
+| 13 MB | Macintosh on Pippin to the Finder (v0.1.0) |
+| 21 MB | Macintosh on Pippin to the Finder, Super Marathon to its launcher (build 32) |
+| The boot chime | plays on HDMI: `misterkvms-cli record 25s F.wav` around a reset, ~2 s of decaying tone (`scratch/boot_chime_v0.1.0_20261022.wav`) |
+| CD audio (Racing Days) | **silent**: the game sends PLAY AUDIO MSF (status good) for a clip at ~17 s and the menu music at ~27 s; the car-select screen records as zeros |
+| Saving to the flash | **works since 38ac0a1 + 53670e3 (build 34)**: a folder made on Flash!, Shut Down (the Menu key, Return), the image on slot 2 written (the volume's signature "NuMc" at 130C); the core reloaded, the folder is there. Before: the flash answered FF during its erase, the driver's program was lost, and it gave up |
+
+The size Mac OS sees at 13 and 21 MB is measured in the bench (MemTop); the KVM cannot
+open the Apple menu. The Flash! volume lives in VRAM between boots of one session (Mac OS's
+driver), so before 53670e3 a volume survived core reloads without ever being saved; the
+VRAM is now cleared when the core loads. To keep a save: Special > Shut Down (or the PC
+keyboard's Menu key, the ADB power key), then the image on the OSD's Advanced > Save flash
+slot is written 2 s later.
 
 Before build 29 every title stalled ~16 s into the boot (the floppy
 driver's Time Manager task, `docs/prompts/RESUME_pippin_board.md`): on this
