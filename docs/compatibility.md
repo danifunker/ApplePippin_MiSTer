@@ -10,7 +10,7 @@ boots the disc.
 | Super Marathon (U) | cue/bin | Boots to the "Choose one: Marathon / Marathon 2" launcher at ~55 s | 2026-10-22, build 29 (bfcfb4f) |
 | Racing Days (J) | chd | Boots to the car-select screen; the car rotates (the menu animates) | 2026-10-22, build 29 |
 | Power Rangers Zeo vs. The Machine Empire (USA) | chd | Saban logo, then the main menu (Load Game / Go / Options) | 2026-10-22, build 29 |
-| Macintosh on Pippin (USA) | chd | The Mac OS Finder desktop; the mouse moves the pointer, the keyboard selects icons | 2026-10-22, build 29 |
+| Macintosh on Pippin (USA) | chd | The Mac OS Finder desktop; the mouse moves the pointer and its button selects an icon, the keyboard selects icons by name (misterkvms-cli's keyboard and mouse through the MiSTer's input) | 2026-10-22, build 29 |
 
 Not yet tried past the first screen: playing (the AppleJack through a
 gamepad), sound (the HDMI capture used for these tests carries no audio;
