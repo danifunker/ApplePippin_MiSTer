@@ -900,12 +900,13 @@ wire bt_ev = dev_ack & bt_pend;
 // inhibited page and two halves of a misaligned store never reach the SDRAM): the
 // request as granted, the answer's data for a read, the SDRAM controller's diagnostic
 // word (its rdata[63:32]) for a write, in bytes 16-19 of the record
-localparam logic [31:5] TRACE_RAM_LINE = 27'(32'h00081C60 >> 5);
+localparam logic [31:5] TRACE_RAM_LINE  = 27'(32'h00081C60 >> 5);   // the board's TMTask (cap2-cap5)
+localparam logic [31:5] TRACE_RAM_LINE2 = 27'(32'h00081AC0 >> 5);   // the bench's (rep18)
 logic        mw_pend, mw_we;
 logic [31:0] mw_a, mw_wd;
 logic [3:0]  mw_be;
 always_ff @(posedge clk) begin
-	if (grant_cpu & ~c_line & (a[31:5] == TRACE_RAM_LINE)) begin
+	if (grant_cpu & ~c_line & ((a[31:5] == TRACE_RAM_LINE) | (a[31:5] == TRACE_RAM_LINE2))) begin
 		mw_pend <= TRACE_INT != 0;
 		mw_a    <= a;
 		mw_we   <= c_we;
