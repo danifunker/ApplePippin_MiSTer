@@ -40,9 +40,9 @@ module Pippin_taosvideo
 #(
 	parameter int unsigned CLKV_HZ  = 100_000_000,
 	parameter logic [28:0] DDR_BASE = 29'h0600_0000,    // byte 3000_0000, in 64-bit words
-	// 1: the dot clock is the console's standard line rate times Taos's line (below); 0:
-	// Athens's, as its registers say
-	parameter bit          STD_DOT  = 1'b1
+	// 1: the dot clock is always the console's standard line rate times Taos's line (below);
+	// 0: that until Mac OS programs Athens (athens_set), then half Athens's output
+	parameter bit          STD_DOT  = 1'b0
 )
 (
 	input  logic         clk,             // the video clock: the memory clock
@@ -78,6 +78,7 @@ module Pippin_taosvideo
 	input  logic [7:0]   athens_d2,
 	input  logic [7:0]   athens_n2,
 	input  logic [7:0]   athens_p2,
+	input  logic         athens_set,      // Athens has been programmed (quasi-static, the CPU's clock)
 	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 3 PAL, 6 VGA (STD_DOT)
 	output logic         vbl,
 	output logic [23:0]  clut_index,      // Taos's colour table (R, G, B indices), read a clock later
@@ -122,14 +123,22 @@ wire [11:0] pitch = row_words[31:20];
 // reaches our Athens, why not yet known. Meanwhile the dot clock is the standard's line rate
 // times Taos's own line length (HPIX + 2): NTSC 4.5 MHz / 286 = 15,734.27 Hz (12.27 MHz on
 // 780), PAL 15,625 Hz, VGA 25.175 MHz / 800 = 31,468.75 Hz.
+//
+// Since 2026-10-22 the Athens is the one at I2C 28 (Pippin_machine), which Mac OS's driver
+// programs: NTSC 20 MHz x 27 / (11 x 2) = 24.545 MHz. Taos's counts are dingusppc's (a frame
+// is the clock / (horizontal total x vertical total in half-lines)), and ours step two half-lines
+// a line, so our dot is half Athens's output: 12.27 MHz, 15,734 Hz on 780. Until the driver has
+// written it (the boot logo; that chip's power-up output is not known) the standard rate as above.
 localparam longint unsigned XTAL = 20_000_000;
+logic [1:0]  set_s;
+always_ff @(posedge clk) set_s <= {set_s[0], athens_set};
 logic [39:0] numer, denom, acc;
 logic        dot_off, ce_dot;
 wire  [40:0] acc_n = {1'b0, acc} + {1'b0, numer};
 wire  [7:0]  d_eff = (athens_p2[5:4] == 2'd2) ? 8'd1 : athens_d2;
 wire  [12:0] htot  = {1'b0, T_HPIX} + 13'd2;
 always_ff @(posedge clk) begin
-	if (STD_DOT) begin
+	if (STD_DOT || !set_s[1]) begin
 		numer   <= (mon_id == 3'd5) ? 40'(4_500_000)  * 40'(htot) :
 		           (mon_id == 3'd3) ? 40'(15_625)     * 40'(htot) :
 		                              40'(25_175_000) * 40'(htot);
@@ -140,7 +149,7 @@ always_ff @(posedge clk) begin
 	end
 	else begin
 		numer   <= (athens_p2[5:4] == 2'd2) ? 40'(XTAL) : 40'(athens_n2) * 40'(XTAL);
-		denom   <= (40'(d_eff) * 40'(CLKV_HZ)) << (2'd3 - athens_p2[1:0]);
+		denom   <= (40'(d_eff) * 40'(CLKV_HZ)) << (3'd4 - {1'b0, athens_p2[1:0]});   // (x 2: half the output)
 		dot_off <= athens_p2[7] | athens_p2[4] | (athens_p2[5:4] == 2'd0 && (athens_d2 == 8'd0 || athens_n2 == 8'd0));
 	end
 	ce_dot  <= 1'b0;

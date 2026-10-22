@@ -258,6 +258,7 @@ module Pippin_machine
 	output logic [7:0]   athens_d2,
 	output logic [7:0]   athens_n2,
 	output logic [7:0]   athens_p2,
+	output logic         athens_set,                // the dot clock's Athens (28) has been programmed
 	input  logic         vbl,
 	input  logic         clk_v,
 	input  logic [23:0]  clut_index,
@@ -708,9 +709,9 @@ Pippin_fdblk fdblk (
 // ---- Cuda ------------------------------------------------------------------------------------
 // On its ADB line: the keyboard and the mouse (Pippin_adb), from the PS/2
 // inputs. On its I2C lines: Athens, the video's clock generator (address 28).
-logic        adb_low, adb_dev_low, cuda_tick, iic_scl_low, iic_sda_low, athens_sda_low;
+logic        adb_low, adb_dev_low, cuda_tick, iic_scl_low, iic_sda_low, athens_sda_low, athens2_sda_low;
 wire         iic_scl = ~iic_scl_low;
-wire         iic_sda = ~(iic_sda_low | athens_sda_low);
+wire         iic_sda = ~(iic_sda_low | athens_sda_low | athens2_sda_low);
 
 logic        adb_tr_ev;
 logic [31:0] adb_tr_info;
@@ -726,10 +727,23 @@ Pippin_adb adb (
 	.ps2_key, .ps2_mouse, .joy, .power_key, .tr_ev(adb_tr_ev), .tr_info(adb_tr_info)
 );
 
-// the Pippin's Athens Prime at 29 (dingusppc's taos.cpp AthensClocks(0x29), MAME's athensprime.cpp:26)
+// The Pippin has two Athens Primes (343S1191; the board's photos, MAME's pippin.cpp:16). Which one
+// makes Taos's dot clock follows the save flash (2026-10-22): the ROM probes the flash at
+// FFF0533C (AMD's autoselect through the reversed data lines) and leaves E1 at F00DFFFA when it
+// answers, E2 when not; with E1 the early set-up (FFF04818) programs the one at 29 to 14.375 MHz
+// and nothing else, and Mac OS's Taos driver (FFE54F9C) talks to the one at 28 (I2C byte 50),
+// with E2 to 29 (52). dingusppc has no flash (E2) and one Athens at 29; MAME forces E1 and does
+// not use the pixel clock. Our flash answers as the real one, so 28 is the dot clock's: it was
+// missing, the driver's first write went unacknowledged and it gave up.
+logic [7:0] athens29_d2, athens29_n2, athens29_p2;
+logic       athens29_set;
 Pippin_athens #(.ADDR(7'h29)) athens (
 	.clk, .reset, .scl(iic_scl), .sda(iic_sda), .sda_low(athens_sda_low),
-	.d2(athens_d2), .n2(athens_n2), .p2_mux2(athens_p2)
+	.d2(athens29_d2), .n2(athens29_n2), .p2_mux2(athens29_p2), .written(athens29_set)
+);
+Pippin_athens #(.ADDR(7'h28)) athens2 (
+	.clk, .reset, .scl(iic_scl), .sda(iic_sda), .sda_low(athens2_sda_low),
+	.d2(athens_d2), .n2(athens_n2), .p2_mux2(athens_p2), .written(athens_set)
 );
 
 logic        cu_cen, cu_rd, cu_wr, cu_tr_valid, cu_tr_int, cu_cpi, cu_fast;

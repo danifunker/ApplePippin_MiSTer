@@ -39,7 +39,8 @@ module Pippin_athens
 	output logic       sda_low,       // this device pulls SDA low
 	output logic [7:0] d2,
 	output logic [7:0] n2,
-	output logic [7:0] p2_mux2
+	output logic [7:0] p2_mux2,
+	output logic       written        // P2_MUX2 (the dot clock's source and divider) written since reset
 );
 
 logic [7:0] regs [8];
@@ -112,6 +113,7 @@ always_ff @(posedge clk) begin
 						else if (nbyte == 2'd1) begin
 							if (reg_n < 8'd8) begin
 								regs[reg_n[2:0]] <= byte_in;
+								if (reg_n == 8'd3) written <= 1'b1;   // P2_MUX2: the drivers write it last
 								sda_low <= 1'b1;
 `ifdef VERILATOR
 								$display("athens: register %0d <= %02X", reg_n, byte_in);
@@ -169,6 +171,7 @@ always_ff @(posedge clk) begin
 		nbyte   <= 2'd0;
 		reg_n   <= 8'h00;
 		sh      <= 8'h00;
+		written <= 1'b0;
 		regs[0] <= 8'h00;
 		regs[1] <= 8'h02;
 		regs[2] <= 8'h02;
