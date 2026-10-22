@@ -248,16 +248,53 @@ store's second half cannot be dropped by one; the exception sites in the
 samples match between the board and the bench; the Pippin build has no L2;
 no other line of set 0x63 is touched between the store and the load.
 
-## What is running / where things stand (20:55)
+## 21:20: the data capture read (`scratch/tr_cap3.bin`, `.txt`, `scratch/cap3_stream.txt`; 175d96a, slack -0.146)
 
-- **Quartus: 175d96a = cac11e1 + 864f43f** (the data capture and the
-  pipelined pattern), started 20:37 (waiter begu7gwmg prints the slack and
-  keeps the rbf as `scratch/BandaiPippin_175d96a.rbf`). Then put the core
-  on .92 and run both on the board: the memory test (`trace-capture` first,
-  then OSD Advanced > Boot: toggle twice to Memory test, backspace, down,
-  enter = Apply and reset; the test is over in ~3 s and the ring holds
-  only 2 s, so the streamer must run before the apply), then Super Marathon
-  with the capture (`capview.py scratch/tr_cap3.txt 0 8192 --rom "scratch/pippin/
+The same stall, instruction for instruction (the TMTask at 81C70 again),
+now with each access's data (`= value` on the line after the access it
+belongs to). The misaligned tmAddr store (51, `stwx` after `lhau r6`)
+presents its halves right: `0000FFCF` (81C74, bytes 2-3) and `7BA20000`
+(81C78, bytes 0-1). InsTime's byte store (250) writes 00 to qType (81C74),
+PrimeTime's `btst/bset` writes 80 and **reads 80 back** (992); qLink
+`00057E22` (1212) reads back (3591); tmCount's misaligned store (1215,
+`00000000`/`57820000`, the same `stwx` handler) **reads back `00005782`**
+(3567) and, after the second insertion, `0000000B` 57 times in the walk.
+Only the two halves of the first store are gone: `tst.l 6(a0)` reads
+`00000000` (1590, and 4023 in the second round). So the misaligned load
+and store paths work; what is lost is one store's bytes, with no external
+cause: between 51 and 250 the CPU touches 15 lines, none other in set
+0x63, no cache instruction, no mtspr, no exception; only the sound DMA
+(DMA-8) ever runs on the board and it stopped at 8.96 s (no snoops at the
+stall). The difference from tmCount's store is the line's state at 51
+(the first touch in the capture: likely a miss) and what surrounds it (a
+load hit on the ROM line just before, the next opcode fetch queued behind).
+
+- **88aa1e8 (build 24, 21:06)**: the capture records a store's word **as
+  the dcache lands it** (`dbg_st_word` = the merge of the bytes into the
+  word read), not the window word. It shows whether the first half's merge
+  already lacked FFCF (the row read stale, or a miss handled wrong) or
+  whether the written word was lost afterwards.
+- **4c4629e (build 25, queued)**: the memory test with the emulator's
+  sequence: `lwz B; stw X,22(A); lhz 2(B)` with A out of the cache, in it
+  clean, in it dirty (B another resident line).
+
+## What is running / where things stand (21:25)
+
+- **Quartus: build 24 = 88aa1e8** in its fitter (chain bg3cj4nrt keeps
+  the rbf as `scratch/BandaiPippin_88aa1e8.rbf`), then **build 25 =
+  4c4629e** (chain b19byxraa, `scratch/BandaiPippin_memtest25.rbf`). For
+  each: `syn/boardcap.sh RBF NAME` does a disc capture round (put the
+  core, stream, load through the OSD, fetch, decode, the stream with
+  `--rom`). The memory test on the board: `trace-capture` first, then OSD
+  Advanced > Boot: toggle twice to Memory test, backspace, down, enter =
+  Apply and reset (the test is over in ~3 s and the ring holds 2 s, so the
+  streamer must run before the apply); `grep DBG` for the error count.
+  **The board is shared tonight**: the Sun-2 session (another Claude
+  session, "OSD refactor and SunOS chesstool") drives .92 from 21:15 for
+  1-2 h; message it (SendMessage to its address) before each 5-minute
+  round and when the board is back. 175d96a's disc capture is done
+  (cap3); its memory test was not run (864f43f's pattern is in build 25
+  too). (`capview.py scratch/tr_cap3.txt 0 8192 --rom "scratch/pippin/
   bandai pippin,19960920 - kinka 1.3,- 3e6b3ee4-a52528e9ce8c.rom"`), and
   read the data at the stores to 81C74/81C7A and the load of 81C76.
 - **The Mac: run19** (run5 with `--mem-wait 48`, lockstep; `rep19.bin`,
