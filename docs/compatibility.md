@@ -26,8 +26,14 @@ gamepad).
 | CD audio (Racing Days) | **silent**: the game sends PLAY AUDIO MSF (status good) for a clip at ~17 s and the menu music at ~27 s; the car-select screen records as zeros |
 | Saving to the flash | **works since 38ac0a1 + 53670e3 (build 34)**: a folder made on Flash!, Shut Down (the Menu key, Return), the image on slot 2 written (the volume's signature "NuMc" at 130C); the core reloaded, the folder is there. Before: the flash answered FF during its erase, the driver's program was lost, and it gave up |
 
-The size Mac OS sees at 13 and 21 MB is measured in the bench (MemTop); the KVM cannot
-open the Apple menu. The Flash! volume lives in VRAM between boots of one session (Mac OS's
+The size Mac OS sees (the bench, Super Marathon's boot, low memory's MemTop at 108; the KVM
+cannot open the Apple menu): 5 MB 004EC000 = 5,040K and 13 MB 00CEA000 = 13,224K, both
+exactly what Kickstart reports on a real Pippin without a card and with an 8 MB card
+(`docs/web-links.md`); 21 MB 014D8000 = 21,344K (no Kickstart figure for a 16 MB card;
+About This Mac shows 21,504K Total Memory there, which counts differently).
+
+Build 35 (f945a58, the release flags, slack +0.205): the four titles boot, the chime plays,
+and the saved Flash! folder comes back after a core reload. The Flash! volume lives in VRAM between boots of one session (Mac OS's
 driver), so before 53670e3 a volume survived core reloads without ever being saved; the
 VRAM is now cleared when the core loads. To keep a save: Special > Shut Down (or the PC
 keyboard's Menu key, the ADB power key), then the image on the OSD's Advanced > Save flash
