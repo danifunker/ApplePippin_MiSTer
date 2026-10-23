@@ -50,6 +50,23 @@ half-lines a line), but that is unproven, so `STD_DOT` stays 1 (the standard rat
 picture on the board is unchanged. **Open:** the 28 chip's power-up D2/N2 (a real Pippin, or
 Apple's Athens Prime data); then `STD_DOT = 0` (cd2424d's path, tested only in the bench).
 
+## 3: the 603's page-crossing alignment exception (branch `align603`)
+
+531723e: the memory unit flags the first word of a non-string access whose bytes cross
+into the next page (`dbus_cross`); the MMU's translation gains a `bat` bit and raises the
+alignment fault in MEM (dcbz's path) for MSR[DR] with no BAT hit, before any byte moves; DAR
+the EA. `CROSS_ALIGN` (DSPPC603, default 1) turns it off. The machine bench hands it to
+dingusppc as dcbz's. Tests (08a40cd, 3fccb6d): `mmutest` per CPU (603: a word at FFE, a
+store at FFE with nothing stored, a halfword at FFF take 600; a word at FFC, a crossing load
+through a BAT and with translation off do not; the 604 keeps its DSI on the second page);
+`widecachetest`'s crossing double on the 603 through BAT aliases (its first version ran
+away: the stfd at FFC under page translation trapped with no handler; then its dcbst/dcbi
+at the page's end still used the page-table base, and the core set R/C on 701000 where
+dingusppc does not: a test bug). run_core.py (603): everything passed but widecachetest's
+three runs; after 3fccb6d those three pass (plain, wait states and snoops, lockstep with
+held ACK), mmutest passes. Next: run29 (the lockstep boot) and run_core --cpu 604 --quick
+(`~/pippin_bench/chainalign2.txt`), then merge into `pippin`.
+
 ## 3: regression tests (88ba866)
 
 `sdram_tb --dqm-quirk`: the chip model writes zeros for a WRITE beat with both DQMs high, as
