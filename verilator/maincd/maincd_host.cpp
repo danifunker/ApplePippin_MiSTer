@@ -80,6 +80,7 @@ void diskled_on() {}
 // the Pippin's CD: block slot 4, the "optimized" Mac SCSI path (the core's own CD target)
 int mac_cdrom_slot() { return 4; }
 char is_mac_scsi_optimized() { return 1; }
+char mac_cd_read_keeps_audio() { return 1; }   // the Pippin: a data read leaves the CD audio playing
 
 int user_io_file_mount(const char* name, unsigned char index, char, int)
 {

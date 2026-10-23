@@ -88,7 +88,12 @@ module Pippin_scsidisk
 #(
 	parameter int unsigned CLK_HZ   = 65_000_000,   // the CPU's clock
 	parameter int unsigned CLK_HZ_FAST = CLK_HZ,    // ... with cpu_fast
-	parameter int unsigned PHASE_US = 10            // a phase change's delay before REQ
+	parameter int unsigned PHASE_US = 10,           // a phase change's delay before REQ
+	// 0: a data READ during PLAY AUDIO leaves the audio playing (the Pippin's drive: Mac OS's
+	// CD driver reads block 0 right after Racing Days starts its menu music, which goes on;
+	// the Main does the same for the Pippin, mac_cd_read_keeps_audio); 1: a read stops it
+	// (MacPPC7300's and the Quadra 800's rule)
+	parameter bit          READ_STOPS_AUDIO = 1'b0
 )
 (
 	input  logic        clk,            // the CPU's clock
@@ -859,7 +864,7 @@ always_ff @(posedge clk) begin
 					8'h08, 8'h28, 8'hA8: begin
 						if (!rg_ok_q) check(4'h5, 8'h21);
 						else if (rd_n4nz_q) begin
-							a_stop_ev <= 1'b1;                                  // a data read stops the audio
+							if (READ_STOPS_AUDIO) a_stop_ev <= 1'b1;            // a data read stops the audio (READ_STOPS_AUDIO)
 							read_blocks(3'd4, rd_l4_q, rd_n4_q, 10'd512);
 						end
 					end
