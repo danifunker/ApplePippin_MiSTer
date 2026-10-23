@@ -171,7 +171,9 @@ when they are there** (gamepad: the AppleJack; listening).
   for VGA, PAL from Athens 29 (the ROM's 14.375 MHz = 920 x 15,625 Hz); check the PAL timing
   the ROM writes to Taos (HPIX 918?).
 - **66 MHz**: later ("soon"); build 37's failing paths are DSPPC603's (ex_b -> cr, msr ->
-  TLB valid); build 38 = seed 3.
+  TLB valid; one of its three boots failed). **Build 38** (3acff21, seed 3, slack +0.120):
+  on .92, three core loads boot Macintosh on Pippin; Video > Interlace and Input > AppleJack 2
+  in the OSD. The Flash! volume still reaches the flash only at Shut Down (the VRAM cache).
 - **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
   DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
 
