@@ -599,16 +599,21 @@ def mmutest(out):
     p.expect[0x00301004] = 0xABCD1234
     expect(D(32, 5, 12, 0), 0x300, 0, dar=U, dsisr=0x40000000)               # no page: load
     expect(D(36, 11, 12, 8), 0x300, 0, dar=U + 8, dsisr=0x42000000)          # ... store
-    # crossing into the next page under page translation: the 603's alignment exception,
-    # before any byte moves (CROSS_ALIGN; on the 604 these went in pieces, a DSI on U)
-    lwz_x, stw_x, lhz_x = D(32, 5, 10, 0xFFE), D(36, 11, 10, 0xFFE), D(40, 5, 10, 0xFFF)
-    expect(lwz_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(lwz_x))
-    expect(stw_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(stw_x))         # nothing stored
-    p.expect[0x00301FFC] = 0x22222222
-    expect(lhz_x, 0x600, 0, dar=B + 0xFFF, dsisr=align_dsisr(lhz_x))         # a halfword at xxFFF
-    load(5, 10, 0xFFC, 0x22222222)                                           # the page's last word: no crossing
+    if CPU == "603":
+        # crossing into the next page under page translation: the 603's alignment exception,
+        # before any byte moves (DSPPC603 CROSS_ALIGN; the 604 performs it in pieces, below)
+        lwz_x, stw_x, lhz_x = D(32, 5, 10, 0xFFE), D(36, 11, 10, 0xFFE), D(40, 5, 10, 0xFFF)
+        expect(lwz_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(lwz_x))
+        expect(stw_x, 0x600, 0, dar=B + 0xFFE, dsisr=align_dsisr(stw_x))     # nothing stored
+        p.expect[0x00301FFC] = 0x22222222
+        expect(lhz_x, 0x600, 0, dar=B + 0xFFF, dsisr=align_dsisr(lhz_x))     # a halfword at xxFFF
+        load(5, 10, 0xFFC, 0x22222222)                                       # the page's last word: no crossing
+    else:
+        expect(D(32, 5, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x40000000)       # crosses into it
+        expect(D(36, 11, 10, 0xFFE), 0x300, 0, dar=U, dsisr=0x42000000)      # ... the first two bytes are stored
+        p.expect[0x00301FFC] = 0x2222ABCD
     expect(D(46, 28, 10, 0xFF8), 0x300, 0, dar=U, dsisr=0x40000000)          # lmw r28: two words, then the fault
-    # ... through a BAT: no exception (the first 128 KB, identity)
+    # ... through a BAT: no exception on either (the first 128 KB, identity)
     p.data[0x0001EFFC] = 0x01020304
     p.data[0x0001F000] = 0x05060708
     p.words += li32(23, 0x0001E000)
@@ -675,7 +680,7 @@ def mmutest(out):
     p.words += set_msr(0, 7)
     st["msr"] = 0
     load(5, 19, 0, 0x11111111)
-    load(5, 19, 0xFFE, 0x22220000)                                           # crossing, translation off: no exception
+    load(5, 19, 0xFFE, 0x22220000 if CPU == "603" else 0xABCD0000)          # crossing, translation off: no exception
 
     p.expect.update(ptes)
     p.words.append(B_SELF)
@@ -987,8 +992,17 @@ def widecachetest(out):
     p.words += caches_on() + set_msr(0, 7)
     for n, v in srs.items():
         p.words += li32(7, v) + [mtsr(n, 7)]
-    for spr, v in ((IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
-                   (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)):
+    bats = [(IBAT0U, batu(0, 8, 1, 1)), (IBAT0U + 1, batl(0, 2)),
+            (DBAT0U, batu(0, 8, 1, 1)), (DBAT0U + 1, batl(0, 2)), (SDR1, sdr1)]
+    # The 603 takes an alignment exception for a double crossing a page under page
+    # translation (DSPPC603 CROSS_ALIGN): its crossing case (off FFC) goes through
+    # BATs, aliases of the same physical pages with the same WIMG
+    cross_bat = CPU == "603"
+    ca2, ci2, wt2 = 0x00720000, 0x00740000, 0x00760000
+    if cross_bat:
+        for n, (ea, wimg) in enumerate(((ca2, 0), (ci2, 4), (wt2, 8)), start=1):
+            bats += [(DBAT0U + 2 * n, batu(ea, 1, 1, 0)), (DBAT0U + 2 * n + 1, batl(phys, 2, wimg))]
+    for spr, v in bats:
         p.words += li32(7, v) + [mtspr(spr, 7)]
     p.words += set_msr(MSR_IR | MSR_DR | MSR_FP, 7) + li32(11, source)
     p.words += [D(50, 3, 11, 0), D(50, 4, 11, 8)]
@@ -1000,7 +1014,8 @@ def widecachetest(out):
         p.checks.append((len(p.words) - 1, check_text([0] * 4, 0, 0, 0, 0, list(f), tag)))
 
     for off in (0, 4, 8, 24, 28, 0xFFC):
-        p.words += li32(8, ca + off) + li32(9, ci + off) + li32(10, wt + off)
+        bca, bci, bwt = (ca2, ci2, wt2) if (cross_bat and off == 0xFFC) else (ca, ci, wt)
+        p.words += li32(8, bca + off) + li32(9, bci + off) + li32(10, bwt + off)
         p.words += [X(0, 0, 8, 470), D(54, 3, 8, 0)]
         load(5, 8, a, "cached_%x" % off)
         p.words.append(X(0, 0, 8, 54))
