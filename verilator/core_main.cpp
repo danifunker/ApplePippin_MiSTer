@@ -1162,7 +1162,7 @@ int main(int argc, char** argv) {
 		for (int i = 0; i < 8; i++) dut->b_rdata[i] = mm.rdata[i];
 		// the console's video switch (Taos's GPIO): 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
 		dut->mon_id = opt.monitor == 6 ? 6 : opt.monitor == 3 ? 3 : 5;
-		dut->eject_btn = 0;
+		dut->eject_btn = cycles < eject_until;   // the console's eject button (--eject-at)
 		dut->fl_ld_we = 0;           // the save flash starts erased (no image loaded)
 		dut->fl_ld_re = 0;
 		dut->fl_ld_addr = 0;
@@ -1890,7 +1890,6 @@ int main(int argc, char** argv) {
 					            (unsigned long long)retired, (unsigned long long)cycles);
 					eject_next++;
 				}
-				dut->eject_btn = cycles < eject_until;
 				while (mouse_next < opt.mouse.size() && retired >= opt.mouse[mouse_next].at) {
 					const Options::MouseMove& m = opt.mouse[mouse_next++];
 					int x = std::max(-255, std::min(255, m.dx)), y = std::max(-255, std::min(255, -m.dy));
