@@ -104,6 +104,7 @@ module Pippin_system
 	output logic         fl_changed,
 
 	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 6 VGA, 3 PAL
+	input  logic         vid_progressive, // NTSC and PAL shown progressive (Pippin_taosvideo), quasi-static
 	input  logic         tray_closed,
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them
@@ -524,7 +525,7 @@ Pippin_taosvideo video (
 	.ddr_busy(va_busy), .ddr_burstcnt(va_burstcnt), .ddr_addr(va_addr), .ddr_dout, .ddr_dout_ready(va_dout_ready),
 	.ddr_rd(va_rd), .ddr_din(va_din), .ddr_be(va_be), .ddr_we(va_we),
 	.timing_on(taos_on), .swatch(taos_swatch), .fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16),
-	.athens_d2, .athens_n2, .athens_p2, .athens_set, .mon_id, .vbl,
+	.athens_d2, .athens_n2, .athens_p2, .athens_set, .mon_id, .progressive(vid_progressive), .vbl,
 	.clut_index, .clut_rgb,
 	.ce_pix(vid_ce), .r(vid_r), .g(vid_g), .b(vid_b), .hs(vid_hs), .vs(vid_vs),
 	.hblank(vid_hblank), .vblank(vid_vblank), .field(vid_field), .interlaced(vid_interlaced)

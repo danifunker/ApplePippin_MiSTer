@@ -84,6 +84,7 @@ module Pippin_taosvideo
 	input  logic [7:0]   athens_p2,
 	input  logic         athens_set,      // Athens has been programmed (quasi-static, the CPU's clock)
 	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 3 PAL, 6 VGA (STD_DOT)
+	input  logic         progressive,     // an interlaced timing shown progressive: every line each field (quasi-static)
 	output logic         vbl,
 	output logic [23:0]  clut_index,      // Taos's colour table (R, G, B indices), read a clock later
 	input  logic [23:0]  clut_rgb,
@@ -140,6 +141,13 @@ wire [11:0] pitch = row_words[31:20];
 localparam longint unsigned XTAL = 20_000_000;
 logic [1:0]  set_s;
 always_ff @(posedge clk) set_s <= {set_s[0], athens_set};
+// Progressive (2026-10-22, the OSD's Interlace option): an interlaced timing (NTSC, PAL) is
+// shown as a progressive picture: each field period scans every line of the frame buffer,
+// one a half-line of the timing, at twice the dot rate (480 lines at 31 kHz for NTSC, the
+// field rate and the vertical blank Mac OS sees unchanged), so the fields' flicker goes
+logic [1:0]  prog_s;
+always_ff @(posedge clk) prog_s <= {prog_s[0], progressive};
+wire         prog_dot = prog_s[1] & T_VHL[0];
 logic [39:0] numer, denom, acc;
 logic        dot_off, ce_dot;
 wire  [40:0] acc_n = {1'b0, acc} + {1'b0, numer};
@@ -147,16 +155,16 @@ wire  [7:0]  d_eff = (athens_p2[5:4] == 2'd2) ? 8'd1 : athens_d2;
 wire  [12:0] htot  = {1'b0, T_HPIX} + 13'd2;
 always_ff @(posedge clk) begin
 	if (STD_DOT || !set_s[1]) begin
-		numer   <= (mon_id == 3'd5) ? 40'(4_500_000)  * 40'(htot) :
-		           (mon_id == 3'd3) ? 40'(15_625)     * 40'(htot) :
-		                              40'(25_175_000) * 40'(htot);
+		numer   <= ((mon_id == 3'd5) ? 40'(4_500_000)  * 40'(htot) :
+		            (mon_id == 3'd3) ? 40'(15_625)     * 40'(htot) :
+		                               40'(25_175_000) * 40'(htot)) << prog_dot;
 		denom   <= (mon_id == 3'd5) ? 40'(286) * 40'(CLKV_HZ) :
 		           (mon_id == 3'd3) ? 40'(CLKV_HZ) :
 		                              40'(800) * 40'(CLKV_HZ);
 		dot_off <= 1'b0;
 	end
 	else begin
-		numer   <= (athens_p2[5:4] == 2'd2) ? 40'(XTAL) : 40'(athens_n2) * 40'(XTAL);
+		numer   <= ((athens_p2[5:4] == 2'd2) ? 40'(XTAL) : 40'(athens_n2) * 40'(XTAL)) << prog_dot;
 		denom   <= (40'(d_eff) * 40'(CLKV_HZ)) << (3'd4 - {1'b0, athens_p2[1:0]});   // (x 2: half the output)
 		dot_off <= athens_p2[7] | athens_p2[4] | (athens_p2[5:4] == 2'd0 && (athens_d2 == 8'd0 || athens_n2 == 8'd0));
 	end
@@ -190,6 +198,7 @@ wire [11:0] HAL   = use_fb ? 12'd144  : T_HAL;
 wire [11:0] HBWAY = use_fb ? 12'd0    : T_HBWAY;
 wire [11:0] HSP   = use_fb ? 12'd704  : T_HSP;
 wire        ilace = VHL[0];
+wire        pmode = ilace & prog_s[1] & ~use_fb;  // the interlaced timing shown progressive
 
 logic [11:0] h, v;
 logic [11:0] xa;
@@ -198,7 +207,7 @@ logic [11:0] s_x;
 logic [10:0] s_y, fetch_y;                // the line within the field
 logic        fetch_fld;
 
-wire [12:0] v2      = {1'b0, v} + 13'd2;
+wire [12:0] v2      = {1'b0, v} + (pmode ? 13'd1 : 13'd2);
 wire [11:0] v_next  = (v2 >= {1'b0, VHL}) ? 12'(v2 - {1'b0, VHL}) : v2[11:0];
 wire        last_h  = h >= HPIX + 12'd1;
 wire        v2_act  = (v_next >= VAL) && (v_next < VFP);
@@ -228,8 +237,8 @@ always_ff @(posedge clk) begin
 		s_hs  <= ~((h >= HSP) || (h < HBWAY));    // negative syncs
 		s_vs  <= ~((v >= VSYNC) || (v < VBPEQ));
 		s_x   <= xa;
-		s_y   <= 11'(v_rel >> 1);
-		s_fld <= ilace & v_rel[0];
+		s_y   <= pmode ? 11'(v_rel) : 11'(v_rel >> 1);
+		s_fld <= ilace & ~pmode & v_rel[0];
 		if ((h >= HAL) && (h < HFP)) xa <= xa + 12'd1;
 		if (!last_h) h <= h + 12'd1;
 		else begin
@@ -240,8 +249,8 @@ always_ff @(posedge clk) begin
 		// a line starts: fetch the line after it if that one is active
 		if (h == 12'd0) begin
 			fetch     <= v2_act && !use_fb;
-			fetch_y   <= 11'(vn_rel >> 1);
-			fetch_fld <= ilace & vn_rel[0];
+			fetch_y   <= pmode ? 11'(vn_rel) : 11'(vn_rel >> 1);
+			fetch_fld <= ilace & ~pmode & vn_rel[0];
 		end
 	end
 end
@@ -283,7 +292,7 @@ logic        f_last;                   // the last DDR3 access was a scan-out bu
 wire         f_word = (ds == D_FWAIT) && ddr_dout_ready;
 wire  [7:0]  f_next = (f_left > 12'd32) ? 8'd32 : 8'(f_left);
 // the frame buffer's line: a field shows every other one
-wire  [10:0] fb_y   = ilace ? {fetch_y[9:0], fetch_fld} : fetch_y;
+wire  [10:0] fb_y   = (ilace & ~pmode) ? {fetch_y[9:0], fetch_fld} : fetch_y;
 
 always_ff @(posedge clk) begin
 	f_calc <= 1'b0;
@@ -501,7 +510,7 @@ always_ff @(posedge clk) begin
 	hblank     <= p3_hb;
 	vblank     <= p3_vb;
 	field      <= p3_fld;
-	interlaced <= ilace;
+	interlaced <= ilace & ~pmode;
 end
 
 endmodule

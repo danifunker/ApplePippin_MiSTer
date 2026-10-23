@@ -133,6 +133,9 @@ localparam CONF_STR = {
 	"R[0],Apply and reset;",
 
 	"P2O[32:30],Video out,NTSC,VGA,PAL;",
+	// NTSC and PAL are interlaced: Progressive shows every line each field (no flicker),
+	// Original the fields as the console sends them
+	"P2O[36],Interlace,Progressive,Original;",
 	"P2O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"P2O[10:9],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 
@@ -766,7 +769,7 @@ Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(
 	.cpu_req, .cpu_we, .cpu_line, .cpu_addr, .cpu_be, .cpu_wdata, .cpu_ack, .cpu_rdata, .cpu_irq, .cpu_tb_tick,
 	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi, .snd_left, .snd_right,
 	.nv_ld_we(1'b0), .nv_ld_re(1'b0), .nv_ld_addr(13'd0), .nv_ld_data(8'd0), .nv_ld_rack(), .nv_ld_q(), .nv_wr_cpu(),
-	.mon_id(mon_c[1]), .tray_closed(1'b1),
+	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .tray_closed(1'b1),
 	.fl_ld_we(nv_ld_we), .fl_ld_re(nv_ld_re), .fl_ld_addr(nv_ld_addr), .fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
 	.fl_changed(nv_wr_cpu),
 	.ps2_key, .ps2_mouse, .joy, .joy2,           // in the memory clock: Pippin_adb synchronises them
