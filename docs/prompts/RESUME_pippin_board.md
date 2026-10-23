@@ -173,7 +173,20 @@ when they are there** (gamepad: the AppleJack; listening).
 - **66 MHz**: later ("soon"); build 37's failing paths are DSPPC603's (ex_b -> cr, msr ->
   TLB valid; one of its three boots failed). **Build 38** (3acff21, seed 3, slack +0.120):
   on .92, three core loads boot Macintosh on Pippin; Video > Interlace and Input > AppleJack 2
-  in the OSD. The Flash! volume still reaches the flash only at Shut Down (the VRAM cache).
+  in the OSD.
+- **Instant saves** (6961fda, build 39): measured on .92 with build 38 (2026-10-23): a folder
+  made on Flash!, the image's mtime unchanged for five minutes; Restart (power key, R) wrote
+  it 4 s later; the Finder refuses to put away the startup CD. So Mac OS writes the volume
+  only at Shut Down or Restart (a real Pippin's eject of the boot disc restarts). The VRAM
+  copy at DDR3 300E0000 equals the CPU's view of the flash byte for byte (2 bytes differed:
+  dates touched after the restart). OSD Advanced > Flash! saves: Instant (default) mirrors each
+  VRAM store into F00E0000-F00FFFFF into the flash (Pippin_flash mir_*, armed by the driver's
+  read of 130C, cleared by reset), so the SD image follows 1 s later; At Shut Down = before.
+  An OSD disc change does not restart the Pippin (the media just changes under Mac OS).
+  Build 39 (6961fda, slack +0.078; `scratch/BandaiPippin_6961fda.rbf`, on .92 as
+  `_Console/BandaiPippin_20261023.rbf`) is untested on the board: .92 was running
+  IBMRS6K7248 for another session. Test: folder on Flash!, the image's mtime within ~2 s,
+  core reloaded without Shut Down, the folder still there.
 - **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
   DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
 
