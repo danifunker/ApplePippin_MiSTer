@@ -1158,6 +1158,7 @@ int main(int argc, char** argv) {
 		dut->fl_ld_re = 0;
 		dut->fl_ld_addr = 0;
 		dut->fl_ld_data = 0;
+		dut->fl_instant = 1;         // the OSD's default: the Flash! volume written through (Pippin_flash)
 		dut->clock_ok = opt.clock_secs != 0;
 		dut->clock_secs = opt.clock_secs;
 		dut->ddr_busy = ddr.busy;

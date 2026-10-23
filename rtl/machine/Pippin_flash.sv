@@ -29,7 +29,24 @@
 //  Down.) A write out of sequence goes back to reading the array.
 //
 //  The second port loads and saves the image (Pippin_nvsave's kind): a byte a
-//  cycle by flash address; ext_wr marks the CPU's changes.
+//  cycle by flash address; changed marks the CPU's changes.
+//
+//  The instant save (2026-10-23, the OSD's "Flash! saves"): Mac OS's driver keeps
+//  the Flash! volume in the top 128 KB of the VRAM (F00E0000-F00FFFFF; the ROM
+//  loads it from here at startup, FFCCE4A0, when "NuMc" is at 130C) and writes
+//  it back here only at Shut Down or Restart (a sector erase and a program per
+//  byte; measured on the board 2026-10-23: nothing in five minutes after a
+//  change, the image written 4 s after Restart). A MiSTer is turned off or
+//  given another disc or core without either, so with mir_on each VRAM store
+//  into those 128 KB (mir_ld, presented by the machine as the store is
+//  answered) is also written here, byte for byte at the same offset (the VRAM
+//  holds the volume as the CPU reads the flash: VRAM byte n is flash byte n,
+//  checked on the board), and changed marks it, so the image is saved a second
+//  later. Armed only once the driver has read 130C in the array (the VRAM is
+//  the ROM's scratch before that: dingusppc's taos.h), until the next reset;
+//  mir_busy holds the next store into the volume while a store's bytes go in,
+//  one a clock, in the clocks the CPU's port leaves free. The write-back at
+//  Shut Down still works as before (it programs what is already here).
 //
 //============================================================================
 
@@ -52,7 +69,17 @@ module Pippin_flash
 	input  logic [16:0]  ld_addr,
 	input  logic [7:0]   ld_data,
 	output logic [7:0]   ld_q,
-	output logic         changed          // a byte was programmed or erased by the CPU (one clock)
+	output logic         changed,         // a byte was programmed or erased by the CPU, or mirrored (one clock)
+
+	// the instant save: a VRAM store into the volume's 128 KB, in the VRAM's byte order (a word,
+	// be[3] the lowest address, or a whole line, word 0 in bits 255-224), one clock
+	input  logic         mir_on,
+	input  logic         mir_ld,
+	input  logic         mir_line,
+	input  logic [16:2]  mir_addr,
+	input  logic [3:0]   mir_be,
+	input  logic [255:0] mir_wdata,
+	output logic         mir_busy
 );
 
 localparam logic [7:0] MFR_ID = 8'h01;   // AMD
@@ -90,12 +117,26 @@ logic        prog_q;                          // a program: the old byte read la
 logic [16:0] prog_a;
 logic [7:0]  prog_d;
 
+// the instant save: the store in hand as a line (byte j of the line in bits 255-8j..248-8j), its
+// bytes to go (mb_mask) from mb_idx on, mb_left of them
+logic         armed;
+logic [255:0] mb_data;
+logic [31:0]  mb_mask;
+logic [16:5]  mb_line;
+logic [4:0]   mb_idx;
+logic [5:0]   mb_left;
+assign mir_busy = mb_left != 6'd0;
+wire          mb_free = mir_busy && !sel && !er_on && !prog_q;   // the port's clock to take
+wire  [7:0]   mb_byte = mb_data[8'(255 - 8 * mb_idx) -: 8];
+wire          mb_we   = mb_free && mb_mask[mb_idx];
+
 always_comb begin
 	m_we = 1'b0;
 	m_a  = fa;
 	m_d  = 8'hFF;
 	if (er_on)       begin m_we = 1'b1; m_a = er_a; end
 	else if (prog_q) begin m_we = 1'b1; m_a = prog_a; m_d = m_q & prog_d; end
+	else if (mb_we)  begin m_we = 1'b1; m_a = {mb_line, mb_idx}; m_d = rev8(mb_byte); end
 	m_d = ~m_d;
 end
 
@@ -123,6 +164,30 @@ always_ff @(posedge clk) begin
 		changed <= 1'b1;
 	end
 	if (prog_q) changed <= 1'b1;
+	if (mb_we)  changed <= 1'b1;
+
+	// the instant save: armed by the driver's look at the signature, a store taken whole, its
+	// bytes written as the port is free
+	if (sel & ~we && st == F_READ && !er_on && fa == 17'h0130C) armed <= 1'b1;
+	if (mb_free) begin
+		mb_idx  <= mb_idx + 5'd1;
+		mb_left <= mb_left - 6'd1;
+	end
+	if (mir_ld && mir_on && armed && !mir_busy) begin
+		mb_line <= mir_addr[16:5];
+		if (mir_line) begin
+			mb_data <= mir_wdata;
+			mb_mask <= '1;
+			mb_idx  <= 5'd0;
+			mb_left <= 6'd32;
+		end
+		else begin
+			mb_data <= {mir_wdata[31:0], 224'd0} >> (32 * mir_addr[4:2]);
+			mb_mask <= 32'({mir_be[0], mir_be[1], mir_be[2], mir_be[3]}) << (4 * mir_addr[4:2]);
+			mb_idx  <= {mir_addr[4:2], 2'b00};
+			mb_left <= 6'd4;
+		end
+	end
 
 	if (sel & ~we) begin
 		rd_id <= st == F_ID;
@@ -169,6 +234,8 @@ always_ff @(posedge clk) begin
 		rd_id  <= 1'b0;
 		rd_er  <= 1'b0;
 		er_tog <= 1'b0;
+		armed  <= 1'b0;
+		mb_left <= 6'd0;
 	end
 end
 

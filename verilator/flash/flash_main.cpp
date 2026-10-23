@@ -18,6 +18,7 @@ static uint8_t rd(uint32_t fa) {
 	uint8_t v = rev((uint8_t)(d->rdata >> 24)); tick(); return v;
 }
 static int fails = 0;
+static bool mir_en = true;
 static void expect(const char* what, uint32_t fa, uint8_t want) {
 	uint8_t got = rd(fa);
 	if (got != want) { std::printf("FAIL %s: %05X reads %02X, want %02X\n", what, fa, got, want); fails++; }
@@ -67,6 +68,48 @@ int main(int argc, char** argv) {
 	// the image port: load a byte, the CPU reads it
 	d->ld_we = 1; d->ld_addr = 0x00200; d->ld_data = 0x3C; tick(); d->ld_we = 0; tick();
 	expect("loaded through the image port", 0x00200, 0x3C);
+	// the instant save: VRAM stores into the volume's 128 KB written through, once armed (the VRAM
+	// holds the CPU's view of the flash, rd() and wr() take the flash's own: hence rev())
+	{
+		auto store = [](uint32_t off, bool line, uint8_t be, const uint8_t* bytes) {
+			d->mir_on = mir_en; d->mir_ld = 1; d->mir_line = line; d->mir_addr = off >> 2; d->mir_be = be;
+			for (int w = 0; w < 8; w++) d->mir_wdata[w] = 0;
+			int n = line ? 32 : 4;
+			for (int j = 0; j < n; j++) {               // byte j (lowest address first) at bits 255-8j (a line) or 31-8j (a word)
+				int bit = (line ? 255 : 31) - 8 * j - 7;
+				d->mir_wdata[bit / 32] |= (uint32_t)bytes[j] << (bit % 32);
+			}
+			tick(); d->mir_ld = 0;
+			int changes = 0, n_t = 0;
+			while (d->mir_busy && n_t < 100) { tick(); n_t++; changes += d->changed; }
+			tick(); changes += d->changed;
+			return changes;
+		};
+		const uint8_t w1[4] = {0x11, 0x22, 0x33, 0x44};
+		store(0x01234 & ~3u, false, 0xF, w1);
+		expect("a store before the driver's look at 130C is not mirrored", 0x01234, 0xFF);
+		rd(0x0130C);                                    // the driver's signature check: armed
+		int ch = store(0x01234, false, 0xF, w1);
+		expect("word store, byte 0", 0x01234, rev(0x11));
+		expect("word store, byte 3", 0x01237, rev(0x44));
+		if (ch != 4) { std::printf("FAIL word store: %d changes, want 4\n", ch); fails++; }
+		const uint8_t w2[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+		store(0x02008, false, 0x4, w2);                // be[2]: the second byte only
+		expect("byte store: its byte", 0x02009, rev(0xBB));
+		expect("byte store: not its neighbour", 0x02008, 0xFF);
+		expect("byte store: nor the other", 0x0200A, 0xFF);
+		uint8_t ln[32]; for (int j = 0; j < 32; j++) ln[j] = (uint8_t)(0x80 + j);
+		store(0x1FFE0, true, 0, ln);
+		expect("line store, first byte", 0x1FFE0, rev(0x80));
+		expect("line store, last byte", 0x1FFFF, rev(0x9F));
+		mir_en = false;
+		store(0x03000, false, 0xF, w1);
+		mir_en = true;
+		expect("with the instant save off nothing is mirrored", 0x03000, 0xFF);
+		d->reset = 1; tick(); d->reset = 0; tick();
+		store(0x03000, false, 0xF, w1);
+		expect("a reset disarms it", 0x03000, 0xFF);
+	}
 	std::printf("%s (%d failures)\n", fails ? "RESULT: FAIL" : "RESULT: PASS", fails);
 	delete d;
 	return fails ? 1 : 0;

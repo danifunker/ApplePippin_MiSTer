@@ -159,6 +159,9 @@ localparam CONF_STR = {
 	// the save flash (Pippin_flash), 128 KB, and Grand Central's 8 KB NVRAM (Mac OS's settings)
 	// kept in an image on slot 2 (Pippin_nvsave): 136 KB keeps both, 128 KB the flash alone
 	"P5SC2,SAV,Save flash;",
+	// Mac OS writes the Flash! volume back to the flash only at Shut Down or Restart; Instant
+	// writes each change through as it is made (Pippin_flash), so the image is saved a second later
+	"P5O[37],Flash! saves,Instant,At Shut Down;",
 	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
 	// in the trace's DBG writes), a debug entry (2026-10-21)
 	"P5O[34],Boot,ROM,Memory test;",
@@ -780,7 +783,7 @@ Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(
 	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .tray_closed(1'b1),
 	.fl_ld_we(nv_ld_we & ~nv_ld_addr[17]), .fl_ld_re(nv_ld_re & ~nv_ld_addr[17]), .fl_ld_addr(nv_ld_addr[16:0]),
 	.fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
-	.fl_changed(nv_wr_cpu),
+	.fl_changed(nv_wr_cpu), .fl_instant(~status[37]),
 	.ps2_key, .ps2_mouse, .joy, .joy2,           // in the memory clock: Pippin_adb synchronises them
 	.clock_ok, .clock_secs,
 	.img_mounted(img_mounted[5:0]), .img_size, .img_readonly,   // the targets' side runs in the memory clock

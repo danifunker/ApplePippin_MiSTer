@@ -224,6 +224,7 @@ module Pippin_machine
 	input  logic [7:0]   fl_ld_data,
 	output logic [7:0]   fl_ld_q,
 	output logic         fl_changed,
+	input  logic         fl_instant,                // the save flash written as the VRAM's copy of the volume changes (Pippin_flash)
 
 	// the console's video switch (Taos's GPIO: 5 NTSC, 6 VGA, 3 PAL) and the CD tray
 	input  logic [2:0]   mon_id,
@@ -457,7 +458,11 @@ end
 // crossing of its own, as RAM goes to the SDRAM. Taos's 1 MB, big-endian, as
 // it is (dingusppc's taos.h:39-41; the ROM uses it as scratch before video).
 
-assign v_req   = q_req & q_is_vram;
+// (a store into the VRAM's top 128 KB, the Flash! volume's copy, also goes to the save flash with
+// the instant save: Pippin_flash, which takes it as it is answered and holds the next meanwhile)
+logic        fl_mir_busy;
+wire         q_vol    = q_is_vram & q_we & (qa[19:17] == 3'b111);
+assign v_req   = q_req & q_is_vram & ~(q_vol & fl_mir_busy);
 assign v_we    = q_we;
 assign v_line  = q_line;
 assign v_addr  = {2'b00, qa[19:2]};
@@ -809,7 +814,9 @@ Pippin_flash flash (
 	.clk, .reset(board_reset),
 	.sel(p_sel & p_dev[7]), .we(p_we), .addr(p_a[18:2]), .be(p_be), .wdata(p_wd), .rdata(fl_rdata),
 	.ld_we(fl_ld_we), .ld_re(fl_ld_re), .ld_addr(fl_ld_addr), .ld_data(fl_ld_data), .ld_q(fl_ld_q),
-	.changed(fl_changed)
+	.changed(fl_changed),
+	.mir_on(fl_instant), .mir_ld(v_req & v_ack & q_vol), .mir_line(q_line), .mir_addr(qa[16:2]), .mir_be(q_be),
+	.mir_wdata(q_wdata), .mir_busy(fl_mir_busy)
 );
 
 // ---- the memory-test boot program, in place of the ROM when the OSD asks ------------------
