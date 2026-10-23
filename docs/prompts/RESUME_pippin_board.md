@@ -210,7 +210,8 @@ when they are there** (gamepad: the AppleJack; listening).
   the core side (6/28 next), a disc chosen in the CD-ROM entry likewise; Eject again closes
   the tray empty. On .92 with build 42 (TRACE=1, 3509a48): Eject from Racing Days, the
   animation, Insert disc: the Pippin logo and Racing Days within 16 s. Release build 43
-  (f77e629, TRACE=0).
+  (f77e629, TRACE=0, slack +0.015; `scratch/BandaiPippin_f77e629.rbf`): on .92, boots Racing
+  Days, Eject, Insert disc: Racing Days again. It is the core on .92 now.
   Open (minor): a second Eject during the animation after a button eject is not seen by the
   ROM on the board (build 41 trace: only the driver's TUR polling every ~2.3 s, no MODE
   SENSE 31 / 1B); the bench (--tray-open from cold boot, press as the animation starts)
