@@ -170,6 +170,7 @@ struct Options {
 	std::vector<MouseMove> mouse;  // PS/2 mouse packets, each after so many instructions
 	std::vector<uint64_t> eject_at;   // the console's eject button pressed after so many instructions
 	uint64_t eject_hold = 28000000;   // ... held this many clocks (400 ms at 70 MHz; the ROM debounces ~100 ms)
+	bool tray_open = false;           // the CD's tray open from the start (a disc in it: --cd)
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
 	std::string vram_dump;         // the VRAM's DDR3 as the run ends, raw (VRAM byte order)
@@ -402,6 +403,8 @@ void usage() {
 		"  --eject-at N     after N instructions, the console's eject button (Taos GPIO 27) is\n"
 		"                   pressed (repeat for more; N in order), held --eject-hold clocks\n"
 		"                   (default 28000000, 400 ms at 70 MHz)\n"
+		"  --tray-open      the CD's tray open from the start, the --cd disc in it (as after\n"
+		"                   an eject: the ROM's insert-disc animation; --eject-at closes it)\n"
 		"  --vram-check     keep a copy of every CPU write to the VRAM window (90000000,\n"
 		"                   Open Firmware's place for Control's VRAM), by VRAM byte (the\n"
 		"                   window's low 22 bits: both apertures, wide mode, 8 bits a\n"
@@ -809,6 +812,7 @@ int main(int argc, char** argv) {
 		}
 		else if (a == "--eject-at") opt.eject_at.push_back(std::strtoull(next().c_str(), nullptr, 0));
 		else if (a == "--eject-hold") opt.eject_hold = std::strtoull(next().c_str(), nullptr, 0);
+		else if (a == "--tray-open") opt.tray_open = true;
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
 		else if (a == "--vram-dump") opt.vram_dump = next();
@@ -1111,6 +1115,7 @@ int main(int argc, char** argv) {
 	size_t mouse_next = 0;
 	size_t eject_next = 0;
 	uint64_t eject_until = 0;            // the eject button held until this cycle
+	bool tray_set = false;               // --tray-open done
 	// the VRAM window as the CPU wrote it: every byte's value and whether it
 	// has been written
 	const uint32_t VWIN = VRAM_BASE, VWIN_SIZE = VRAM_SIZE, VRAM_MASK = (4u << 20) - 1;
@@ -1884,6 +1889,10 @@ int main(int argc, char** argv) {
 					std::fflush(stdout);
 				}
 				if (opt.max_instr && retired >= opt.max_instr) done = true;
+				if (opt.tray_open && !tray_set) {   // at the first instruction, long before the CD is asked
+					dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__cd_ejected = 1;
+					tray_set = true;
+				}
 				while (eject_next < opt.eject_at.size() && retired >= opt.eject_at[eject_next]) {
 					eject_until = cycles + opt.eject_hold;
 					std::printf("eject: the button pressed after %llu instructions (cycle %llu)\n",
