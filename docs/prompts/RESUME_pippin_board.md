@@ -153,6 +153,28 @@ when they are there** (gamepad: the AppleJack; listening).
   (`scratch/boot_chime_v0.1.0_20261022.wav`); **CD audio is silent** (Racing
   Days's PLAY AUDIO MSF accepted, the menu records as zeros).
 
+## Late on 2026-10-22: the user's next list (their order: the second controller first)
+
+- **Second controller** (ea881f5): Pippin_adb's aj2, a second AppleJack from joystick 1 (OSD
+  Input > AppleJack 2, default Yes, with Controller = AppleJack). Bench (`runaj2.txt`, --joy 5
+  --joy2): the ROM's address resolution separates them (mouse 15, joy 14, aj2 3); both stay
+  handler 01 until a game's driver sets 46. Needs two pads on the board (the user).
+- **Flicker** (d7ba2eb): OSD Video > Interlace, Progressive (default: every frame-buffer line
+  each field, 31 kHz, the vertical blank unchanged) or Original (the fields).
+- **Settings** (28d3b79): the slot-2 image holds the flash and then Grand Central's 8 KB NVRAM
+  (136 KB; 128 KB images keep the flash alone); each region saved 1 s after its last write.
+  On the board the 136 KB load works; no boot so far has written the NVRAM (dingusppc's boot
+  without a disc never touches it either), so the save of that region is unexercised. The
+  board's image is 136 KB now (`Pippin flash.sav`; the 128 KB copy `.sav.128k-backup`).
+- **Video clock**: the driver writes only P2 = 02 to Athens 28 whatever the monitor (bench
+  runmon3/6: PAL, VGA). Hypothesis: Athens 28 (straps ~24.5 MHz) halved for NTSC and whole
+  for VGA, PAL from Athens 29 (the ROM's 14.375 MHz = 920 x 15,625 Hz); check the PAL timing
+  the ROM writes to Taos (HPIX 918?).
+- **66 MHz**: later ("soon"); build 37's failing paths are DSPPC603's (ex_b -> cr, msr ->
+  TLB valid); build 38 = seed 3.
+- **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
+  DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
+
 ## Next steps
 
 1. When `chainalign.txt` says `done`: `run_core.py` and run29 PASS → merge
