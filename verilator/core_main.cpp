@@ -168,6 +168,8 @@ struct Options {
 	std::string frame_out;         // ... to this file (PNG if it ends in .png, else PPM)
 	struct MouseMove { uint64_t at; int dx, dy; };
 	std::vector<MouseMove> mouse;  // PS/2 mouse packets, each after so many instructions
+	std::vector<uint64_t> eject_at;   // the console's eject button pressed after so many instructions
+	uint64_t eject_hold = 28000000;   // ... held this many clocks (400 ms at 70 MHz; the ROM debounces ~100 ms)
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
 	std::string vram_dump;         // the VRAM's DDR3 as the run ends, raw (VRAM byte order)
@@ -397,6 +399,9 @@ void usage() {
 		"                   picture to watch while the bench runs)\n"
 		"  --mouse N:DX:DY  after N instructions, the PS/2 mouse moves DX right and DY down\n"
 		"                   (repeat for more; N in order)\n"
+		"  --eject-at N     after N instructions, the console's eject button (Taos GPIO 27) is\n"
+		"                   pressed (repeat for more; N in order), held --eject-hold clocks\n"
+		"                   (default 28000000, 400 ms at 70 MHz)\n"
 		"  --vram-check     keep a copy of every CPU write to the VRAM window (90000000,\n"
 		"                   Open Firmware's place for Control's VRAM), by VRAM byte (the\n"
 		"                   window's low 22 bits: both apertures, wide mode, 8 bits a\n"
@@ -802,6 +807,8 @@ int main(int argc, char** argv) {
 			}
 			opt.mouse.push_back(m);
 		}
+		else if (a == "--eject-at") opt.eject_at.push_back(std::strtoull(next().c_str(), nullptr, 0));
+		else if (a == "--eject-hold") opt.eject_hold = std::strtoull(next().c_str(), nullptr, 0);
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
 		else if (a == "--vram-dump") opt.vram_dump = next();
@@ -1102,6 +1109,8 @@ int main(int argc, char** argv) {
 	// Y up, [15:8] X right, [5] and [4] their signs, [3] always 1)
 	uint32_t ps2_mouse = 0;
 	size_t mouse_next = 0;
+	size_t eject_next = 0;
+	uint64_t eject_until = 0;            // the eject button held until this cycle
 	// the VRAM window as the CPU wrote it: every byte's value and whether it
 	// has been written
 	const uint32_t VWIN = VRAM_BASE, VWIN_SIZE = VRAM_SIZE, VRAM_MASK = (4u << 20) - 1;
@@ -1153,7 +1162,7 @@ int main(int argc, char** argv) {
 		for (int i = 0; i < 8; i++) dut->b_rdata[i] = mm.rdata[i];
 		// the console's video switch (Taos's GPIO): 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
 		dut->mon_id = opt.monitor == 6 ? 6 : opt.monitor == 3 ? 3 : 5;
-		dut->tray_closed = 1;
+		dut->eject_btn = 0;
 		dut->fl_ld_we = 0;           // the save flash starts erased (no image loaded)
 		dut->fl_ld_re = 0;
 		dut->fl_ld_addr = 0;
@@ -1875,6 +1884,13 @@ int main(int argc, char** argv) {
 					std::fflush(stdout);
 				}
 				if (opt.max_instr && retired >= opt.max_instr) done = true;
+				while (eject_next < opt.eject_at.size() && retired >= opt.eject_at[eject_next]) {
+					eject_until = cycles + opt.eject_hold;
+					std::printf("eject: the button pressed after %llu instructions (cycle %llu)\n",
+					            (unsigned long long)retired, (unsigned long long)cycles);
+					eject_next++;
+				}
+				dut->eject_btn = cycles < eject_until;
 				while (mouse_next < opt.mouse.size() && retired >= opt.mouse[mouse_next].at) {
 					const Options::MouseMove& m = opt.mouse[mouse_next++];
 					int x = std::max(-255, std::min(255, m.dx)), y = std::max(-255, std::min(255, -m.dy));

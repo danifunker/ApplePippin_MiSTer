@@ -106,7 +106,7 @@ module Pippin_system
 
 	input  logic [2:0]   mon_id,          // the console's video switch: 5 NTSC, 6 VGA, 3 PAL
 	input  logic         vid_progressive, // NTSC and PAL shown progressive (Pippin_taosvideo), quasi-static
-	input  logic         tray_closed,
+	input  logic         eject_btn,       // the console's eject button, held while pressed (the ROM samples it every 2 ticks)
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them
 	// (the ADB devices synchronise them)
@@ -315,7 +315,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
 	.fl_ld_we, .fl_ld_re, .fl_ld_addr, .fl_ld_data, .fl_ld_q, .fl_changed, .fl_instant,
-	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .joy2, .clock_ok, .clock_secs, .int_dbg,
+	.mon_id, .eject_btn, .ps2_key, .ps2_mouse, .joy, .joy2, .clock_ok, .clock_secs, .int_dbg,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
 	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .athens_set, .vbl,
 	.clk_v(clk_b), .clut_index, .clut_rgb,

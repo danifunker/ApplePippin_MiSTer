@@ -50,7 +50,16 @@
 //  reset and FE after a bus reset. Data: 2048-byte blocks (a MODE SELECT
 //  asking for any other length is refused, 5/26, as the Quadra's), four of
 //  the slot's; an audio-only disc refuses data reads (5/64); no disc is NOT
-//  READY (2/B0, AppleCD's); an eject lasts until a bus reset or a mount.
+//  READY, 2/3A (the CR-8005's: the Pippin ROM's AppleCD driver takes the
+//  drive as SCSI-2 and reads only ASC 04 or 3A as no disc; 2/B0, which it
+//  read until 2026-10-23, it took for an I/O error). An eject (1B with LoEj,
+//  or Apple's C0) opens the tray: answered after the tray's travel (TRAY_MS)
+//  when it was closed, at once when it was open; the disc stays out through
+//  bus and machine resets (the console's eject button resets the machine
+//  right after the eject: ROM VBL task 14CB0, AppleCD csCode 11, then Cuda's
+//  RESET_SYSTEM) until the tray is closed (1B with LoEj and Start: the
+//  driver's toggle when the eject came back in under a second; then 6/28 on
+//  the next command) or a disc is mounted.
 //  The drive answers selection only once the Main has answered the INQUIRY
 //  window with the drive's identity (read after a reset and a mount): with
 //  a Main that does not speak the contract there is no drive at all, and
@@ -93,7 +102,10 @@ module Pippin_scsidisk
 	// CD driver reads block 0 right after Racing Days starts its menu music, which goes on;
 	// the Main does the same for the Pippin, mac_cd_read_keeps_audio); 1: a read stops it
 	// (MacPPC7300's and the Quadra 800's rule)
-	parameter bit          READ_STOPS_AUDIO = 1'b0
+	parameter bit          READ_STOPS_AUDIO = 1'b0,
+	// the tray's travel: an eject with the tray closed is answered this long after (the ROM's
+	// eject button handler closes the tray again if the eject comes back in under 60 ticks)
+	parameter int unsigned TRAY_MS = 1200
 )
 (
 	input  logic        clk,            // the CPU's clock
@@ -299,7 +311,7 @@ typedef enum logic [5:0] {
 	T_MSGOUT_DONE, T_CMD_DONE, T_DECODE, T_DECODE2, T_EXEC, T_RD_START, T_RD_WAIT, T_RD_BYTE, T_RD_NEXT,
 	T_WR_BYTE, T_WR_BLOCK, T_WR_FLUSH, T_DATA_IN, T_DATA_OUT, T_DOUT_BYTE, T_MSEL,
 	T_FWD_CP, T_FWD_W, T_TBO, T_TBO_B, T_TBO_W, T_TB_CP, T_TB_W, T_TB_DEC,
-	T_PEEKW, T_PEEK, T_PROBE, T_PROBE_D, T_STATUS, T_MSGIN, T_MSGX, T_MSGX_N, T_FREE
+	T_PEEKW, T_PEEK, T_PROBE, T_PROBE_D, T_STATUS, T_MSGIN, T_MSGX, T_MSGX_N, T_FREE, T_TRAY
 } t_t;
 t_t ts, t_after, pk_ret, fwd_ret;       // the state; where a byte's handshake, a peek, a forward return to
 
@@ -345,7 +357,11 @@ logic [1:0]  tb_dir;                    // 0 data in, 1 data out, 2 none
 logic [2:0]  tb_slot;
 logic        tb_dbg;                    // TOGGLE DEBUG's flag
 logic        cd_ok;                     // the Main speaks the CD contract (its INQUIRY window answered)
-logic        cd_ejected, cd_prevent;
+logic        cd_ejected = 1'b0;         // the tray open: kept through resets (a real tray stays open)
+logic        cd_prevent;
+logic        cd_ua;                     // a disc loaded by closing the tray: 6/28 owed
+logic [31:0] tray_cnt;                  // the tray's travel, in clocks
+localparam int unsigned TRAY_CLKS = CLK_HZ / 1000 * TRAY_MS, TRAY_CLKS_FAST = CLK_HZ_FAST / 1000 * TRAY_MS;
 logic        probe_pend, hk_ff, hk_fe;  // housekeeping owed
 logic        hk_on;                     // ... under way (off the bus)
 logic        a_fwd_ev, a_stop_ev;       // to the audio
@@ -709,6 +725,7 @@ always_ff @(posedge clk) begin
 	// ---- the CD: a mount puts the disc back; a mount of the same disc is not a change ----
 	if (cd_mev) begin
 		cd_ejected <= 1'b0;
+		cd_ua      <= 1'b0;
 		probe_pend <= 1'b1;
 	end
 
@@ -853,7 +870,11 @@ always_ff @(posedge clk) begin
 			else if (p31_q)
 				respond(R_P31, clamp(10'd56, alloc6));
 			else if (is_cd) begin
-				if (nomedia_q) check(4'h2, 8'hB0);             // AppleCD's no-disc answer
+				if (nomedia_q) check(4'h2, 8'h3A);             // MEDIUM NOT PRESENT
+				else if (cd_ua && op != 8'h03 && op != 8'h12) begin
+					cd_ua <= 1'b0;
+					check(4'h6, 8'h28);                        // the disc the tray brought in
+				end
 				else if (cdao_q) check(4'h5, 8'h64);
 				else case (op)
 					8'h00, 8'h2B, 8'hBB: ;              // TEST UNIT READY, SEEK, SET CD SPEED: GOOD
@@ -868,16 +889,22 @@ always_ff @(posedge clk) begin
 							read_blocks(3'd4, rd_l4_q, rd_n4_q, 10'd512);
 						end
 					end
-					8'h1B, 8'hC0: begin                 // START STOP UNIT (LoEj, not Start), Apple's EJECT
+					8'h1B, 8'hC0: begin                 // START STOP UNIT with LoEj, Apple's EJECT: the tray
 						if (op == 8'hC0 || (cdb[4][1] && !cdb[4][0])) begin
 							if (cd_prevent) check(4'h5, 8'h80);
-							else begin
+							else if (!cd_ejected) begin     // the tray opens: answered once it is out
 								cd_ejected     <= 1'b1;
 								sense_key[cur] <= 4'h2;      // what a later REQUEST SENSE sees
 								sense_asc[cur] <= 8'h3A;
 								a_stop_ev      <= 1'b1;
-								forward(op, 1'b0, T_STATUS);
+								tray_cnt       <= cpu_fast ? 32'(TRAY_CLKS_FAST) : 32'(TRAY_CLKS);
+								forward(op, 1'b0, T_TRAY);
 							end
+						end
+						else if (cdb[4][1] && cdb[4][0] && cd_ejected) begin   // the tray closes
+							cd_ejected <= 1'b0;
+							cd_ua      <= m_valid[2];
+							probe_pend <= 1'b1;
 						end
 					end
 					8'h1E: cd_prevent <= cdb[4][0];
@@ -1119,6 +1146,9 @@ always_ff @(posedge clk) begin
 			ts <= T_IDLE;
 		end
 
+		// ---- the tray's travel before an eject's status ----
+		T_TRAY: if (tray_cnt != 32'd0) tray_cnt <= tray_cnt - 32'd1; else ts <= T_STATUS;
+
 		// ---- STATUS, MESSAGE IN, bus free -----------------------------------------------------------
 		T_STATUS: begin
 			ob <= status;
@@ -1169,11 +1199,10 @@ always_ff @(posedge clk) begin
 	endcase
 
 	// the bus reset: everything let go (a block in flight finishes first); the
-	// CD comes back and the Main's playhead stops
+	// Main's playhead stops (the tray stays as it is)
 	if (b_rst) begin
 		if (!hk_on) ts <= T_IDLE;
 		ph_q       <= 3'b100;
-		cd_ejected <= 1'b0;
 		if (cd_ok) hk_fe <= 1'b1;
 	end
 
@@ -1195,8 +1224,9 @@ always_ff @(posedge clk) begin
 		dout_keep  <= 1'b0;
 		tb_dbg     <= 1'b0;
 		tb_pos     <= 24'd0;
-		cd_ejected <= 1'b0;
 		cd_prevent <= 1'b0;
+		cd_ua      <= 1'b0;
+		tray_cnt   <= 32'd0;
 		probe_pend <= 1'b1;
 		hk_ff      <= 1'b1;
 		hk_fe      <= 1'b0;

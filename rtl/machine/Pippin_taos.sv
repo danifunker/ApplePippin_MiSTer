@@ -12,7 +12,9 @@
 //    20 CRT_CTRL      as written
 //    68 GPIO_IN       the monitor ID in bits 31-29 (mon_id: 5 NTSC, 6 VGA,
 //                     3 PAL; the switch on the console's back, active low),
-//                     bit 27 the CD tray closed, bit 25 the vertical sync,
+//                     bit 27 the console's eject button (0 while pressed:
+//                     the ROM's VBL task polls it; dingusppc's "CD tray"
+//                     reads 1 always), bit 25 the vertical sync,
 //                     without the pins GPIO_CONFIG makes outputs (dingusppc
 //                     masks the low byte instead: the same here, the ROM's
 //                     configurations touching none of those pins)
@@ -47,7 +49,7 @@ module Pippin_taos
 	output logic [31:0]  rdata,
 
 	input  logic [2:0]   mon_id,          // 5 NTSC, 6 VGA, 3 PAL
-	input  logic         tray_closed,
+	input  logic         eject_btn,       // the console's eject button, pressed (GPIO 27, low while pressed)
 	input  logic         vsync,           // the vertical sync input (GPIO 6)
 
 	// to the scan-out (in this clock; standing still while they are used)
@@ -77,7 +79,7 @@ always_comb for (int i = 0; i < 15; i++) swatch[32 * i +: 32] = sw[i];
 
 wire [8:0]  rn     = addr[10:2];          // register number: offset >> 2
 wire [3:0]  sw_n   = 4'(rn - 9'h0B);      // a timing register's index (HEQ 0 ... VHLINE 14)
-wire [31:0] gpio_in = ({mon_id, 1'b0, tray_closed, 1'b0, vsync, 25'd0}) & ~{gpio_cfg[31:24], 24'd0};
+wire [31:0] gpio_in = ({mon_id, 1'b0, ~eject_btn, 1'b0, vsync, 25'd0}) & ~{gpio_cfg[31:24], 24'd0};
 
 // ---- the colour table ------------------------------------------------------------------
 logic [23:0] clut_c [0:255];

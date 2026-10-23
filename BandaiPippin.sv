@@ -162,6 +162,9 @@ localparam CONF_STR = {
 	// Mac OS writes the Flash! volume back to the flash only at Shut Down or Restart; Instant
 	// writes each change through as it is made (Pippin_flash), so the image is saved a second later
 	"P5O[37],Flash! saves,Instant,At Shut Down;",
+	// the console's eject button (Pippin_taos GPIO 27): Mac OS ejects the disc and restarts the
+	// Pippin; the disc stays out until another is mounted (or Eject is pressed again)
+	"P5R[38],Eject disc;",
 	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
 	// in the trace's DBG writes), a debug entry (2026-10-21)
 	"P5O[34],Boot,ROM,Memory test;",
@@ -558,6 +561,20 @@ always @(posedge clk_mem) if (cpu_reset_m) begin
 	spd_want_m <= 1'b0;                     // the PLL's 70 MHz, never reconfigured
 	cpu_fast_m <= spd_pll_s[2];
 end
+// the OSD's Eject disc: the console's eject button held 400 ms (the ROM debounces it over ~6
+// ticks, 100 ms), in the CPU's clock
+localparam int unsigned EJ_CLKS = CPU_HZ / 10 * 4;
+reg  [1:0]  ej_s = 2'b00;
+reg         ej_q = 1'b0, eject_btn = 1'b0;
+reg  [31:0] ej_cnt = 32'd0;
+always @(posedge clk_cpu) begin
+	ej_s <= {ej_s[0], status[38]};
+	ej_q <= ej_s[1];
+	if (ej_s[1] && !ej_q) ej_cnt <= EJ_CLKS;
+	else if (ej_cnt != 32'd0) ej_cnt <= ej_cnt - 32'd1;
+	eject_btn <= ej_cnt != 32'd0;
+end
+
 // "Changes pending" (menu mask bit 0): an OSD setting differs from the one the machine
 // took at its last reset (the memory, the video out, the controller); the Input page's
 // stick setting and the media apply at once and are left out
@@ -780,7 +797,7 @@ Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(
 	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi, .snd_left, .snd_right,
 	.nv_ld_we(nv_ld_we & nv_ld_addr[17]), .nv_ld_re(nv_ld_re & nv_ld_addr[17]), .nv_ld_addr(nv_ld_addr[12:0]),
 	.nv_ld_data(nv_ld_data), .nv_ld_rack(gc_ld_rack), .nv_ld_q(gc_ld_q), .nv_wr_cpu(gc_wr_cpu),
-	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .tray_closed(1'b1),
+	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .eject_btn(eject_btn),
 	.fl_ld_we(nv_ld_we & ~nv_ld_addr[17]), .fl_ld_re(nv_ld_re & ~nv_ld_addr[17]), .fl_ld_addr(nv_ld_addr[16:0]),
 	.fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
 	.fl_changed(nv_wr_cpu), .fl_instant(~status[37]),

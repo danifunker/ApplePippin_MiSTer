@@ -228,7 +228,7 @@ module Pippin_machine
 
 	// the console's video switch (Taos's GPIO: 5 NTSC, 6 VGA, 3 PAL) and the CD tray
 	input  logic [2:0]   mon_id,
-	input  logic         tray_closed,
+	input  logic         eject_btn,                 // the console's eject button (Taos GPIO 27; Mac OS's ROM ejects and resets)
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them (Pippin_adb)
 	input  logic [10:0]  ps2_key,
@@ -618,7 +618,7 @@ logic [2:0]  vbl_s;
 Pippin_taos taos (
 	.clk, .reset(board_reset),
 	.sel(p_sel & p_dev[6]), .clut_sel(p_sel & p_dev[5]), .we(p_we), .addr(p_a[10:2]), .be(p_be), .wdata(p_wd),
-	.rdata(taos_rdata), .mon_id, .tray_closed, .vsync(taos_vsync),
+	.rdata(taos_rdata), .mon_id, .eject_btn, .vsync(taos_vsync),
 	.fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16), .video_mode(taos_video_mode),
 	.crt_ctrl(taos_crt_ctrl), .swatch(taos_swatch),
 	.clk_v, .v_index_r(clut_index[23:16]), .v_index_g(clut_index[15:8]), .v_index_b(clut_index[7:0]),
