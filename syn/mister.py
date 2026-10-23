@@ -565,6 +565,15 @@ def trace(last, first, fname=None):
                                               " ".join("%02x" % b for b in cdb)))
         elif kind == 2:
             print("%s bus reset  %s" % (t, fl))
+        elif kind == 20:
+            # the ESCC's channel A: a byte finished by the receiver and/or one taken by DMA (Pippin_gc scc_tr_info)
+            f = r[10]
+            parts = []
+            if f & 0x80:
+                parts.append("rx %02x%s" % (r[9], " LOST (overrun)" if f & 0x20 else ""))
+            if f & 0x40:
+                parts.append("dma %02x" % r[8])
+            print("%s SCC-A %s  fifo %d" % (t, ", ".join(parts), f & 0x1F))
         elif kind == 18:
             # a block of the card (Pippin_scsidisk): its LBA, half, slot and the rolling XOR of its bytes
             print("%s block lba %d half %d slot %d bytes %d xor %08x" % (t, int.from_bytes(r[8:12], "little"), r[1] & 1, r[2] & 7,

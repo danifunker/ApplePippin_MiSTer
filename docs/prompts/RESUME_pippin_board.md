@@ -119,7 +119,7 @@ when they are there** (gamepad: the AppleJack; listening).
   (one RAM line at the memory port, `TRACE_RAM_A`, with Pippin_sdram's `DIAG`
   word). All 0 now.
 - The memory test (Advanced > Boot), the bench (`verilator/run_machine.py`,
-  options as before), `make sdram` / `make sdram-normw` with `--dqm-quirk`,
+  options as before), `make sdram` (RMW 0, the masks on A12-A11) / `make sdram-rmw`,
   `make flash`, machref (`~/.cache/applepippin/machref/machref`, here; with
   `--machine pippin --cpu 603 --pvr 00030302 --ram 4 --set rambank1_size=4
   --set rambank2_size=1 --set rambank3_size=0 --set rambank4_size=0`;

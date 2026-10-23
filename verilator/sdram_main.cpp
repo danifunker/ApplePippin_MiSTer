@@ -7,10 +7,13 @@
 //            [--module 32|64|128] [--dqm-quirk]
 //
 // --dqm-quirk: a WRITE beat with both DQMs high writes zeros in place of
-// leaving the halfword alone, as MiSTerss1's module does (2026-10-22, the
-// Pippin's stall: docs/prompts/LOG_pippin_board_20261022.md). With the
-// controller's RMW (the default) no such beat is issued and the bench
-// passes; built with RMW = 0 (make sdram-normw) it must fail.
+// leaving the halfword alone (2026-10-22, the first reading of the Pippin's
+// stall: docs/prompts/LOG_pippin_board_20261022.md). The real cause is the
+// boards' wiring, which the model has without the option: DQMH and DQML come
+// from A12 and A11 (below), so a controller that masks only on its DQM pins
+// writes every byte. Pippin_sdram puts the masks on both since 2026-10-23
+// (MacPPC7300 35af5ad, RMW = 0, make sdram) and passes; make sdram-rmw builds
+// the read-modify-write workaround (RMW = 1), which passes too.
 //
 // The model is a MiSTer SDRAM board (--module, 128 MB by default): 128 MB is
 // two ranks of 4 banks x 8192 rows x 1024 columns x 16 bits, nCS low
@@ -32,7 +35,8 @@
 //   AUTO REFRESH with every bank of the rank idle, tRP after the last
 //     PRECHARGE; at most 8 refreshes owed at any time (7.8 us each)
 //   the controller drives the bus only for a WRITE and never while the chip
-//     drives read data; DQM low on every read beat (it never masks a read)
+//     drives read data; DQM low on every read beat (it never masks a read);
+//     DQMH and DQML taken from A12 and A11, the MiSTer boards' wiring
 // Every read is checked against a software copy of the memory, and at the
 // end the model's whole contents are compared with it.
 
@@ -375,7 +379,7 @@ int main(int argc, char** argv) {
 				// the SDRAM's rising edge (SDRAM_CLK is the controller's clock inverted)
 				bool drv; uint16_t dq;
 				chip.edge(sd, dut->SDRAM_nCS, dut->SDRAM_nRAS, dut->SDRAM_nCAS, dut->SDRAM_nWE, dut->SDRAM_BA,
-				          dut->SDRAM_A, (dut->SDRAM_DQMH << 1) | dut->SDRAM_DQML, dut->dq_oe, dut->dq_out, drv, dq);
+				          dut->SDRAM_A, (dut->SDRAM_A >> 11) & 3, dut->dq_oe, dut->dq_out, drv, dq);   // DQM on A12-A11, as the MiSTer boards wire it
 				if (!dut->SDRAM_CKE) fail(sd, "CKE low");
 				chip_drives = drv;
 				dut->dq_in = dq;

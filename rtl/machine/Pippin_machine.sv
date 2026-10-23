@@ -656,6 +656,8 @@ logic [1:0]   dfin_type;
 logic [127:0] dfin_info;
 logic         itr_ev, itr8_ev;
 logic [7:0]   itr8_st;
+logic         scc_tr_ev;
+logic [23:0]  scc_tr_info;
 logic         fd_m_t, fd_m_ok, fd_m_dc42, fd_rq_t, fd_dn_t;
 logic [1:0]   fd_m_fmt;
 logic [11:0]  fd_rq_lba;
@@ -682,7 +684,7 @@ Pippin_gc #(.SCSI_HZ(SCSI_HZ), .SOUND_IN_DMA(SOUND_IN_DMA), .INT_REPORT(INT_REPO
 	/* verilator lint_off PINCONNECTEMPTY */
 	.clut_rgb(),
 	/* verilator lint_on PINCONNECTEMPTY */
-	.dfin, .dfin_ch, .dfin_type, .dfin_info, .itr_ev, .itr_st, .itr8_ev, .itr8_st,
+	.dfin, .dfin_ch, .dfin_type, .dfin_info, .itr_ev, .itr_st, .itr8_ev, .itr8_st, .scc_tr_ev, .scc_tr_info,
 	.fd_m_t, .fd_m_ok, .fd_m_fmt, .fd_m_dc42, .fd_rq_t, .fd_rq_lba, .fd_dn_t, .fd_ra, .fd_q
 );
 
@@ -901,6 +903,7 @@ wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory te
                       (TRACE_FL != 0 && q_is_fl) ||               // the save flash (2026-10-22: does Mac OS program it?)
                       q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
+                                qa[16:13] == 4'h9 || qa[16:10] == 7'h21 ||   // the ESCC and its DMA channels 4-7 (MacPPC7300 719cc93)
                                 (tr_mesh && (qa[16:8] == 9'h180 || qa[16:8] == 9'h08A)) ||
                                 (TRACE_INT != 0 && q_we && (qa[16:8] == 9'h000 || q_is_via)) ||
                                 (TRACE_INT != 0 && q_is_via) ||   // the VIA's reads too: T2 and IFR as the Time Manager sees them
@@ -924,7 +927,17 @@ always_ff @(posedge clk) begin
 	else if (dev_ack) bt_pend <= 1'b0;
 	if (reset) bt_pend <= 1'b0;
 end
-wire bt_ev = dev_ack & bt_pend;
+// an ESCC or serial-DMA access the same as the one two before it (a polling loop's pair) is
+// left out, so a spin does not flood the trace
+wire        bt_ser = bt_a[16:13] == 4'h9 || bt_a[16:10] == 7'h21;
+wire [49:0] bt_key = {bt_a[16:0], bt_we, bt_we ? bt_wd : line_buf[0]};
+logic [49:0] bt_k1, bt_k2;
+wire bt_ev = dev_ack & bt_pend & ~(bt_ser & bt_key == bt_k2);
+always_ff @(posedge clk)
+	if (dev_ack & bt_pend & bt_ser) begin
+		bt_k1 <= bt_key;
+		bt_k2 <= bt_k1;
+	end
 // ... and every word access (not a line: uncached) the CPU makes to one RAM line, as the
 // memory port serves it (2026-10-21 22:50: the floppy driver's TMTask is in a cache-
 // inhibited page and two halves of a misaligned store never reach the SDRAM): the
@@ -959,8 +972,10 @@ always_ff @(posedge clk) begin fl_re_q <= fl_ld_re; fl_ch_q <= fl_changed; end
 wire         fl_tev  = TRACE_FL != 0 &&
                        ((fl_ld_we && fl_ld_addr[8:0] == 9'd0) || (fl_ld_re && !fl_re_q && fl_ld_addr[8:0] == 9'd0) || (fl_changed && !fl_ch_q));
 wire  [31:0] fl_ta   = {8'h4F, fl_changed ? 4'd3 : fl_ld_we ? 4'd1 : 4'd2, 3'd0, fl_ld_addr};
-assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev | fl_tev;
+// kind 20: the ESCC's channel A received a byte or gave one to DMA (scc_tr_info; MacPPC7300's kind 16)
+assign tr_ev  = sd_tr_ev | bt_ev | mw_ev | dfin | adb_tr_ev | itr_tr | itr8_ev | fl_tev | scc_tr_ev;
 assign tr_rec = sd_tr_ev ? sd_tr_rec :
+                scc_tr_ev ? {168'd0, scc_tr_info, bt_us, 24'd0, 8'd20} :
                 fl_tev & ~bt_ev & ~mw_ev ? {128'd0, 24'd0, fl_ld_data, fl_ta, bt_us, 19'd0, 1'b1, 4'hF, 8'd4} :
                 bt_ev    ? {128'd0, bt_we ? bt_wd : line_buf[0], bt_a, bt_us, 19'd0, bt_we, bt_be, 8'd4} :
                 mw_ev    ? {96'd0, m_rdata[63:32], mw_we ? mw_wd : m_rdata[31:0], mw_a, bt_us, 19'd0, mw_we, mw_be, 8'd4} :

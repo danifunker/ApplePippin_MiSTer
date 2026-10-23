@@ -137,17 +137,17 @@ $(BUILD)/sdram/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv 
 		> $(BUILD)/sdram/build.log 2>&1 || (cat $(BUILD)/sdram/build.log; false)
 	@grep -E '^%Warning' $(BUILD)/sdram/build.log || true
 
-# The same with the controller's RMW off (DQM masking): against the model's --dqm-quirk it
-# must fail, which shows the quirk test can see the board's fault
-sdram-normw: $(BUILD)/sdram-normw/sdram_tb
+# The same with the old read-modify-write of partial words (RMW=1, the workaround before the
+# masks went on A12-A11 too)
+sdram-rmw: $(BUILD)/sdram-rmw/sdram_tb
 
-$(BUILD)/sdram-normw/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
-	@mkdir -p $(BUILD)/sdram-normw
-	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -GRMW=0 -Mdir $(BUILD)/sdram-normw -o sdram_tb \
+$(BUILD)/sdram-rmw/sdram_tb: $(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp $(HERE)Makefile
+	@mkdir -p $(BUILD)/sdram-rmw
+	@$(VERILATOR) $(VFLAGS) --top-module sdram_tb_top -GRMW=1 -Mdir $(BUILD)/sdram-rmw -o sdram_tb \
 		-CFLAGS "-O2 -std=c++17" \
 		$(MACH_RTL)/DSPPC603_memcdc.sv $(MACH)/Pippin_sdram.sv $(HERE)sdram_tb_top.sv $(HERE)sdram_main.cpp \
-		> $(BUILD)/sdram-normw/build.log 2>&1 || (cat $(BUILD)/sdram-normw/build.log; false)
-	@grep -E '^%Warning' $(BUILD)/sdram-normw/build.log || true
+		> $(BUILD)/sdram-rmw/build.log 2>&1 || (cat $(BUILD)/sdram-rmw/build.log; false)
+	@grep -E '^%Warning' $(BUILD)/sdram-rmw/build.log || true
 
 lint:
 	@mkdir -p $(BUILD)
@@ -162,4 +162,4 @@ lint-machine:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all core machine flash cdc sdram sdram-normw lint clean
+.PHONY: all core machine flash cdc sdram sdram-rmw lint clean
