@@ -985,7 +985,9 @@ def widecachetest(out):
     table = PageTable(p, sdr1, srs)
     for ea, wimg in ((ca, 0), (ci, 4), (wt, 8)):
         for page in (0, 0x1000):
-            table.map(ea + page, phys + page, 2, wimg=wimg, r_final=1, c_final=1)
+            # (on the 603 the second pages are reached only through the BAT aliases below)
+            touched = page == 0 or CPU != "603"
+            table.map(ea + page, phys + page, 2, wimg=wimg, r_final=int(touched), c_final=int(touched))
     a, b = 0x400921FB54442D18, 0xC010123456ABCDEF
     p.data[source], p.data[source + 4] = a >> 32, a & 0xFFFFFFFF
     p.data[source + 8], p.data[source + 12] = b >> 32, b & 0xFFFFFFFF
@@ -1020,7 +1022,7 @@ def widecachetest(out):
         load(5, 8, a, "cached_%x" % off)
         p.words.append(X(0, 0, 8, 54))
         if off & 31 == 28:
-            p.words += li32(12, ca + off + 4) + [X(0, 0, 12, 54)]
+            p.words += li32(12, bca + off + 4) + [X(0, 0, 12, 54)]
         load(6, 9, a, "flushed_%x" % off)
         p.words.append(D(54, 4, 10, 0))
         load(5, 9, b, "write_through_memory_%x" % off)
