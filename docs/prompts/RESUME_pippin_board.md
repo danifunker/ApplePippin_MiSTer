@@ -195,6 +195,18 @@ when they are there** (gamepad: the AppleJack; listening).
   title's save (Racing Days's folder) watched the same way (VRAM poll for its file's name);
   if titles do not flush, look at the console's eject button (Mac OS restarts on eject of the
   boot disc) and make an OSD disc change do that.
+- **Eject disc** (6df344e, build 40, slack +0.110; `scratch/BandaiPippin_6df344e.rbf`): the
+  console's eject button is Taos GPIO_IN bit 27 (low = pressed), polled by a ROM VBL task
+  (kinka-1.0 MainCode 14B10, handler 14CB0): AppleCD csCode 11 (1E allow, 1B 02 eject; 1B 03
+  if that came back in < 60 ticks), then Cuda RESET_SYSTEM if a disc was in: no FlushVol, so
+  the button saves only what titles already wrote (Instant saves it). OSD Advanced > Eject
+  disc holds the pin 400 ms; the target's eject waits 1.2 s (TRAY_MS) with the tray closed;
+  the tray stays open through resets until a mount or a close (1B 03, then 6/28); no disc is
+  2/3A (was 2/B0, which the ROM's driver takes for an I/O error with the CR-8005 entry).
+  On .92: Eject from the Finder: reset, Pippin logo, the ROM's insert-disc animation; a disc
+  chosen in the OSD (Racing Days) boots at once. Open: a second Eject during the animation
+  did not close the tray and boot (bench runeject2: presses at 300M and 560M instructions,
+  frame at 540M). The first bench run's press (200M) fell during the boot's PREVENT, no eject.
 - **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
   DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
 
