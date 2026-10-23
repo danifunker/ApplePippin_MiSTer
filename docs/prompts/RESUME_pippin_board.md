@@ -204,9 +204,18 @@ when they are there** (gamepad: the AppleJack; listening).
   the tray stays open through resets until a mount or a close (1B 03, then 6/28); no disc is
   2/3A (was 2/B0, which the ROM's driver takes for an I/O error with the CR-8005 entry).
   On .92: Eject from the Finder: reset, Pippin logo, the ROM's insert-disc animation; a disc
-  chosen in the OSD (Racing Days) boots at once. Open: a second Eject during the animation
-  did not close the tray and boot (bench runeject2: presses at 300M and 560M instructions,
-  frame at 540M). The first bench run's press (200M) fell during the boot's PREVENT, no eject.
+  chosen in the OSD (Racing Days) boots at once.
+- **Insert disc** (3509a48; the user's model, 2026-10-23): an eject takes the disc out (tray
+  open, empty); OSD Advanced > Insert disc puts the last disc back and closes the tray from
+  the core side (6/28 next), a disc chosen in the CD-ROM entry likewise; Eject again closes
+  the tray empty. On .92 with build 42 (TRACE=1, 3509a48): Eject from Racing Days, the
+  animation, Insert disc: the Pippin logo and Racing Days within 16 s. Release build 43
+  (f77e629, TRACE=0).
+  Open (minor): a second Eject during the animation after a button eject is not seen by the
+  ROM on the board (build 41 trace: only the driver's TUR polling every ~2.3 s, no MODE
+  SENSE 31 / 1B); the bench (--tray-open from cold boot, press as the animation starts)
+  does see it (MODE SENSE 31, 1B 03, boot). The early bench runs' --eject-at never pressed
+  (drive() reset it each cycle; fixed 1db838d).
 - **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
   DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
 
