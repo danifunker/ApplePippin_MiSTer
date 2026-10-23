@@ -229,6 +229,7 @@ module Pippin_machine
 	// the console's video switch (Taos's GPIO: 5 NTSC, 6 VGA, 3 PAL) and the CD tray
 	input  logic [2:0]   mon_id,
 	input  logic         eject_btn,                 // the console's eject button (Taos GPIO 27; Mac OS's ROM ejects and resets)
+	input  logic         cd_insert,                 // one clock: the last disc back in the CD's tray, the tray closed (Pippin_scsidisk)
 
 	// the keyboard, the mouse and the game controller, as hps_io gives them (Pippin_adb)
 	input  logic [10:0]  ps2_key,
@@ -692,7 +693,7 @@ logic         sd_tr_ev;
 logic [255:0] sd_tr_rec;
 
 Pippin_scsidisk #(.CLK_HZ(CPU_HZ), .CLK_HZ_FAST(CPU_HZ_FAST)) disks (
-	.clk, .cpu_fast, .reset(board_reset),
+	.clk, .cpu_fast, .reset(board_reset), .cd_insert,
 	.t_bsy, .t_req, .t_msg, .t_cd, .t_io, .t_db,
 	.b_rst, .b_bsy, .b_sel, .b_atn, .b_ack, .b_db,
 	.clk_h(clk_v), .img_mounted, .img_size, .img_readonly,

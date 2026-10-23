@@ -165,6 +165,9 @@ localparam CONF_STR = {
 	// the console's eject button (Pippin_taos GPIO 27): Mac OS ejects the disc and restarts the
 	// Pippin; the disc stays out until another is mounted (or Eject is pressed again)
 	"P5R[38],Eject disc;",
+	// the last disc back in the tray and the tray closed (the eject took it out); a disc
+	// chosen in the CD-ROM entry goes in the same way
+	"P5R[39],Insert disc;",
 	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
 	// in the trace's DBG writes), a debug entry (2026-10-21)
 	"P5O[34],Boot,ROM,Memory test;",
@@ -574,6 +577,14 @@ always @(posedge clk_cpu) begin
 	else if (ej_cnt != 32'd0) ej_cnt <= ej_cnt - 32'd1;
 	eject_btn <= ej_cnt != 32'd0;
 end
+// the OSD's Insert disc: one clock in the CPU's clock
+reg  [1:0]  ins_s = 2'b00;
+reg         ins_q = 1'b0, cd_insert = 1'b0;
+always @(posedge clk_cpu) begin
+	ins_s     <= {ins_s[0], status[39]};
+	ins_q     <= ins_s[1];
+	cd_insert <= ins_s[1] && !ins_q;
+end
 
 // "Changes pending" (menu mask bit 0): an OSD setting differs from the one the machine
 // took at its last reset (the memory, the video out, the controller); the Input page's
@@ -797,7 +808,7 @@ Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(
 	.modem_txd, .modem_rxd, .modem_cts, .modem_rts, .modem_midi, .snd_left, .snd_right,
 	.nv_ld_we(nv_ld_we & nv_ld_addr[17]), .nv_ld_re(nv_ld_re & nv_ld_addr[17]), .nv_ld_addr(nv_ld_addr[12:0]),
 	.nv_ld_data(nv_ld_data), .nv_ld_rack(gc_ld_rack), .nv_ld_q(gc_ld_q), .nv_wr_cpu(gc_wr_cpu),
-	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .eject_btn(eject_btn),
+	.mon_id(mon_c[1]), .vid_progressive(~status[36]), .eject_btn(eject_btn), .cd_insert(cd_insert),
 	.fl_ld_we(nv_ld_we & ~nv_ld_addr[17]), .fl_ld_re(nv_ld_re & ~nv_ld_addr[17]), .fl_ld_addr(nv_ld_addr[16:0]),
 	.fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
 	.fl_changed(nv_wr_cpu), .fl_instant(~status[37]),

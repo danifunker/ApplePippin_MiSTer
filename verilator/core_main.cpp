@@ -171,6 +171,7 @@ struct Options {
 	std::vector<uint64_t> eject_at;   // the console's eject button pressed after so many instructions
 	uint64_t eject_hold = 28000000;   // ... held this many clocks (400 ms at 70 MHz; the ROM debounces ~100 ms)
 	bool tray_open = false;           // the CD's tray open from the start (a disc in it: --cd)
+	std::vector<uint64_t> insert_at;  // the OSD's Insert disc after so many instructions
 	bool vram_check = false;       // every CPU read of the VRAM window checked against what it wrote
 	std::string vram_log;          // every CPU access to the VRAM window
 	std::string vram_dump;         // the VRAM's DDR3 as the run ends, raw (VRAM byte order)
@@ -405,6 +406,8 @@ void usage() {
 		"                   (default 28000000, 400 ms at 70 MHz)\n"
 		"  --tray-open      the CD's tray open from the start, the --cd disc in it (as after\n"
 		"                   an eject: the ROM's insert-disc animation; --eject-at closes it)\n"
+		"  --insert-at N    after N instructions, the OSD's Insert disc (the --cd disc back in,\n"
+		"                   the tray closed; repeat for more)\n"
 		"  --vram-check     keep a copy of every CPU write to the VRAM window (90000000,\n"
 		"                   Open Firmware's place for Control's VRAM), by VRAM byte (the\n"
 		"                   window's low 22 bits: both apertures, wide mode, 8 bits a\n"
@@ -813,6 +816,7 @@ int main(int argc, char** argv) {
 		else if (a == "--eject-at") opt.eject_at.push_back(std::strtoull(next().c_str(), nullptr, 0));
 		else if (a == "--eject-hold") opt.eject_hold = std::strtoull(next().c_str(), nullptr, 0);
 		else if (a == "--tray-open") opt.tray_open = true;
+		else if (a == "--insert-at") opt.insert_at.push_back(std::strtoull(next().c_str(), nullptr, 0));
 		else if (a == "--vram-check") opt.vram_check = true;
 		else if (a == "--vram-log") opt.vram_log = next();
 		else if (a == "--vram-dump") opt.vram_dump = next();
@@ -1116,6 +1120,8 @@ int main(int argc, char** argv) {
 	size_t eject_next = 0;
 	uint64_t eject_until = 0;            // the eject button held until this cycle
 	bool tray_set = false;               // --tray-open done
+	size_t insert_next = 0;
+	uint64_t insert_cycle = ~0ull;       // the cycle Insert disc is presented (one clock)
 	// the VRAM window as the CPU wrote it: every byte's value and whether it
 	// has been written
 	const uint32_t VWIN = VRAM_BASE, VWIN_SIZE = VRAM_SIZE, VRAM_MASK = (4u << 20) - 1;
@@ -1168,6 +1174,7 @@ int main(int argc, char** argv) {
 		// the console's video switch (Taos's GPIO): 5 NTSC (dingusppc's default), 6 VGA, 3 PAL
 		dut->mon_id = opt.monitor == 6 ? 6 : opt.monitor == 3 ? 3 : 5;
 		dut->eject_btn = cycles < eject_until;   // the console's eject button (--eject-at)
+		dut->cd_insert = cycles >= insert_cycle && cycles < insert_cycle + 4;   // the OSD's Insert disc (--insert-at; a few clocks: idempotent)
 		dut->fl_ld_we = 0;           // the save flash starts erased (no image loaded)
 		dut->fl_ld_re = 0;
 		dut->fl_ld_addr = 0;
@@ -1892,6 +1899,12 @@ int main(int argc, char** argv) {
 				if (opt.tray_open && !tray_set) {   // at the first instruction, long before the CD is asked
 					dut->rootp->Pippin_system__DOT__machine__DOT__disks__DOT__cd_ejected = 1;
 					tray_set = true;
+				}
+				while (insert_next < opt.insert_at.size() && retired >= opt.insert_at[insert_next]) {
+					insert_cycle = cycles + 1;
+					std::printf("insert: the disc put back after %llu instructions (cycle %llu)\n",
+					            (unsigned long long)retired, (unsigned long long)cycles);
+					insert_next++;
 				}
 				while (eject_next < opt.eject_at.size() && retired >= opt.eject_at[eject_next]) {
 					eject_until = cycles + opt.eject_hold;

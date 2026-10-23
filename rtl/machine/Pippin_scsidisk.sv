@@ -57,9 +57,11 @@
 //  when it was closed, at once when it was open; the disc stays out through
 //  bus and machine resets (the console's eject button resets the machine
 //  right after the eject: ROM VBL task 14CB0, AppleCD csCode 11, then Cuda's
-//  RESET_SYSTEM) until the tray is closed (1B with LoEj and Start: the
-//  driver's toggle when the eject came back in under a second; then 6/28 on
-//  the next command) or a disc is mounted.
+//  RESET_SYSTEM). The eject takes the disc out (the OSD's model, 2026-10-23):
+//  closing the tray (1B with LoEj and Start: the driver's toggle when the
+//  eject came back in under a second) leaves the drive empty; the disc comes
+//  back with cd_insert (the OSD's Insert disc: the last disc, the tray
+//  closed, 6/28 on the next command) or a mount (any disc, the tray closed).
 //  The drive answers selection only once the Main has answered the INQUIRY
 //  window with the drive's identity (read after a reset and a mount): with
 //  a Main that does not speak the contract there is no drive at all, and
@@ -111,6 +113,7 @@ module Pippin_scsidisk
 	input  logic        clk,            // the CPU's clock
 	input  logic        cpu_fast,       // clk is CLK_HZ_FAST, else CLK_HZ (changes only in reset)
 	input  logic        reset,
+	input  logic        cd_insert,      // one clock: the last disc put back and the tray closed (the OSD's Insert disc)
 
 	// the SCSI bus: what the targets drive, and the lines (1 = asserted)
 	output logic        t_bsy, t_req, t_msg, t_cd, t_io,
@@ -358,6 +361,7 @@ logic [2:0]  tb_slot;
 logic        tb_dbg;                    // TOGGLE DEBUG's flag
 logic        cd_ok;                     // the Main speaks the CD contract (its INQUIRY window answered)
 logic        cd_ejected = 1'b0;         // the tray open: kept through resets (a real tray stays open)
+logic        cd_gone = 1'b0;            // the disc taken out by an eject (until Insert disc or a mount)
 logic        cd_prevent;
 logic        cd_ua;                     // a disc loaded by closing the tray: 6/28 owed
 logic [31:0] tray_cnt;                  // the tray's travel, in clocks
@@ -370,7 +374,7 @@ logic [2:0]  ph_q;                      // the phase of the last REQ
 logic [15:0] pd_cnt;                    // clocks before a new phase's first REQ
 
 wire is_cd   = cur == 2'd2;
-wire cd_disc = m_valid[2] && !cd_ejected;
+wire cd_disc = m_valid[2] && !cd_ejected && !cd_gone;
 logic cd_audio_only;
 
 assign t_bsy = ts != T_IDLE && !hk_on;
@@ -725,8 +729,14 @@ always_ff @(posedge clk) begin
 	// ---- the CD: a mount puts the disc back; a mount of the same disc is not a change ----
 	if (cd_mev) begin
 		cd_ejected <= 1'b0;
+		cd_gone    <= 1'b0;
 		cd_ua      <= 1'b0;
 		probe_pend <= 1'b1;
+	end
+	else if (cd_insert && (cd_ejected || cd_gone) && m_valid[2]) begin
+		cd_ejected <= 1'b0;
+		cd_gone    <= 1'b0;
+		cd_ua      <= 1'b1;
 	end
 
 	case (ts)
@@ -892,8 +902,9 @@ always_ff @(posedge clk) begin
 					8'h1B, 8'hC0: begin                 // START STOP UNIT with LoEj, Apple's EJECT: the tray
 						if (op == 8'hC0 || (cdb[4][1] && !cdb[4][0])) begin
 							if (cd_prevent) check(4'h5, 8'h80);
-							else if (!cd_ejected) begin     // the tray opens: answered once it is out
+							else if (!cd_ejected) begin     // the tray opens, the disc taken out: answered once it is out
 								cd_ejected     <= 1'b1;
+								cd_gone        <= 1'b1;
 								sense_key[cur] <= 4'h2;      // what a later REQUEST SENSE sees
 								sense_asc[cur] <= 8'h3A;
 								a_stop_ev      <= 1'b1;
@@ -901,10 +912,9 @@ always_ff @(posedge clk) begin
 								forward(op, 1'b0, T_TRAY);
 							end
 						end
-						else if (cdb[4][1] && cdb[4][0] && cd_ejected) begin   // the tray closes
+						else if (cdb[4][1] && cdb[4][0] && cd_ejected) begin   // the tray closes (empty unless a disc went in)
 							cd_ejected <= 1'b0;
-							cd_ua      <= m_valid[2];
-							probe_pend <= 1'b1;
+							cd_ua      <= m_valid[2] && !cd_gone;
 						end
 					end
 					8'h1E: cd_prevent <= cdb[4][0];
