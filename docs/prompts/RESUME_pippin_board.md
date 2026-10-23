@@ -184,9 +184,17 @@ when they are there** (gamepad: the AppleJack; listening).
   read of 130C, cleared by reset), so the SD image follows 1 s later; At Shut Down = before.
   An OSD disc change does not restart the Pippin (the media just changes under Mac OS).
   Build 39 (6961fda, slack +0.078; `scratch/BandaiPippin_6961fda.rbf`, on .92 as
-  `_Console/BandaiPippin_20261023.rbf`) is untested on the board: .92 was running
-  IBMRS6K7248 for another session. Test: folder on Flash!, the image's mtime within ~2 s,
-  core reloaded without Shut Down, the folder still there.
+  `_Console/BandaiPippin_20261023.rbf`), on .92 2026-10-23: boots; the boot's load rewrites
+  the image once (mirrored, same bytes); VRAM and image equal byte for byte after it (so the
+  mirror works). But a Finder New Folder ("Instant test") never reached the VRAM in 7
+  minutes: HFS keeps the catalog in its RAM cache until FlushVol/unmount (Shut Down,
+  Restart); only the MDB (0x2400 in the volume image: drLsMod, drAtrb's unmounted bit
+  cleared, drWrCnt) was written, 3 min later, and the image followed in 1 s. So Instant
+  saves whatever Mac OS writes to the volume; whether a title's save gets there before a
+  power-off depends on the title calling FlushVol (the technotes say nothing). Next: a real
+  title's save (Racing Days's folder) watched the same way (VRAM poll for its file's name);
+  if titles do not flush, look at the console's eject button (Mac OS restarts on eject of the
+  boot disc) and make an OSD disc change do that.
 - **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
   DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
 
