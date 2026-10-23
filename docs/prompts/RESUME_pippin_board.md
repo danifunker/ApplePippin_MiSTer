@@ -12,7 +12,9 @@ the MacPPC7300 candidate fixes `docs/fix_macppc7300.md`.
 - **Work on your own** (said 2026-10-21): decide and run builds, board
   captures and bench runs without asking, within the rules below, and report
   results. Ask only for things outward-facing beyond this workflow (pushing
-  `pippin` to origin is part of it: the Mac pulls from GitHub).
+  `main` to origin is part of it: the Mac pulls from GitHub). **Everything on
+  `main`** (said 2026-10-22 evening; `main` was fast-forwarded to `pippin`,
+  which is kept but no longer used; no side branches).
 - **One simulation at a time per box** (machine_tb, machref, run_core,
   run.py). **Quartus on this Linux box, Verilator on the Mac only**
   (`ssh dani-dev.local`, tools under `zsh -lc`, Homebrew's Verilator 5.052,
@@ -75,9 +77,12 @@ when they are there** (gamepad: the AppleJack; listening).
 
 ## Where things are
 
-- Repo `~/repos/ApplePippin_MiSTer`, branch `pippin` (pushed; the Mac pulls),
-  plus `align603` (pushed, under test on the Mac). Main_MiSTer worktree
-  `~/repos/Main_MiSTer-pippin` (`pippin-cdrom`). On .92: `games/Pippin` has
+- Repo `~/repos/ApplePippin_MiSTer`, branch **`main`** (pushed; the Mac pulls),
+  plus `align603` (pushed, held off `main` until the user decides; see below).
+  Main_MiSTer worktree `~/repos/Main_MiSTer-pippin` (`pippin-cdrom`; 9f6fc1f,
+  the CD-audio change, committed locally, not pushed: the user decides about
+  their fork); its `bin/MiSTer` is the Main on .92 (cross-compiled with
+  `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf/bin` on PATH). On .92: `games/Pippin` has
   boot.rom (Kinka 1.3), Kinka 1.0/1.2/1.3/GM flash, the four discs, and
   `Pippin flash.sav` (128 KB, mounted on slot 2 through Advanced > Save flash;
   `config/Pippin.s2`); `config/Pippin.s4` mounts the last disc (Macintosh on
@@ -147,7 +152,8 @@ when they are there** (gamepad: the AppleJack; listening).
 ## Next steps
 
 1. When `chainalign.txt` says `done`: `run_core.py` and run29 PASS → merge
-   `align603` into `pippin` (fast-forward or merge commit), push. If
+   `align603` into `main` only if the user wants the rule (it slows the boot:
+   run29 at 150 M instructions 534.6 M cycles against 364.3 M), push. If
    run_core's lockstep random programs with translation trip on the new
    exception (dingusppc does not take it), hand it to the reference there
    as `core_main.cpp`'s machine branch does.
