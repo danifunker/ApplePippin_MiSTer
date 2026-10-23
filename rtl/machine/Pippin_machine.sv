@@ -233,6 +233,7 @@ module Pippin_machine
 	input  logic [10:0]  ps2_key,
 	input  logic [24:0]  ps2_mouse,
 	input  logic [51:0]  joy,
+	input  logic [32:0]  joy2,                      // the second AppleJack (Pippin_adb)
 
 	// the date and time for Cuda's clock: seconds since 1904, steady in this clock
 	input  logic         clock_ok,
@@ -725,7 +726,7 @@ end
 
 Pippin_adb adb (
 	.clk, .reset, .tick(cuda_tick), .host_low(adb_low), .dev_low(adb_dev_low),
-	.ps2_key, .ps2_mouse, .joy, .power_key, .tr_ev(adb_tr_ev), .tr_info(adb_tr_info)
+	.ps2_key, .ps2_mouse, .joy, .joy2, .power_key, .tr_ev(adb_tr_ev), .tr_info(adb_tr_info)
 );
 
 // The Pippin has two Athens Primes (343S1191; the board's photos, MAME's pippin.cpp:16). Which one

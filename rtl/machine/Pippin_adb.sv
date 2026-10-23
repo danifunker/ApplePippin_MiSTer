@@ -63,6 +63,12 @@
 //  drives joy in handlers 01 and 02, or, with the GamePad (its analog stick)
 //  or no controller, the mouse.
 //
+//  A second AppleJack (aj2, 2026-10-22) from the MiSTer's joystick 1 and its
+//  left stick, when the controller is the AppleJack and joy2's enable is set
+//  (OSD Input > AppleJack 2): the same device as joy's AppleJack, address 3,
+//  handler 01 until the driver sets 46; it answers Talk 3 after the keyboard,
+//  the mouse and joy, so the ROM's address resolution moves it apart.
+//
 //============================================================================
 
 module Pippin_adb
@@ -79,6 +85,8 @@ module Pippin_adb
 	// 4 SideWinder, 5 AppleJack), right stick {Y, X}, left stick {Y, X}, joystick_0[15:0]}; sticks signed,
 	// up and left negative
 	input  logic [51:0] joy,
+	// the second AppleJack: {enable, left stick {Y, X}, joystick_1[15:0]}
+	input  logic [32:0] joy2,
 	output logic        power_key,       // a clock: the power key pressed (it also wakes a machine that is off)
 
 	// for Pippin_trace: a key queued (or dropped), a command to the keyboard or to all
@@ -346,6 +354,47 @@ wire        joy_has = joy_on && (m_aj ? aj_has :
 wire  [7:0] aj_b2 = ~{aj_now[0], aj_now[1], aj_now[10], aj_now[11], aj_now[9], aj_now[12], aj_now[3], aj_now[2]};
 wire  [7:0] aj_b3 = {5'b11111, ~aj_now[7], ~aj_now[6], ~aj_now[8]};
 
+// ---- the second AppleJack (aj2): joystick 1, the same reports as joy's AppleJack ----
+logic [32:0] j2s1, j2s2, j2s3, j2r;
+always_ff @(posedge clk) begin
+	j2s1 <= joy2; j2s2 <= j2s1; j2s3 <= j2s2;
+	if (j2s2 == j2s3) j2r <= j2s3;
+end
+wire       aj2_on = m_aj && j2r[32];
+logic [3:0] aj2_addr;
+logic [7:0] aj2_hid;
+logic       aj2_srq_en, aj2_col, aj2_force;
+wire [7:0] a2_x = j2r[23:16], a2_y = j2r[31:24];
+// its stick as the pointer, as joy's: rate control past a dead zone
+logic [7:0] a2_xa, a2_ya;
+logic       a2_xn, a2_yn;
+always_ff @(posedge clk) begin
+	a2_xa <= a2_x[7] ? -a2_x : a2_x;
+	a2_ya <= a2_y[7] ? -a2_y : a2_y;
+	a2_xn <= a2_x[7];
+	a2_yn <= a2_y[7];
+end
+wire       a2_xo_c = a2_xa > 8'd24, a2_yo_c = a2_ya > 8'd24;
+wire [7:0] a2_xs = a2_xa - 8'd24, a2_ys = a2_ya - 8'd24;
+wire [6:0] a2_xm = a2_xo_c ? {2'b00, a2_xs[7:3]} : 7'd0;
+wire [6:0] a2_ym = a2_yo_c ? {2'b00, a2_ys[7:3]} : 7'd0;
+logic       a2_xo, a2_yo;
+logic [6:0] a2_dx, a2_dy;
+always_ff @(posedge clk) begin
+	a2_xo <= a2_xo_c;
+	a2_yo <= a2_yo_c;
+	a2_dx <= a2_xn ? -a2_xm : a2_xm;
+	a2_dy <= a2_yn ? -a2_ym : a2_ym;
+end
+// {up, right, down, left, buttons 9-1}, as aj_now
+wire [12:0] aj2_now = {j2r[3], j2r[0], j2r[2], j2r[1], j2r[12:4]};
+logic [12:0] aj2_last;
+wire        aj2_has = aj2_on && (aj2_force || a2_xo || a2_yo || aj2_now != aj2_last);
+wire  [7:0] aj2_b2  = ~{aj2_now[0], aj2_now[1], aj2_now[10], aj2_now[11], aj2_now[9], aj2_now[12], aj2_now[3], aj2_now[2]};
+wire  [7:0] aj2_b3  = {5'b11111, ~aj2_now[7], ~aj2_now[6], ~aj2_now[8]};
+wire  [3:0] aj2_n   = (aj2_hid == 8'h46) ? 4'd4 : 4'd2;
+wire [63:0] aj2_rep = {~aj2_now[4], a2_yo ? a2_dy : 7'd0, ~aj2_now[5], a2_xo ? a2_dx : 7'd0, aj2_b2, aj2_b3, 32'd0};
+
 // MouseStick II (23): a still mouse word, X and Y x 75 / 16 (about +-600), buttons active low
 // {1, 1, 1, right top (5), left top (4), trigger (1), bottom (3), top (2)}
 wire [15:0] jxe = {{8{joy_x[7]}}, joy_x};
@@ -450,7 +499,10 @@ wire signed [10:0] ps2_dy  = {{2{md_s2[18]}}, md_s2[18], md_s2[17:10]};
 // Talk is answered 160 us after its command): at 100 MHz they did not fit
 // in the clock that chose the answer. A Talk records as reported the values
 // it sent, so a change in that clock is reported next time, not lost.
-logic              mouse_has_q, joy_has_q, pad_has_q, btn_now_q;
+logic              mouse_has_q, joy_has_q, pad_has_q, btn_now_q, aj2_has_q;
+logic [63:0]       aj2_rep_q;
+logic [3:0]        aj2_n_q;
+logic [12:0]       aj2_q;
 logic signed [6:0] mx7_q, my7_q;
 logic signed [10:0] st_dx_q, st_dy_q;
 logic [63:0]       joy_rep_q, pad_rep_q;
@@ -473,6 +525,10 @@ always_ff @(posedge clk) begin
 	pad_n_q     <= pad_n;
 	{jx_q, jy_q, jt_q, jrx_q, jb_q} <= {joy_x, joy_y, joy_t, joy_rx, joy_b};
 	aj_q        <= aj_now;
+	aj2_has_q   <= aj2_has;
+	aj2_rep_q   <= aj2_rep;
+	aj2_n_q     <= aj2_n;
+	aj2_q       <= aj2_now;
 	pdir_q      <= p_dir;
 	pk_sent_q   <= pk_sent;
 end
@@ -492,7 +548,7 @@ logic [3:0]  nbit;
 logic [65:0] frame;                   // the answer: start bit, up to eight bytes, stop bit
 logic [6:0]  fbits;
 logic [15:0] lrx;                     // a Listen's data
-logic [3:0]  l_hit;                   // the Listen's devices {pad, joy, mouse, keyboard}
+logic [4:0]  l_hit;                   // the Listen's devices {aj2, pad, joy, mouse, keyboard}
 logic [1:0]  l_reg;
 logic        reset_seen;              // the current low has already reset the devices
 
@@ -510,9 +566,10 @@ wire [1:0] c_reg  = cmd[1:0];
 // (a clock behind cmd, which is whole at least two clocks before S_ACT; at 100 MHz the answer's
 // choice did not fit behind the compares. The keyboard's queue shrinks only in S_ACT, so a
 // clock-old "not empty" holds there; a key queued in that clock waits for the next Talk)
-logic kh, mh, jh, ph, kq_has;
+logic kh, mh, jh, ph, a2h, kq_has;
 always_ff @(posedge clk) begin
 	kh     <= c_addr == kbd_addr;
+	a2h    <= aj2_on && c_addr == aj2_addr;
 	mh     <= c_addr == mouse_addr;
 	jh     <= joy_on && c_addr == joy_addr;
 	ph     <= pad_on && c_addr == pad_addr;
@@ -524,7 +581,8 @@ wire [7:0] cmd_full = {cmd[6:0], dur > T_BIT};
 wire       srq_want = (!kq_empty && kbd_srq_en && cmd_full[7:4] != kbd_addr) ||
                       (mouse_has_q && mouse_srq_en && cmd_full[7:4] != mouse_addr) ||
                       (joy_has_q && joy_srq_en && cmd_full[7:4] != joy_addr) ||
-                      (pad_has_q && pad_srq_en && cmd_full[7:4] != pad_addr);
+                      (pad_has_q && pad_srq_en && cmd_full[7:4] != pad_addr) ||
+                      (aj2_has_q && aj2_srq_en && cmd_full[7:4] != aj2_addr);
 
 // the handlers a Listen 3 may set
 wire [7:0] l_hid   = lrx[7:0];
@@ -565,6 +623,8 @@ task automatic joys_reset;
 	pad_addr <= pad_home;    pad_hid <= pad_hid0; pad_srq_en <= 1'b1;
 	{kbd_col, mouse_col, joy_col, pad_col} <= '0;
 	js_force <= 1'b1; ps_force <= 1'b1;
+	aj2_addr <= ADDR_MOUSE;  aj2_hid <= 8'h01;    aj2_srq_en <= 1'b1;
+	aj2_col  <= 1'b0;        aj2_force <= 1'b1;
 	pk_state <= '0;
 endtask
 
@@ -680,11 +740,12 @@ always_ff @(posedge clk) begin
 							ps_lx <= joy_x[7:1]; ps_ly <= joy_y[7:1]; ps_lt <= joy_t[7:1]; ps_lr <= joy_rx[7:1];
 							ps_lb <= joy_b; ps_ld <= p_dir; ps_force <= 1'b0; pk_state <= p_dir;
 						end
+						if (a2h) begin aj2_last <= aj2_now; aj2_force <= 1'b0; end
 					end
 				end
 				2'b10: begin                                                // Listen
-					if ((c_reg == 2'd3 && (kh | mh | jh | ph)) || (c_reg == 2'd2 && kh)) begin
-						l_hit <= {ph, jh, mh, kh};
+					if ((c_reg == 2'd3 && (kh | mh | jh | ph | a2h)) || (c_reg == 2'd2 && kh)) begin
+						l_hit <= {a2h, ph, jh, mh, kh};
 						l_reg <= c_reg;
 						st    <= S_LRX_WAIT;
 					end
@@ -714,6 +775,10 @@ always_ff @(posedge clk) begin
 							js_lx <= jx_q[7:1]; js_ly <= jy_q[7:1]; js_lt <= jt_q[7:1];
 							js_lb <= jb_q; js_btn <= jb_q[0]; js_force <= 1'b0; aj_last <= aj_q;
 						end
+						else if (a2h && aj2_has_q) begin
+							say(aj2_n_q, aj2_rep_q);
+							aj2_last <= aj2_q; aj2_force <= 1'b0;
+						end
 						else if (ph && pad_has_q) begin
 							say(pad_n_q, pad_rep_q);
 							ps_lx <= jx_q[7:1]; ps_ly <= jy_q[7:1]; ps_lt <= jt_q[7:1]; ps_lr <= jrx_q[7:1];
@@ -741,13 +806,18 @@ always_ff @(posedge clk) begin
 								say(4'd2, {2'b01, joy_srq_en, 1'b0, joy_addr, joy_hid, 48'd0});
 								joy_col <= 1'b0;
 							end
+							else if (a2h) begin
+								say(4'd2, {2'b01, aj2_srq_en, 1'b0, aj2_addr, aj2_hid, 48'd0});
+								aj2_col <= 1'b0;
+							end
 							else if (ph) begin
 								say(4'd2, {2'b01, pad_srq_en, 1'b0, pad_addr, pad_hid, 48'd0});
 								pad_col <= 1'b0;
 							end
-							if (mh && kh)              mouse_col <= 1'b1;
-							if (jh && (kh | mh))       joy_col   <= 1'b1;
-							if (ph && (kh | mh | jh))  pad_col   <= 1'b1;
+							if (mh && kh)                    mouse_col <= 1'b1;
+							if (jh && (kh | mh))             joy_col   <= 1'b1;
+							if (a2h && (kh | mh | jh))       aj2_col   <= 1'b1;
+							if (ph && (kh | mh | jh | a2h))  pad_col   <= 1'b1;
 						end
 					endcase
 				end
@@ -815,6 +885,12 @@ always_ff @(posedge clk) begin
 					else if (pad_acc) begin pad_hid <= l_hid; ps_force <= 1'b1; pk_state <= '0; end
 					pad_col <= 1'b0;
 				end
+				if (l_hit[4]) begin
+					if (l_hid == 8'h00) begin aj2_addr <= lrx[11:8]; aj2_srq_en <= lrx[13]; end
+					else if (l_hid == 8'hFE) begin if (!aj2_col) aj2_addr <= lrx[11:8]; end
+					else if (l_hid == 8'h01 || l_hid == 8'h46) begin aj2_hid <= l_hid; aj2_force <= 1'b1; end
+					aj2_col <= 1'b0;
+				end
 			end
 		end
 		default: st <= S_IDLE;
@@ -845,6 +921,7 @@ always_ff @(posedge clk) begin
 		joys_reset();
 		js_lx <= '0; js_ly <= '0; js_lt <= '0; js_lb <= '0; js_btn <= 1'b0;
 		ps_lx <= '0; ps_ly <= '0; ps_lt <= '0; ps_lr <= '0; ps_lb <= '0; ps_ld <= '0;
+		aj2_last <= '0;
 	end
 end
 
@@ -854,8 +931,8 @@ always_ff @(posedge clk) begin
 	if (mouse_ev) $display("adb: mouse event x %0d y %0d button %0d", $signed({md_s2[9], md_s2[8:1]}),
 	                       $signed({md_s2[18], md_s2[17:10]}), md_s2[0]);
 	if (k_push) $display("adb: key %02X %s", k_code, k_up ? "up" : "down");
-	if (st == S_ACT) $display("adb: command %02X (keyboard at %0d, mouse at %0d, joy at %0d, pad at %0d)", cmd,
-	                          kbd_addr, mouse_addr, joy_addr, pad_addr);
+	if (st == S_ACT) $display("adb: command %02X (keyboard at %0d, mouse at %0d, joy at %0d %02X, aj2 at %0d %02X, pad at %0d)", cmd,
+	                          kbd_addr, mouse_addr, joy_addr, joy_hid, aj2_addr, aj2_hid, pad_addr);
 	if (!hl && !hl_q && dur >= T_RESET && !reset_seen) $display("adb: reset pulse");
 end
 `endif

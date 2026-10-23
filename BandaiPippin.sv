@@ -141,6 +141,9 @@ localparam CONF_STR = {
 	// line kept, without a controller (mask bit 1)
 	"P3O[13:11],Controller,AppleJack,None,MouseStick II,Firebird,GamePad,SideWinder;",
 	"H1P3O[14],Stick moves pointer,No,Yes;",
+	// a second AppleJack from the MiSTer's second controller (with Controller AppleJack;
+	// taken at the reset, as the controller)
+	"P3O[35],AppleJack 2,Yes,No;",
 	"h1P3-;",
 
 	"P4O[20],Use MT32-pi,Yes,No;",
@@ -270,8 +273,8 @@ wire        ioctl_download;
 wire [15:0] ioctl_index;
 wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
-wire [31:0] joystick_0;
-wire [15:0] joystick_l_analog_0, joystick_r_analog_0;
+wire [31:0] joystick_0, joystick_1;
+wire [15:0] joystick_l_analog_0, joystick_r_analog_0, joystick_l_analog_1;
 wire  [7:0] uart_mode;                // the Main's UART mode: 3 MIDI
 reg         mt32_info_req;
 reg   [3:0] mt32_info_disp;
@@ -332,8 +335,10 @@ hps_io #(.CONF_STR(CONF_STR), .VDNUM(VDNUM), .BLKSZ(2)) hps_io
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
 	.joystick_0(joystick_0),
+	.joystick_1(joystick_1),
 	.joystick_l_analog_0(joystick_l_analog_0),
 	.joystick_r_analog_0(joystick_r_analog_0),
+	.joystick_l_analog_1(joystick_l_analog_1),
 	.uart_mode(uart_mode),
 	.info_req(mt32_info_req),
 	.info({4'd0, mt32_info_disp}),
@@ -527,6 +532,7 @@ assign spd_rst = cpu_reset_m;
 reg  [7:0]  ram_mb = 8'd5;
 reg  [2:0]  mon_m = 3'd5;                   // NTSC
 reg  [2:0]  joy_mode = 0;
+reg         aj2_m = 0;                      // the second AppleJack (status[35] 0: yes)
 reg         net_on = 0;
 reg         tr_mesh_m = 0;                  // the trace also takes MESH (status[29]: no menu entry)
 reg         l2_on_m = 1;
@@ -536,6 +542,7 @@ always @(posedge clk_mem) if (cpu_reset_m) begin
 	ram_mb     <= ram_opt;
 	mon_m      <= mon_sel;
 	joy_mode   <= joy_sel;
+	aj2_m      <= ~status[35];
 	net_on     <= 1'b0;                     // no Ethernet on the Pippin
 	tr_mesh_m  <= status[29];
 	l2_on_m    <= ~status[4];
@@ -546,11 +553,13 @@ end
 // "Changes pending" (menu mask bit 0): an OSD setting differs from the one the machine
 // took at its last reset (the memory, the video out, the controller); the Input page's
 // stick setting and the media apply at once and are left out
-assign pending  = ram_opt != ram_mb || mon_sel != mon_m || joy_sel != joy_mode || status[34] != memtest_m;
+assign pending  = ram_opt != ram_mb || mon_sel != mon_m || joy_sel != joy_mode || status[34] != memtest_m ||
+                  ~status[35] != aj2_m;
 // mask bit 1: no controller, so no stick to move the pointer with
 assign no_stick = joy_sel == 3'd0;
 
 wire [51:0] joy = {status[14], joy_mode, joystick_r_analog_0, joystick_l_analog_0, joystick_0[15:0]};
+wire [32:0] joy2 = {aj2_m, joystick_l_analog_1, joystick_1[15:0]};
 
 // into the CPU's clock (the options are quasi-static: they change only with the reset held)
 reg [2:0] cpu_reset_s = 3'b111;
@@ -760,7 +769,7 @@ Pippin_system #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(100000000), .L2_KB(L2_KB), .TB_HZ(
 	.mon_id(mon_c[1]), .tray_closed(1'b1),
 	.fl_ld_we(nv_ld_we), .fl_ld_re(nv_ld_re), .fl_ld_addr(nv_ld_addr), .fl_ld_data(nv_ld_data), .fl_ld_q(nv_ld_q),
 	.fl_changed(nv_wr_cpu),
-	.ps2_key, .ps2_mouse, .joy,           // in the memory clock: Pippin_adb synchronises them
+	.ps2_key, .ps2_mouse, .joy, .joy2,           // in the memory clock: Pippin_adb synchronises them
 	.clock_ok, .clock_secs,
 	.img_mounted(img_mounted[5:0]), .img_size, .img_readonly,   // the targets' side runs in the memory clock
 	.sd_lba(disk_lba), .sd_rd(disk_rd), .sd_wr(disk_wr), .sd_blk_cnt(disk_blk_cnt), .sd_ack(sd_ack[5:0]),

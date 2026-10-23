@@ -132,6 +132,7 @@ struct Options {
 	int stall = 0;                 // percent chance of a wait state, per bus per cycle
 	unsigned mem_wait = 1;         // memory clocks from the CPU's memory request to its answer (the SDRAM stand-in)
 	unsigned joy_mode = 0;         // the OSD's controller (joy[50:48]): 0 none, 5 the AppleJack (the board's default)
+	bool joy2 = false;             // a second AppleJack (joy2[32], with --joy 5)
 	uint32_t ram_fill = 0;         // nonzero: the RAM starts as a pseudo-random byte stream from this seed (a board's stale SDRAM)
 	int ack_hold = 0;              // extra clocks before the memory's ACK drops
 	long irq_every = 0;            // raise the external interrupt every N cycles
@@ -432,6 +433,7 @@ void usage() {
 		"  --stall P        percent chance of a bus wait state (default 0)\n"
 		"  --joy MODE       the ADB game controller (BandaiPippin's joy_mode): 0 none (default), 1 MouseStick II,\n"
 		"                   2 Firebird, 3 GamePad, 4 SideWinder, 5 the AppleJack (the board's default)\n"
+		"  --joy2           a second AppleJack (with --joy 5; the OSD's AppleJack 2)\n"
 		"  --ram-fill SEED  start the RAM as pseudo-random bytes from SEED (default 0: zeros; a board's\n"
 		"                   SDRAM keeps the previous run's contents)\n"
 		"  --mem-wait N     memory clocks from a CPU memory request to its answer (default 1;\n"
@@ -753,6 +755,7 @@ int main(int argc, char** argv) {
 		else if (a == "--stall") opt.stall = std::atoi(next().c_str());
 		else if (a == "--mem-wait") opt.mem_wait = (unsigned)std::atoi(next().c_str());
 		else if (a == "--joy") opt.joy_mode = (unsigned)std::atoi(next().c_str()) & 7;
+		else if (a == "--joy2") opt.joy2 = true;
 		else if (a == "--ram-fill") opt.ram_fill = (uint32_t)std::strtoul(next().c_str(), nullptr, 0);
 		else if (a == "--ack-hold") opt.ack_hold = std::max(0, std::atoi(next().c_str()));
 		else if (a == "--snoop-every") opt.snoop_every = std::atoi(next().c_str());
@@ -1134,6 +1137,7 @@ int main(int argc, char** argv) {
 		dut->ps2_mouse = ps2_mouse;
 		dut->ps2_key = 0;
 		dut->joy = (uint64_t)opt.joy_mode << 48;   // {stick moves pointer, mode, right and left analog, buttons}
+		dut->joy2 = opt.joy2 ? (1ull << 32) : 0;   // {enable, left analog, buttons}
 		dut->ram_mb = opt.ram_mb;
 		dut->cpu_fast = 0;
 		dut->rom_at = ROM_SDRAM >> 22;

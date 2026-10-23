@@ -111,6 +111,7 @@ module Pippin_system
 	input  logic [10:0]  ps2_key,
 	input  logic [24:0]  ps2_mouse,
 	input  logic [51:0]  joy,
+	input  logic [32:0]  joy2,            // the second AppleJack (Pippin_adb)
 
 	// the date and time for Cuda's clock (seconds since 1904), steady in the
 	// CPU's clock while clock_ok; set once as the machine starts
@@ -312,7 +313,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.net_rx_ra, .net_rx_q, .net_rx_avail, .net_rx_len, .net_rx_done, .net_mac, .net_mac_ok,
 	.nv_ld_we, .nv_ld_re, .nv_ld_addr, .nv_ld_data, .nv_ld_rack, .nv_ld_q, .nv_wr_cpu,
 	.fl_ld_we, .fl_ld_re, .fl_ld_addr, .fl_ld_data, .fl_ld_q, .fl_changed,
-	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .clock_ok, .clock_secs, .int_dbg,
+	.mon_id, .tray_closed, .ps2_key, .ps2_mouse, .joy, .joy2, .clock_ok, .clock_secs, .int_dbg,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
 	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .athens_set, .vbl,
 	.clk_v(clk_b), .clut_index, .clut_rgb,
