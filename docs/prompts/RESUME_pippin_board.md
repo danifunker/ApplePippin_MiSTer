@@ -79,10 +79,14 @@ when they are there** (gamepad: the AppleJack; listening).
 
 - Repo `~/repos/ApplePippin_MiSTer`, branch **`main`** (pushed; the Mac pulls),
   plus `align603` (pushed, held off `main` until the user decides; see below).
-  Main_MiSTer worktree `~/repos/Main_MiSTer-pippin` (`pippin-cdrom`; 9f6fc1f,
-  the CD-audio change, committed locally, not pushed: the user decides about
-  their fork); its `bin/MiSTer` is the Main on .92 (cross-compiled with
-  `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf/bin` on PATH). On .92: `games/Pippin` has
+  Main_MiSTer worktree `~/repos/Main_MiSTer-pippin` (`pippin-cdrom`, rebased
+  2026-10-22 onto upstream master 065d0d2 at the user's request: 7729396 the
+  Pippin in the Mac SCSI family, 54632e3 the CHD pregaps, bae97b3 a data read
+  leaves CD audio playing on the Pippin; local only, not pushed to the fork);
+  its `bin/MiSTer` is the Main on .92 (cross-compiled with
+  `~/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf/bin` on PATH; the
+  previous one kept as `/media/fat/MiSTer.prev-20261022-2156`). The Mac's copy
+  of that worktree lacks the CD-audio commit (the bench's `maincd`). On .92: `games/Pippin` has
   boot.rom (Kinka 1.3), Kinka 1.0/1.2/1.3/GM flash, the four discs, and
   `Pippin flash.sav` (128 KB, mounted on slot 2 through Advanced > Save flash;
   `config/Pippin.s2`); `config/Pippin.s4` mounts the last disc (Macintosh on
@@ -163,8 +167,8 @@ when they are there** (gamepad: the AppleJack; listening).
    titles and a save round trip on .92, then v0.2.0 (`releases/`, tag,
    `gh release create` with `releases/README.md` updated: saves, ROMs, RAM,
    the chime; CD audio silent).
-4. CD audio (the compatibility sweep): why Racing Days's PLAY AUDIO is silent
-   (Pippin_cdaudio, the Main's Mac CD layer, AWACS's CD input).
+4. CD audio: fixed (build 36 + the Main's bae97b3; Racing Days's menu music
+   plays). The rest of the compatibility sweep stays for later.
 5. Athens 28's power-up D2/N2 (a real Pippin, or Apple's data), then
    `STD_DOT = 0`.
 6. With the user at the board: the AppleJack in the games.

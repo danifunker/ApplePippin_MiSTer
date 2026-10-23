@@ -23,7 +23,7 @@ gamepad).
 | 13 MB | Macintosh on Pippin to the Finder (v0.1.0) |
 | 21 MB | Macintosh on Pippin to the Finder, Super Marathon to its launcher (build 32) |
 | The boot chime | plays on HDMI: `misterkvms-cli record 25s F.wav` around a reset, ~2 s of decaying tone (`scratch/boot_chime_v0.1.0_20261022.wav`) |
-| CD audio (Racing Days) | **silent**: the game sends PLAY AUDIO MSF (status good) for a clip at ~17 s and the menu music at ~27 s; the car-select screen records as zeros |
+| CD audio (Racing Days) | **plays since build 36 (9023a51) with the Main's bae97b3**: the menu music on HDMI (`scratch/racingdays_cd_audio_20261022.wav`). Before, Mac OS's CD driver read block 0 70 ms after the game's PLAY AUDIO MSF, and that data read stopped the audio (in the core's SCSI target and in the Main's playhead); now a read leaves it playing on the Pippin |
 | Saving to the flash | **works since 38ac0a1 + 53670e3 (build 34)**: a folder made on Flash!, Shut Down (the Menu key, Return), the image on slot 2 written (the volume's signature "NuMc" at 130C); the core reloaded, the folder is there. Before: the flash answered FF during its erase, the driver's program was lost, and it gave up |
 
 The size Mac OS sees (the bench, Super Marathon's boot, low memory's MemTop at 108; the KVM
