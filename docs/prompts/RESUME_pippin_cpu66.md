@@ -279,6 +279,12 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     build66_115d132.log`, slack in `output_files/BandaiPippin.sta.rpt`): how far the whole core
     is and which machine paths the 33 MHz bus must take out, before the split is written.
     The 420 M lockstep boot (`run66c.sh`, a4e697e) was running meanwhile.
+  - **The 420 M lockstep boot (run66c, a4e697e = changes 2-17): RESULT: PASS, identical.**
+  - **Build 115d132 (the whole core at 66.667, today's architecture)**: CPU clock Fmax 63.12 MHz,
+    **setup -0.844 ns, TNS -23** (a few paths); memory clock +0.051; hold +0.24 everywhere;
+    `scratch/BandaiPippin_115d132.rbf` (not for the board: setup fails). Only ~0.35 ns worse
+    than the CPU alone (fit t -0.49). The families: `scratch/sta66_paths.txt` (quartus_sta -t
+    syn/sta_cpu_paths.tcl).
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
