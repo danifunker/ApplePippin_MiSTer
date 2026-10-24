@@ -1405,6 +1405,18 @@ int main(int argc, char** argv) {
 				std::printf("frame: %zu x %zu after %llu instructions, written to %s; lines at %.3f kHz, fields at %.3f Hz%s\n",
 					w, fr.rows.size(), (unsigned long long)retired, name.c_str(), fr.line ? 1e5 / fr.line : 0.0,
 					fr.field ? 1e8 / fr.field : 0.0, dut->vid_interlaced ? " (interlaced)" : "");
+				{	// Taos's registers as they stand (the counts in bits 31-20)
+					auto* T = dut->rootp;
+					static const char* sn[15] = {"HEQ", "HBWAY", "HAL", "HSERR", "HFP", "HPIX", "HSP", "HLFLN",
+					                             "VBPEQ", "VBP", "VAL", "VFP", "VFPEQ", "VSYNC", "VHLINE"};
+					std::printf("taos:");
+					for (int k = 0; k < 15; k++)
+						std::printf(" %s %u", sn[k], T->Pippin_system__DOT__machine__DOT__taos__DOT__sw[k] >> 20);
+					std::printf(" | VEFS %u VOFS %u HSTART %u HEB %u FB_BASE %08X ROW_WORDS %08X\n",
+						T->Pippin_system__DOT__machine__DOT__taos__DOT__vefs >> 20, T->Pippin_system__DOT__machine__DOT__taos__DOT__vofs >> 20,
+						T->Pippin_system__DOT__machine__DOT__taos__DOT__hstart >> 20, T->Pippin_system__DOT__machine__DOT__taos__DOT__heb >> 20,
+						T->Pippin_system__DOT__taos_fbb, T->Pippin_system__DOT__taos_roww);
+				}
 				std::fflush(stdout);
 				if (opt.frame_every) { fr.st = Frame::WAIT; fr.next = retired + opt.frame_every; }
 				else fr.st = Frame::DONE;

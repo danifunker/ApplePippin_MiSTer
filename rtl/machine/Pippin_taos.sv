@@ -72,7 +72,10 @@ import Pippin_pkg::*;
 
 localparam logic [31:0] TAOS_VERSION = 32'hA500_0000;
 
-logic [31:0] gpio_cfg, gpio_out, gpio_int_ctrl, int_enables, crt_test, vefs, vofs, hstart, vconv_end, heb;
+logic [31:0] gpio_cfg, gpio_out, gpio_int_ctrl, int_enables, crt_test, vconv_end;
+// the picture's window in the timing (not yet used by the scan-out; readable by the machine bench)
+logic [31:0] vefs /*verilator public_flat_rd*/, vofs /*verilator public_flat_rd*/,
+             hstart /*verilator public_flat_rd*/, heb /*verilator public_flat_rd*/;
 logic [31:0] sw [15];
 
 always_comb for (int i = 0; i < 15; i++) swatch[32 * i +: 32] = sw[i];
