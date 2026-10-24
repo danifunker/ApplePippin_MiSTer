@@ -51,7 +51,8 @@ module DSPPC603_int_unit
 	// each operation's own result (sum is the adder's): the pipeline chooses
 	// flat among them with selects registered with the operation, instead
 	// of behind the choice result makes here
-	output logic [31:0] alu_log, alu_rot, alu_clz, alu_exts, mul_hi, mul_lo, div_q
+	output logic [31:0] alu_log, alu_rot, alu_clz, alu_exts, mul_hi, mul_lo, div_q,
+	output logic        alu_rot_zero                // ... and the rotator's result's zero, found fast for the shifts
 );
 
 import DSPPC603_pkg::*;
@@ -82,6 +83,7 @@ DSPPC603_alu alu
 	.lt_u   (cmp_ltu),
 	.zero   (alu_zero),
 	.neg    (alu_neg),
+	.rot_zero (alu_rot_zero),
 	.log_o  (alu_log),
 	.rot_o  (alu_rot),
 	.clz_o  (alu_clz),

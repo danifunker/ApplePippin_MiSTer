@@ -26,6 +26,8 @@ module DSPPC603_alu
 	output logic        lt_u,
 	output logic        zero,        // the result is zero (found per operation, before the result's choice)
 	output logic        neg,         // ... and its sign bit, likewise
+	output logic        rot_zero,    // the rotator's result is zero, found without the rotator for the
+	                                 // shifts (a under a mask of the count: the 66 MHz work, 2026-10-24)
 	output logic [31:0] log_o,       // each operation's own result, for a flat choice outside (sum is the adder's)
 	output logic [31:0] rot_o,
 	output logic [31:0] clz_o,
@@ -125,6 +127,16 @@ always_comb begin
 
 	// sraw, srawi: carry when a negative value loses any one bits
 	rot_ca = a[31] & (|(rot & ~mask));
+
+	// a shift's result is zero when the bits of a it keeps are all zero: a
+	// left shift keeps a's low 32-n bits, a right shift its high 32-n (and
+	// an arithmetic one fills with the sign); a rotate's needs the rotator
+	case (ctl.rot_op)
+		ROT_SLW:  rot_zero = sh_n[5] | ~(|(a & (32'hFFFFFFFF >> sh_n[4:0])));
+		ROT_SRW:  rot_zero = sh_n[5] | ~(|(a & (32'hFFFFFFFF << sh_n[4:0])));
+		ROT_SRAW: rot_zero = ~a[31] & (sh_n[5] | ~(|(a & (32'hFFFFFFFF << sh_n[4:0]))));
+		default:  rot_zero = ~(|rot_res);
+	endcase
 end
 
 // ---- count leading zeros ---------------------------------------------------

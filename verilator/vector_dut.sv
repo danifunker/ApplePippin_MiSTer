@@ -126,7 +126,7 @@ DSPPC604_int_unit int_unit
 	.cmp_lts    (),
 	.cmp_ltu    (),
 	.cmp_eq     (),
-	.alu_log    (), .alu_rot (), .alu_clz (), .alu_exts (), .mul_hi (), .mul_lo (), .div_q ()
+	.alu_log    (), .alu_rot (), .alu_clz (), .alu_exts (), .mul_hi (), .mul_lo (), .div_q (), .alu_rot_zero ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
 
