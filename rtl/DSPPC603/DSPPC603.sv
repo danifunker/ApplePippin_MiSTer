@@ -2648,17 +2648,24 @@ function automatic logic [2:0] ra_match(input dec_t d, input logic [5:0] r);
 endfunction
 wire       fwd_ex_ok   = ex_leave & ~ex_abort;
 wire       fwd_mem_own = mem_valid;   // (if it leaves: fq_kill, at the use)
+// (flat since the 66 MHz work, 2026-10-24: each candidate's matches are found
+// from registers, and the late signals, completion_pop, ex_leave and mem_take,
+// form one-hot selects for one AND-OR, not nested choices)
+// (a popped FP entry whose write is suppressed forwards nothing: mem_rd_wr)
+wire fs_pop = mem_take & completion_pop & (~completion_queue[completion_head].fp | cq_h_we);
+wire fs_ex  = mem_take & ~completion_pop & fwd_ex_ok;
+wire fs_mem = ~mem_take & fwd_mem_own;
 function automatic logic [14:0] fwd_sel(input dec_t d);
-	logic [5:0] m_take, m_mem, m_wb;
-	logic [2:0] u;
-	// (a popped FP entry whose write is suppressed forwards nothing: mem_rd_wr)
-	m_take = completion_pop ? ((~completion_queue[completion_head].fp | cq_h_we) ?
-	                           rd_match(d, completion_queue[completion_head].rd) : 6'd0) :
-	         (fwd_ex_ok & ex_rd_wr) ? rd_match(d, ex_rd) : 6'd0;
-	m_mem  = mem_take ? m_take : (fwd_mem_own & mem_rd_wr) ? rd_match(d, mem_rd) : 6'd0;
-	m_wb   = fwd_wb_v ? rd_match(d, fwd_wb_rd) : 6'd0;
-	u      = mem_take ? ((fwd_ex_ok & ex_dec.upd) ? ra_match(d, ex_dec.ra) : 3'd0) :
-	         (fwd_mem_own & mem_upd) ? ra_match(d, mem_upd_ra) : 3'd0;
+	logic [5:0] c_pop, c_ex, c_mem, m_mem, m_wb;
+	logic [2:0] u_ex, u_mem, u;
+	c_pop = rd_match(d, completion_queue[completion_head].rd);
+	c_ex  = ex_rd_wr  ? rd_match(d, ex_rd)  : 6'd0;
+	c_mem = mem_rd_wr ? rd_match(d, mem_rd) : 6'd0;
+	m_mem = ({6{fs_pop}} & c_pop) | ({6{fs_ex}} & c_ex) | ({6{fs_mem}} & c_mem);
+	m_wb  = fwd_wb_v ? rd_match(d, fwd_wb_rd) : 6'd0;
+	u_ex  = ex_dec.upd ? ra_match(d, ex_dec.ra)  : 3'd0;
+	u_mem = mem_upd    ? ra_match(d, mem_upd_ra) : 3'd0;
+	u     = ({3{fs_ex}} & u_ex) | ({3{fs_mem}} & u_mem);
 	fwd_sel = {m_mem, m_wb, u};
 endfunction
 wire [14:0] fwd_sel_id = fwd_sel(id_uop_f);
