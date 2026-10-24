@@ -147,6 +147,50 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
   --to "*cpu|cr[*"` (cell by cell into CR; run it under `flock /tmp/quartus.lock`; a run was
   stopped at the hand-off, nothing was learned from it).
 
+- **Changes 2-6 (afternoon, 2026-10-24)**, each `run_core.py` PASS on the Mac (a run takes ~21 s;
+  PASS = `RESULT: PASS`, 82 `pass` lines, no `fail`) and each fitted alone from a detached
+  worktree (`git worktree add --detach <scratchpad>/wt_x <commit>`, then check.py from there,
+  so the next edit does not leak into a queued fit). The fitter's noise is about ±0.6 ns on a
+  family's slack between seeds: judge a change by the path's structure (cell by cell), not by
+  one number. Fmax (slow 100 C) went 58.30 -> 60.85 (1) -> 61.60 (2) -> 61.60 (3) -> 63.73 (4).
+  - **2 (8a48ab9)** CR0 flat: `int_cr_flat` from each operation's own result chosen by the
+    registered `ex_rs` (bit 14 added: a compare), replacing the ALU's `Selector72` and the int
+    unit's `Selector37`; `int_cr` kept for a `$fatal` check. Fit c (`check66_core_c.txt`):
+    worst -1.233, the CR family gone (-0.449); new worst the FPU's rounding into the
+    completion queue's RAM (`den_q`/`k_q -> completion_queue.value`, 1,700 paths: k_q + up ->
+    the denormal shift -> e_res -> the range compare -> rnd_result -> fprf's zero class ->
+    the RAM's data).
+  - **3 (d09267a)** `seq_miss` registered in ID (`ex_seq_miss_q <= id_pred != id_pc+4/8`): the
+    32-bit compare was in `ex_fp_elig -> completion_push_ex -> ex_done -> ex_leave` (fan-out
+    146; the `Add29 -> d_cached_page`/`fa_mem` families were really this: Add29 = ex_pc+4).
+    Fit d: worst -1.235 `ex_dec.frb -> completion_queue RAM` (= `cq_fpr_o[frb]` 32:1 mux ->
+    `ex_stall_ops` -> the FPU's simple `resp_valid` -> `ex_done` -> `ex_leave` -> `redir`
+    (fan-out 61) -> `completion_head`'s reset -> the RAM's address register).
+  - **4 (e8cb621)** the fetch's translation registered in the MMU: `ixl_q <= translate(i_page_q
+    ...)`, `ixl_valid_q` (the segment register was the page's, no BAT/SR/TLB/MSR[IR,PR] write at
+    its edge), `i_xl_fresh = ixl_valid_q & (ixl_page_q == i_addr[31:12])` in `i_ready`; with
+    translation off `ixl` is forced ok. A fetch into a page other than the one translated
+    costs one more cycle (one bubble per sequential page crossing too). `$fatal` check against
+    the fetch address's own translate(). Fit e: **Fmax 63.73, worst -0.692**
+    `dcache.r_addr -> ex_stall_ops`: the data cache's hit (`landed_tag_hit -> hit_w` fan-out
+    143 `-> post_take -> d_rvalid -> mem_unit.resp_valid -> mem_leave`) into `wb_valid`'s D,
+    which the fitter retimed forward into `ffc_wb -> ex_stall_ops` (the `wb_fden` term).
+    Others: `fpu.tc_q -> completion_queue RAM` -0.601 (change 5 covers it), `landed_tag ->
+    ex_stall_ops` -0.56, `wb_result -> dar` -0.51, `fq_a_mem_r -> Mux182` -0.47.
+  - **5 (770651b + 2cafc33)** the FPU answers from S_DONE's registers always (`in_round = 0`;
+    S_ROUND always goes to S_DONE: its early exit to S_IDLE when `resp_ready & ~no_early` lost
+    the answer and hung run_core). One cycle more FP latency. Fit f: `check66_core_f.txt`.
+  - **6 (0c1fecc + d5f654e)** EX's FP dependency on the queue registered: `ex_fdep[2:0]` (a, b,
+    c) from `fdep_of(d, completion_push_ex, ex_leave)`: `cq_fpr_o[fr]`, the pop's clear and
+    `fr == ex_dec.frd` found from registers, `redir`/`ex_leave`/the push/the pop only choosing;
+    `(|ex_fdep)` in `completion_dependency`; `$fatal` check against the bitmap. (The first
+    commit paired the operands' registers with the wrong flags: `'{fra, frb, frc}` indexes a
+    at 0 while the flags put a at bit 2; caught by the check.) Fit g: `check66_core_g.txt`.
+- The remaining known structure after 4: the data cache's hit decision is ~10 ns from its
+  address register and feeds, the same cycle, `d_rvalid -> mem_unit.resp_valid -> mem_leave ->
+  wb_valid/mem_valid/mo_*` (and `mu_gnt -> mem_unit.state`, `d_gnt`); the forwarding selects
+  `fq_*` are chosen by `ex_leave`/`mem_take` (late) in `fwd_sel`; `redir` fans out to 61.
+
 ## Next steps (in order)
 
 1. The CR family (fix (a) and/or (b) above). Then the data-MMU page compare from EX's address
