@@ -721,9 +721,13 @@ always_ff @(posedge clk) begin
 end
 /* synthesis translate_off */
 always_ff @(posedge clk)
-	if (~reset & d_xl_seen_q & (d_state == D_IDLE) & ~d_cancel &
-	    (~d_req | (d_ready & ((d_xl_fault_q != dxl.fault) | (d_xl_ok_q != dxl.ok)))))
-		$fatal(1, "the data lookup's registered outcome differs from the request's a cycle later");
+	if (~reset & d_xl_seen_q & (d_state == D_IDLE) & ~d_cancel) begin
+		if (~d_req)
+			$fatal(1, "the data request of a missed or faulted lookup is gone a cycle later");
+		if (d_ready & ((d_xl_fault_q != dxl.fault) | (d_xl_ok_q != dxl.ok)))
+			$fatal(1, "the data lookup's registered outcome differs from the request's a cycle later (fault %b->%b ok %b->%b we %b)",
+			       d_xl_fault_q, dxl.fault, d_xl_ok_q, dxl.ok, d_we);
+	end
 /* synthesis translate_on */
 always_ff @(posedge clk) begin
 	case (d_state)
