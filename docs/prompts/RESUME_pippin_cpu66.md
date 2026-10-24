@@ -294,6 +294,11 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     **So the 33 MHz bus split buys nothing for timing** (the machine is not on the failing
     paths; the whole core is ~0.35 ns behind the CPU alone): the recommendation is to drop it
     and judge the CPU work on whole-core builds from here (one build at a time).
+  - **19 (61a9c49 + 8f39341)** ID's instruction validity registered at `fetch_deliver`
+    (`id_dvalid_q <= fetch_dec.valid & ~fetch_word.isi`: a faulted fetch is the word 0, invalid;
+    3 ISI runs caught the first form), out of `id_leave`. Judged on a whole-core build from
+    here: `scratch/build66_8f39341.log`, families in `scratch/sta66_paths.txt` (the STA runs at
+    the build's end).
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
