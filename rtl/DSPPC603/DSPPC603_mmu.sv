@@ -692,8 +692,10 @@ always_comb begin
 			if (~d_lookup_ready & ~d_ready)  d_rd  = 1'b1;
 			else if (~d_ready)              ;      // wait for the registered lookup
 			else if (dxl.ok)                d_gnt = dbus_gnt & ~w_bus;
-			else if (dxl.fault)             d_gnt = 1'b1;
-			// else a miss or a changed-bit walk: D_WREQ, a cycle on
+			// a fault found last cycle: granted now, from the registered
+			// outcome (answered from D_FAULT next); a miss or a changed-bit
+			// walk likewise leaves for D_WREQ now
+			else if (d_xl_seen_q & d_xl_fault_q) d_gnt = 1'b1;
 		end
 		D_WREQ:                             w_req_d = 1'b1;
 		D_WALK: if (w_done & ~d_cancelled & d_req) begin
