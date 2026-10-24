@@ -78,13 +78,14 @@ logic [31:0] gpio_cfg, gpio_out, gpio_int_ctrl, int_enables, crt_test, vconv_end
 logic [31:0] vefs /*verilator public_flat_rd*/, vofs /*verilator public_flat_rd*/,
              hstart /*verilator public_flat_rd*/, heb /*verilator public_flat_rd*/;
 logic [31:0] sw [15];
+logic [3:0]  vm_hi;                       // VIDEO_MODE's top nibble as written (Mac OS 2, the logo and Racing Days 3)
 
 always_comb for (int i = 0; i < 15; i++) swatch[32 * i +: 32] = sw[i];
-// (VIDEO_MODE 3, the ROM's boot logo and Racing Days (HSTART 148, VEFS 62, VCONV_END 480 on
+// (VIDEO_MODE 3 in bits 31-28 (writes 30000000; Mac OS's desktop writes 20000000), the ROM's boot logo and Racing Days (HSTART 148, VEFS 62, VCONV_END 480 on
 // NTSC; board trace 2026-10-24): the picture fills the active area, as it does on the console
 // (Racing Days's 640x480 screens whole); the registers there set up the convolution, so the
 // window is the active area. VIDEO_MODE 2 (Mac OS's desktop): from HSTART and VEFS.)
-assign window = (video_mode == 2'd3) ? {sw[2][31:20], 12'(sw[10][31:20] - 12'd2)} : {hstart[31:20], vefs[31:20]};
+assign window = (vm_hi == 4'h3) ? {sw[2][31:20], 12'(sw[10][31:20] - 12'd2)} : {hstart[31:20], vefs[31:20]};
 
 wire [8:0]  rn     = addr[10:2];          // register number: offset >> 2
 wire [3:0]  sw_n   = 4'(rn - 9'h0B);      // a timing register's index (HEQ 0 ... VHLINE 14)
@@ -130,7 +131,10 @@ always_ff @(posedge clk) begin
 			9'h00: fb_base       <= merge_be(fb_base, wdata, be);
 			9'h01: row_words     <= merge_be(row_words, wdata, be);
 			9'h02: color16       <= be[3] ? wdata[31] : color16;
-			9'h03: video_mode    <= be[3] ? wdata[31:30] : video_mode;
+			9'h03: begin
+				video_mode <= be[3] ? wdata[31:30] : video_mode;
+				if (be[3]) vm_hi <= wdata[31:28];
+			end
 			9'h04: vefs          <= merge_be(vefs, wdata, be);
 			9'h05: vofs          <= merge_be(vofs, wdata, be);
 			9'h06: hstart        <= merge_be(hstart, wdata, be);
@@ -150,6 +154,7 @@ always_ff @(posedge clk) begin
 		row_words     <= 32'h0;
 		color16       <= 1'b0;
 		video_mode    <= 2'd0;
+		vm_hi         <= 4'h0;
 		vefs          <= 32'h0;
 		vofs          <= 32'h0;
 		hstart        <= 32'h0;
