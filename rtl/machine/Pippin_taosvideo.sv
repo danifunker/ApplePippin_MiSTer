@@ -76,6 +76,7 @@ module Pippin_taosvideo
 	// Taos's registers, from the CPU's clock (standing still while used)
 	input  logic         timing_on,       // CRT_CTRL bit 24
 	input  logic [479:0] swatch,          // HEQ (bits 31-0) .. VHLINE
+	input  logic [23:0]  window,          // {HSTART, VEFS} (quasi-static, as swatch)
 	input  logic [31:0]  fb_base,
 	input  logic [31:0]  row_words,
 	input  logic         color16,
@@ -198,11 +199,32 @@ wire [11:0] HAL   = use_fb ? 12'd144  : T_HAL;
 wire [11:0] HBWAY = use_fb ? 12'd0    : T_HBWAY;
 wire [11:0] HSP   = use_fb ? 12'd704  : T_HSP;
 wire        ilace = VHL[0];
+
+// The picture's window (2026-10-24): the frame buffer is shown from HSTART and from VEFS + 2
+// half-lines on, centred in the active area HAL-HFP / VAL-VFP, which is black around it. What
+// Mac OS's driver writes (board trace, build 46): NTSC HAL 116 HFP 756 HSTART 116, VAL 34 VFP
+// 514 VEFS 32 (the window is the active area); PAL HAL 136 HFP 912 HSTART 204, VAL 38 VFP 614
+// VEFS 84 (640 x 480 in 776 x 576, 68 dots and 48 half-lines each side; ROW_WORDS 1280, the
+// desktop's 640 dots). The boot ROM's first NTSC setting (HSTART 148, VEFS 62) gives the logo's
+// 576 x 420. Without the window PAL showed the 776-dot line, the rows running on into the next.
+wire [11:0] W_HST = window[23:12];
+wire [11:0] W_VEF = window[11:0] + 12'd2;
+logic [11:0] hw0, hw1, vw0, vw1;          // the window: dots HW0-HW1, half-lines VW0-VW1
+always_ff @(posedge clk) begin
+	logic [11:0] ho, vo;
+	ho = (!use_fb && W_HST > HAL && 12'(W_HST - HAL) < 12'((HFP - HAL) >> 1)) ? 12'(W_HST - HAL) : 12'd0;
+	vo = (!use_fb && W_VEF > VAL && 12'(W_VEF - VAL) < 12'((VFP - VAL) >> 1)) ? 12'(W_VEF - VAL) : 12'd0;
+	hw0 <= HAL + ho;
+	hw1 <= HFP - ho;
+	vw0 <= VAL + vo;
+	vw1 <= VFP - vo;
+end
 wire        pmode = ilace & prog_s[1] & ~use_fb;  // the interlaced timing shown progressive
 
 logic [11:0] h, v;
 logic [11:0] xa;
 logic        s_ce, s_hs, s_vs, s_hb, s_vb, fetch, s_fld;
+logic        s_win;                       // the dot is in the picture's window
 logic [11:0] s_x;
 logic [10:0] s_y, fetch_y;                // the line within the field
 logic        fetch_fld;
@@ -210,9 +232,9 @@ logic        fetch_fld;
 wire [12:0] v2      = {1'b0, v} + (pmode ? 13'd1 : 13'd2);
 wire [11:0] v_next  = (v2 >= {1'b0, VHL}) ? 12'(v2 - {1'b0, VHL}) : v2[11:0];
 wire        last_h  = h >= HPIX + 12'd1;
-wire        v2_act  = (v_next >= VAL) && (v_next < VFP);
-wire [11:0] v_rel   = v - VAL;
-wire [11:0] vn_rel  = v_next - VAL;
+wire        v2_act  = (v_next >= vw0) && (v_next < vw1);
+wire [11:0] v_rel   = v - vw0;
+wire [11:0] vn_rel  = v_next - vw0;
 
 always_ff @(posedge clk) begin
 	on_s   <= {on_s[0], timing_on};
@@ -234,12 +256,13 @@ always_ff @(posedge clk) begin
 		s_ce  <= 1'b1;
 		s_hb  <= ~((h >= HAL) && (h < HFP));
 		s_vb  <= ~((v >= VAL) && (v < VFP));
+		s_win <= (h >= hw0) && (h < hw1) && (v >= vw0) && (v < vw1);
 		s_hs  <= ~((h >= HSP) || (h < HBWAY));    // negative syncs
 		s_vs  <= ~((v >= VSYNC) || (v < VBPEQ));
 		s_x   <= xa;
 		s_y   <= pmode ? 11'(v_rel) : 11'(v_rel >> 1);
 		s_fld <= ilace & ~pmode & v_rel[0];
-		if ((h >= HAL) && (h < HFP)) xa <= xa + 12'd1;
+		if ((h >= hw0) && (h < hw1)) xa <= xa + 12'd1;
 		if (!last_h) h <= h + 12'd1;
 		else begin
 			h  <= 12'd0;
@@ -263,7 +286,7 @@ initial begin
 end
 
 // ---- the line fetch ----------------------------------------------------------------------------
-wire [11:0] width  = HFP - HAL;
+wire [11:0] width  = hw1 - hw0;
 wire [14:0] lpix   = color16 ? {2'd0, width, 1'b0} : {3'd0, width};
 wire [14:0] lbytes = lpix + 15'd7;
 wire [11:0] lwords = 12'(lbytes >> 3);
@@ -478,7 +501,7 @@ logic        p3_ce, p3_de, p3_hs, p3_vs, p3_hb, p3_vb, p3_fld;
 
 always_ff @(posedge clk) begin
 	p1_ce   <= s_ce;
-	p1_de   <= ~s_hb & ~s_vb;
+	p1_de   <= ~s_hb & ~s_vb & s_win;
 	p1_hs   <= s_hs;
 	p1_vs   <= s_vs;
 	p1_hb   <= s_hb;

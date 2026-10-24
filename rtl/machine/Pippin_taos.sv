@@ -59,6 +59,7 @@ module Pippin_taos
 	output logic [1:0]   video_mode,      // VIDEO_MODE bits 31-30 (0 progressive, 1-3 interlaced)
 	output logic [31:0]  crt_ctrl,        // bit 24: video out enabled
 	output logic [15*32-1:0] swatch,      // HEQ (2C) .. VHLINE (64), the first in bits 31-0
+	output logic [23:0]  window,          // {HSTART, VEFS}: where the frame buffer's picture starts in the timing
 
 	// the colour table, read by the scan-out in its clock
 	input  logic         clk_v,
@@ -73,12 +74,13 @@ import Pippin_pkg::*;
 localparam logic [31:0] TAOS_VERSION = 32'hA500_0000;
 
 logic [31:0] gpio_cfg, gpio_out, gpio_int_ctrl, int_enables, crt_test, vconv_end;
-// the picture's window in the timing (not yet used by the scan-out; readable by the machine bench)
+// the picture's window in the timing (HSTART and VEFS go to the scan-out; readable by the machine bench)
 logic [31:0] vefs /*verilator public_flat_rd*/, vofs /*verilator public_flat_rd*/,
              hstart /*verilator public_flat_rd*/, heb /*verilator public_flat_rd*/;
 logic [31:0] sw [15];
 
 always_comb for (int i = 0; i < 15; i++) swatch[32 * i +: 32] = sw[i];
+assign window = {hstart[31:20], vefs[31:20]};
 
 wire [8:0]  rn     = addr[10:2];          // register number: offset >> 2
 wire [3:0]  sw_n   = 4'(rn - 9'h0B);      // a timing register's index (HEQ 0 ... VHLINE 14)

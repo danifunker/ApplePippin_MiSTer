@@ -285,6 +285,7 @@ logic [31:0]  vw_be;
 logic [255:0] vw_wdata, vw_rdata;
 logic         taos_on, taos_c16, vbl;
 logic [479:0] taos_swatch;
+logic [23:0]  taos_window;
 logic [31:0]  taos_fbb, taos_roww;
 logic [7:0]   athens_d2, athens_n2, athens_p2;
 logic         athens_set;
@@ -318,7 +319,7 @@ Pippin_machine #(.CPU_HZ(CPU_HZ), .CPU_HZ_FAST(CPU_HZ_FAST), .TB_HZ(TB_HZ), .CUD
 	.fl_ld_we, .fl_ld_re, .fl_ld_addr, .fl_ld_data, .fl_ld_q, .fl_changed, .fl_instant,
 	.mon_id, .eject_btn, .cd_insert, .ps2_key, .ps2_mouse, .joy, .joy2, .clock_ok, .clock_secs, .int_dbg,
 	.v_req, .v_we, .v_line, .v_addr, .v_be, .v_wdata, .v_ack, .v_rdata,
-	.taos_on, .taos_swatch, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .athens_set, .vbl,
+	.taos_on, .taos_swatch, .taos_window, .taos_fbb, .taos_roww, .taos_c16, .athens_d2, .athens_n2, .athens_p2, .athens_set, .vbl,
 	.clk_v(clk_b), .clut_index, .clut_rgb,
 	.dbg_status, .dbg_passes, .dbg_errors, .dbg_first,
 	.tr_mesh, .tr_ev(scsi_tr_ev), .tr_rec(scsi_tr_rec)
@@ -526,7 +527,7 @@ Pippin_taosvideo video (
 	.c_ack(vb_ack), .c_rdata(vb_rdata),
 	.ddr_busy(va_busy), .ddr_burstcnt(va_burstcnt), .ddr_addr(va_addr), .ddr_dout, .ddr_dout_ready(va_dout_ready),
 	.ddr_rd(va_rd), .ddr_din(va_din), .ddr_be(va_be), .ddr_we(va_we),
-	.timing_on(taos_on), .swatch(taos_swatch), .fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16),
+	.timing_on(taos_on), .swatch(taos_swatch), .window(taos_window), .fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16),
 	.athens_d2, .athens_n2, .athens_p2, .athens_set, .mon_id, .progressive(vid_progressive), .vbl,
 	.clut_index, .clut_rgb,
 	.ce_pix(vid_ce), .r(vid_r), .g(vid_g), .b(vid_b), .hs(vid_hs), .vs(vid_vs),

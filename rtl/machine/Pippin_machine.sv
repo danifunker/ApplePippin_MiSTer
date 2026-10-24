@@ -256,6 +256,7 @@ module Pippin_machine
 	// still while they are used; its vertical blanking back (asynchronous)
 	output logic         taos_on,
 	output logic [479:0] taos_swatch,
+	output logic [23:0]  taos_window,         // Taos's {HSTART, VEFS}
 	output logic [31:0]  taos_fbb,
 	output logic [31:0]  taos_roww,
 	output logic         taos_c16,
@@ -621,7 +622,7 @@ Pippin_taos taos (
 	.sel(p_sel & p_dev[6]), .clut_sel(p_sel & p_dev[5]), .we(p_we), .addr(p_a[10:2]), .be(p_be), .wdata(p_wd),
 	.rdata(taos_rdata), .mon_id, .eject_btn, .vsync(taos_vsync),
 	.fb_base(taos_fbb), .row_words(taos_roww), .color16(taos_c16), .video_mode(taos_video_mode),
-	.crt_ctrl(taos_crt_ctrl), .swatch(taos_swatch),
+	.crt_ctrl(taos_crt_ctrl), .swatch(taos_swatch), .window(taos_window),
 	.clk_v, .v_index_r(clut_index[23:16]), .v_index_g(clut_index[15:8]), .v_index_b(clut_index[7:0]),
 	.v_rgb(clut_rgb)
 );
