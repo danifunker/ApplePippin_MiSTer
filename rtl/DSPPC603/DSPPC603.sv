@@ -3168,7 +3168,7 @@ DSPPC603_cache #(.WRITABLE (0), .IDXW (IC_IDXW), .WAYS (CACHE_WAYS)) icache
 	/* verilator lint_on PINCONNECTEMPTY */
 );
 
-DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (1), .IDXW (DC_IDXW), .WAYS (CACHE_WAYS)) dcache
+DSPPC603_cache #(.WRITABLE (1), .LATE_ANSWER (0), .IDXW (DC_IDXW), .WAYS (CACHE_WAYS)) dcache
 (
 	.clk        (clk),
 	.reset      (reset),
