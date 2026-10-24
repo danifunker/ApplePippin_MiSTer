@@ -1073,8 +1073,10 @@ always_ff @(posedge clk) begin
 	end
 
 	F_DIV: begin
-		// (the last step waits for the back)
-		if ((d_cnt != 5'd0) | back_free) begin
+		// (the last pair's step is not taken: the quotient and the remainder
+		// go to the back from d_quo_next and d_next_b as they stand, so the
+		// back's readiness is not these registers' enable; the 66 MHz work)
+		if (d_cnt != 5'd0) begin
 			d_rem <= d_next_b;
 			d_quo <= d_quo_next;
 			d_cnt <= d_cnt - 5'd1;

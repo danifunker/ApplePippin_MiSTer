@@ -681,7 +681,22 @@ always_ff @(posedge clk) begin
 end
 
 // the data side's own bus request
-wire d_dreq = (d_state == D_IDLE) & d_req & d_ready & dxl.ok & ~w_bus;
+// The hit's ok from a bit per entry (a load's or a store's ok, less dcbz's
+// alignment exception on a W or I page), ANDed with the match: dxl's
+// composition over the matched entries was three levels in front of the
+// grant (the 66 MHz work, 2026-10-24; checked against dxl.ok below)
+logic [DXL_N-1:0] d_ok_vec;
+always_comb
+	for (int n = 0; n < DXL_N; n++)
+		d_ok_vec[n] = (d_we ? d_cached_store[n].ok : d_cached_load[n].ok) &
+		              ~(d_line & (d_cached_load[n].wimg[3] | d_cached_load[n].wimg[2]));
+wire d_ok_hit = |(d_cached_match & d_ok_vec);
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & d_req & d_ready & (d_ok_hit != dxl.ok))
+		$fatal(1, "the per-entry ok differs from the translation's");
+/* synthesis translate_on */
+wire d_dreq = (d_state == D_IDLE) & d_req & d_ready & d_ok_hit & ~w_bus;
 
 always_comb begin
 	d_rd    = 1'b0;
@@ -691,7 +706,7 @@ always_comb begin
 		D_IDLE: if (d_req) begin
 			if (~d_lookup_ready & ~d_ready)  d_rd  = 1'b1;
 			else if (~d_ready)              ;      // wait for the registered lookup
-			else if (dxl.ok)                d_gnt = dbus_gnt & ~w_bus;
+			else if (d_ok_hit)              d_gnt = dbus_gnt & ~w_bus;
 			// a fault found last cycle: granted now, from the registered
 			// outcome (answered from D_FAULT next); a miss or a changed-bit
 			// walk likewise leaves for D_WREQ now
@@ -715,7 +730,7 @@ end
 logic d_xl_fault_q, d_xl_ok_q, d_xl_align_q, d_xl_seen_q;
 logic [31:0] d_xl_info_q;
 always_ff @(posedge clk) begin
-	d_xl_seen_q  <= (d_state == D_IDLE) & d_req & d_ready & ~dxl.ok & ~reset;   // (a miss or a fault: not granted, so held)
+	d_xl_seen_q  <= (d_state == D_IDLE) & d_req & d_ready & ~d_ok_hit & ~reset;   // (a miss or a fault: not granted, so held)
 	d_xl_fault_q <= dxl.fault;
 	d_xl_ok_q    <= dxl.ok;
 	d_xl_align_q <= dxl.align;
