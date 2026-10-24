@@ -82,7 +82,8 @@ AppleJack 2 adds a second AppleJack from the MiSTer's second gamepad. The keyboa
 mouse are always there.
 
 **Video.** OSD > Video: Video out NTSC (the default), VGA or PAL (the console's switch; reset
-to apply). NTSC and PAL are interlaced: Interlace: Progressive (the default) shows every line
+to apply). PAL shows Mac OS's 640x480 picture centred in the 50 Hz frame, with black borders,
+as a PAL Pippin does. NTSC and PAL are interlaced: Interlace: Progressive (the default) shows every line
 each frame without flicker, Original shows the fields as the console sends them.
 
 **Internet (PPP).** The Pippin's modem port is the MiSTer's UART. The "Macintosh on Pippin"
@@ -104,15 +105,13 @@ for Apply and reset.
 - **CPU speed**: 58.3 MHz against the Pippin's 66 MHz. The CPU's longest paths (DSPPC603's
   condition-register and TLB-valid logic) barely meet timing at 58.3 MHz; 66 MHz needs them
   shortened. Titles run, a little slower than on the console.
-- **Video clock**: Mac OS programs only one of the two Athens clock chips the way the core
-  expects; the picture is right with the standard NTSC/VGA/PAL dot clocks, and PAL timing is
-  still to be checked.
+- **Video clock**: the core uses the standard dot clocks (NTSC 15.734 kHz, PAL 15.625 kHz,
+  VGA 31.469 kHz lines) rather than the Athens clock chips' outputs, which Mac OS programs only
+  in part; the rates are right on the board (NTSC and VGA 59.9 Hz, PAL 50 Hz).
 - **Eject pressed twice**: pressing Eject again during the insert-disc animation should close
   the empty tray; the ROM does not see that press yet. Use Insert disc or choose a disc.
 - **The 603's misaligned page-crossing exception** is not modelled on the main branch
   (`align603` has it; it slows the boot and no title needs it so far).
-- **PAL**: the line and frame rates are right (15.625 kHz, 50 Hz), but the picture shows the
-  whole active line (776x576) instead of the 640x480 window the Pippin puts in it.
 - Not yet: playing titles through, the compatibility sweep.
 
 ## Repository
