@@ -1288,7 +1288,7 @@ always_ff @(posedge clk) begin
 		id_ra_q <= fetch_dec.ra;
 		id_rb_q <= fetch_dec.rb;
 		id_rc_q <= fetch_dec.rc;
-		id_dvalid_q <= fetch_dec.valid;
+		id_dvalid_q <= fetch_dec.valid & ~fetch_word.isi;   // (a fetch that faulted is the word 0: invalid)
 	end
 	else if (gpr_seq_take) begin
 		id_ra_q <= seq_next_ra;
