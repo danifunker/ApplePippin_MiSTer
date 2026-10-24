@@ -1175,7 +1175,7 @@ always_ff @(posedge clk) begin
 		fin_fi      <= rnd_fi;
 		fin_fprf_we <= ~int_q;
 		fin_den     <= rnd_den;
-		state       <= (resp_ready & ~no_early) ? S_IDLE : S_DONE;
+		state       <= S_DONE;
 	end
 
 	S_DONE: if (resp_ready & ~hand_now) state <= S_IDLE;
