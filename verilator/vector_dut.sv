@@ -114,6 +114,7 @@ DSPPC604_int_unit int_unit
 	.a          (op_a),
 	.b          (op_b),
 	.ca_in      (xer_ca),
+	.mask_imm   (32'd0), .mask_rot_imm (32'd0),
 	.so_in      (xer_so),
 	.resp_valid (int_resp),
 	.resp_ready (1'b1),

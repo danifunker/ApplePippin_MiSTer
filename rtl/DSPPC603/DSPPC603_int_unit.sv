@@ -36,6 +36,7 @@ module DSPPC603_int_unit
 	input  logic [31:0] b,
 	input  logic        ca_in,       // XER[CA]
 	input  logic        so_in,       // XER[SO]
+	input  logic [31:0] mask_imm, mask_rot_imm,   // the immediate rotate forms' masks, registered by the pipeline (see the ALU)
 
 	output logic        resp_valid,
 	input  logic        resp_ready,
@@ -73,6 +74,8 @@ DSPPC603_alu alu
 	.a      (a),
 	.b      (b),
 	.ca_in  (ca_in),
+	.mask_imm (mask_imm),
+	.mask_rot_imm (mask_rot_imm),
 	.result (alu_result),
 	.sum    (sum),
 	.ca_out (alu_ca),

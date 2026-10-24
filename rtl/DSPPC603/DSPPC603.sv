@@ -1430,6 +1430,7 @@ DSPPC603_alu completion_alu
 	.a (completion_exec_a),
 	.b (completion_exec_b),
 	.ca_in (1'b0),
+	.mask_imm (32'd0), .mask_rot_imm (32'd0),
 	.result (completion_result),
 	/* verilator lint_off PINCONNECTEMPTY */
 	.sum (), .ca_out (), .ov_out (), .lt (), .gt (), .eq (), .lt_s (), .lt_u (), .zero (), .neg (), .rot_zero (), .rot_imm_zero (), .rot_imm_neg (),
@@ -1800,6 +1801,7 @@ logic [31:0] int_result;
 logic [31:0] int_log, int_rot, int_clz, int_exts, int_mul_hi, int_mul_lo, int_div_q;
 logic        int_rot_zero;              // (unused since the two-cycle record forms below)
 logic        int_rot_imm_zero, int_rot_imm_neg;
+logic [31:0] ex_mask_i_q, ex_mask_rot_q;    // the immediate rotate forms' masks, registered with the operation (below)
 logic [31:0] int_sum;                      // the adder alone: the effective address
 logic        int_ca;
 logic        int_ov;
@@ -1826,6 +1828,8 @@ DSPPC603_int_unit int_unit
 	.b          (op_b),
 	.ca_in      (xer[29]),
 	.so_in      (xer[31]),
+	.mask_imm   (ex_mask_i_q),
+	.mask_rot_imm (ex_mask_rot_q),
 	.resp_valid (int_resp),
 	.resp_ready (mem_room & ex_order_ready),
 	.result     (int_result),
@@ -2625,6 +2629,40 @@ always_comb begin
 	end
 end
 
+// The immediate rotate forms' masks, from the instruction's own bits in ID (MB
+// [10:6], ME [5:1], SH [15:11]: no decoder in front) and registered with the
+// operation: rlwinm/rlwimi keep rotl(a, SH) under mask(MB, ME), so a's bits
+// under rotr(mask, SH); srawi keeps rotr(a, SH) under mask(SH, 31), so a's
+// under rotl(mask, SH). The ALU tests a under them (the 66 MHz work, 2026-10-24;
+// the kind's choice is the decoder's, last). Checked against the ALU's own below.
+function automatic logic [31:0] mask_gen_id(input logic [4:0] mb, input logic [4:0] me);
+	logic [31:0] m1, m2;
+	begin
+		m1 = 32'hFFFFFFFF >> mb;
+		m2 = 32'hFFFFFFFF << (5'd31 - me);
+		mask_gen_id = (mb <= me) ? (m1 & m2) : (m1 | m2);
+	end
+endfunction
+wire [4:0]  id_sh  = id_insn[15:11];
+wire [31:0] id_mask_rl = mask_gen_id(id_insn[10:6], id_insn[5:1]);
+wire [31:0] id_mask_sr = mask_gen_id(id_sh, 5'd31);
+wire [63:0] id_mask_rl_dbl = {id_mask_rl, id_mask_rl} >> id_sh;
+wire [63:0] id_mask_sr_dbl = {id_mask_sr, id_mask_sr} << id_sh;
+wire [31:0] id_mask_rl_rot = id_mask_rl_dbl[31:0];
+wire [31:0] id_mask_sr_rot = id_mask_sr_dbl[63:32];
+wire        id_rot_sr = (id_dec.ic.rot_op == ROT_SRW) | (id_dec.ic.rot_op == ROT_SRAW);
+/* synthesis translate_off */
+function automatic logic [31:0] mask_of_ex();
+	case (ex_dec.ic.rot_op)
+		ROT_SRW, ROT_SRAW: mask_of_ex = mask_gen_id(ex_dec.ic.sh, 5'd31);
+		default:           mask_of_ex = mask_gen_id(ex_dec.ic.mb, ex_dec.ic.me);
+	endcase
+endfunction
+always_ff @(posedge clk)
+	if (~reset & ex_valid & is_int & (ex_dec.unit == UNIT_ALU) & (ex_dec.ic.alu_op == ALU_ROT) & ~ex_dec.ic.sh_reg &
+	    (ex_mask_i_q != mask_of_ex()))
+		$fatal(1, "the registered immediate mask differs from the operation's");
+/* synthesis translate_on */
 // The value for the register this operation writes, and which register.
 // The upper word mffs delivers is undefined; FFF80000 is what the 604 puts
 // there (measured, as for fctiw).
@@ -2829,6 +2867,8 @@ always_ff @(posedge clk) begin
 		ex_spr_sel   <= spr_sel_of(id_spr_n);
 		ex_rs        <= (seq_nop | seq_cr_op) ? '0 : rs_of(id_dec);
 		ex_rot_chk_q <= ~(seq_nop | seq_cr_op) & (id_dec.unit == UNIT_ALU) & (id_dec.ic.alu_op == ALU_ROT) & id_dec.ic.sh_reg & id_dec.cr_wr;
+		ex_mask_i_q   <= id_rot_sr ? id_mask_sr : id_mask_rl;
+		ex_mask_rot_q <= id_rot_sr ? id_mask_sr_rot : id_mask_rl_rot;
 		ex_ill   <= ~id_dec.valid;
 		ex_isi   <= id_isi;
 		ex_isi_info <= id_isi_info;
