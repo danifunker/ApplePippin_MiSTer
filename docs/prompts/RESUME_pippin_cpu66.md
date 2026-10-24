@@ -1,4 +1,4 @@
-# Resume: the Pippin's CPU at 66 MHz (written 2026-10-24)
+# Resume: the Pippin's CPU at 66 MHz (written 2026-10-24; updated at the hand-off, ~13:00)
 
 Resume the Bandai Pippin MiSTer core's work with one goal: **close timing with the CPU
 (DSPPC603) and the machine at 66 MHz** (the console's own clock; today 58.333 MHz), then
@@ -128,14 +128,36 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
   for `constraint 66.67 MHz` instead. Other sessions (Sun-3, IBMRS6K7248) queue on
   `/tmp/quartus.lock` too: a fit may wait 20-40 min.
 
+- **The CR path after change 1** (path 1 of `check66_core_b.txt`, 15.75 ns data path): the
+  forwarded `fb_wb` -> `op_b` (fan-out 13) -> the ALU's shift count `sh_n` (fan-out 78) -> the
+  barrel shifter (`ShiftRight0`, `rot[24]`) -> `Selector72` (the ALU's result/zero choice) ->
+  `int_unit.Selector37` (4 levels: the int unit's per-unit `res_zero`/`res_neg` choice) ->
+  `int_unit.cr_out[2]` (EQ) -> `cr~43/44` -> `cr[18]`. That is a record-form shift/rotate by
+  a register amount (`slw.`/`srw.`/`sraw.`/`rlwnm.`) whose rB comes forwarded. The int unit
+  already finds zero per unit before the result's choice (`DSPPC603_int_unit.sv:157-192`,
+  `DSPPC603_alu.sv` `zero`/`neg`); the time is the forward mux, the shifter and the two
+  choice levels. Candidate fixes, cheapest first:
+  (a) make the register-amount record forms (rot_op SLW/SRW/SRAW/RLWNM with Rc) take a second
+      EX cycle: CR0 from the registered result (rare instructions, negligible cost);
+  (b) flatten the zero/neg choice: one mux over every unit's flags selected by a decode
+      registered in ID, instead of the ALU's `Selector72` then the int unit's case;
+  (c) commit CR0 of all record forms a stage later (from `mem_result`), forwarding CR0 to a
+      dependent branch: broadest, but touches the branch path; only if (a)+(b) are not enough.
+  Check what else lands in `cr` with `syn/check.py core --cpu 603 --mhz 66.667 --report-only
+  --to "*cpu|cr[*"` (cell by cell into CR; run it under `flock /tmp/quartus.lock`; a run was
+  stopped at the hand-off, nothing was learned from it).
+
 ## Next steps (in order)
 
-1. Read `scratch/check66_core_b.txt`: how much change 1 won; the new worst families.
-2. Next hubs: whatever still feeds `completion_push_ex` (its own inputs: `fpu_ready`,
-   `completion_count`, `ex_fp_elig`'s decode terms, `mem_fault`); then `id_ra_q`/`id_rc_q`
-   (ID's hazard/forwarding compare against EX's destination: precompute in ID, register);
-   then CR's writeback (`wb_result -> cr`). One change at a time: lint, `run_core.py` on the
-   Mac, a CPU-alone fit; log the slack here.
+1. The CR family (fix (a) and/or (b) above). Then the data-MMU page compare from EX's address
+   adder (`Add29 -> mmu.d_cached_page`, `-> fa_mem`): the effective address's adder feeding
+   the TLB/BAT compare in the same cycle; then the forwarded operands into the memory unit's
+   state (`fb_mem`/`mem_result -> mem_unit.state.S_REQ1/S_RSP1`); then
+   `mmu.i_page_q -> pc_f`. One change at a time: lint (`make -C verilator lint`),
+   `verilator/run_core.py` on the Mac (copy `~/pippin_bench/runcore66a.sh`; PASS = every
+   line `pass` and `RESULT: PASS`), a CPU-alone fit (`syn/check.py core --cpu 603 --mhz
+   66.667 --paths 40 --detail 1 > scratch/check66_core_<x>.txt` under the flock); record
+   Fmax, worst slack and the new families in this file, commit and push each step.
 3. When the CPU alone meets 66.67 with ~0.5 ns margin: the bus split and the PLL (below),
    then whole-core fits.
 
