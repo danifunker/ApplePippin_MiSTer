@@ -901,6 +901,7 @@ logic [7:0]  bt_rdn = 8'd0;
 wire         bt_rd_sample = q_is_gc && ~q_we && qa[16:8] == 9'h000;   // (the VIA's reads: every one, since 2026-10-21 14:00)
 wire         bt_hit = (TRACE_INT != 0 && q_is_dbg && q_we) ||   // the memory test's progress (DBG)
                       (TRACE_FL != 0 && q_is_fl) ||               // the save flash (2026-10-22: does Mac OS program it?)
+                      (q_is_taos && q_we && (qa[10:2] < 9'h01A || qa[10:2] == 9'h025)) ||   // Taos's video registers (the PAL window)
                       q_is_gc && (qa[16:9] == 8'h88 || qa[16:8] == 9'h082 || qa[16:8] == 9'h083 ||
                                 qa[16:8] == 9'h140 || qa[16:8] == 9'h088 ||
                                 qa[16:13] == 4'h9 || qa[16:10] == 7'h21 ||   // the ESCC and its DMA channels 4-7 (MacPPC7300 719cc93)
