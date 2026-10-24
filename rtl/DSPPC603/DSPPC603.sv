@@ -1869,6 +1869,8 @@ wire  ex_fpu_req = ex_valid & ~x_pre & ~ex_stall & is_fpu & ~ex_fpu_taken;
 wire  fpu_req    = ex_fpu_req;
 wire  fpu_take   = fpu_req & fpu_ready & ~fpu_req_simple;
 wire  fpu_flush  = ex_flush | redir;     // (a misfetched FP operation leaving EX kills its successor in the unit)
+logic fpu_flush_q;                        // (the unit applies it a cycle later; its answer in that cycle goes nowhere)
+always_ff @(posedge clk) fpu_flush_q <= fpu_flush & ~reset;
 // EX's FP operation leaves into a completion-queue entry in the cycle the
 // unit takes it (overlap 2 of docs/fpu_pipe_plan.md): one writing a
 // register, FP traps off, fetched sequentially with nothing folded after
@@ -1927,7 +1929,7 @@ always_ff @(posedge clk) begin
 end
 /* synthesis translate_off */
 always_ff @(posedge clk) begin
-	if (~reset & fpu_resp & (fo_count == 3'd0) & ~(ex_fpu_req & fpu_req_simple))
+	if (~reset & ~fpu_flush_q & fpu_resp & (fo_count == 3'd0) & ~(ex_fpu_req & fpu_req_simple))
 		$fatal(1, "the FPU answers with no request outstanding");
 	if (~reset & fpu_take & (fo_count == 3'd4)) $fatal(1, "more FPU requests outstanding than the order FIFO holds");
 	if (~reset & completion_push_ex & completion_push_alu) $fatal(1, "EX's FP operation pushed with an admission from ID");
