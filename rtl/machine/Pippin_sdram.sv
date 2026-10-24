@@ -173,7 +173,9 @@ always_ff @(posedge clk) begin
 end
 
 // ---- the request side -------------------------------------------------------------------
-logic [15:0] t;                        // clocks in this state
+logic [7:0]  t;                        // clocks in this state (every state ends within a few dozen)
+logic [15:0] st_cnt;                   // the power-up wait (STARTUP clocks), then the init commands by t
+logic        st_go;
 logic        r_we, r_line, r_up;       // what is being served
 logic [26:1] r_hw;                     // its first halfword
 logic [3:0]  r_be;
@@ -193,7 +195,7 @@ always_ff @(posedge clk) begin
 	command  <= CMD_NOP;
 	dq_oe    <= 1'b0;
 	ack      <= 1'b0;
-	t        <= t + 16'd1;
+	t        <= t + 8'd1;
 	if (~req) acked <= 1'b0;
 
 	case (state)
@@ -203,24 +205,29 @@ always_ff @(posedge clk) begin
 			SDRAM_A  <= 13'h0;
 			SDRAM_BA <= 2'b00;
 			dqm      <= 2'b11;
-			if (t >= 16'(STARTUP)) begin
-				case (t - 16'(STARTUP))
-					16'd0:  begin chip <= 1'b0; command <= CMD_PRECHARGE; SDRAM_A[10] <= 1'b1; end
-					16'd8:  command <= CMD_REFRESH;
-					16'd16: command <= CMD_REFRESH;
-					16'd24: begin command <= CMD_MODE; SDRAM_A <= MODE; end
-					16'd32: begin chip <= 1'b1; command <= CMD_PRECHARGE; SDRAM_A[10] <= 1'b1; end
-					16'd40: command <= CMD_REFRESH;
-					16'd48: command <= CMD_REFRESH;
-					16'd56: begin command <= CMD_MODE; SDRAM_A <= MODE; end
-					16'd64: begin state <= S_IDLE; ready <= 1'b1; end
-					default: ;
-				endcase
+			// (the wait on a counter of its own: the commands' timer is 8 bits, 2026-10-23, the
+			// 16-bit compare and subtraction were the memory clock's longest paths)
+			if (!st_go) begin
+				t <= 8'd0;
+				if (st_cnt == 16'(STARTUP - 1)) st_go <= 1'b1;
+				else st_cnt <= st_cnt + 16'd1;
 			end
+			else case (t)
+				8'd0:  begin chip <= 1'b0; command <= CMD_PRECHARGE; SDRAM_A[10] <= 1'b1; end
+				8'd8:  command <= CMD_REFRESH;
+				8'd16: command <= CMD_REFRESH;
+				8'd24: begin command <= CMD_MODE; SDRAM_A <= MODE; end
+				8'd32: begin chip <= 1'b1; command <= CMD_PRECHARGE; SDRAM_A[10] <= 1'b1; end
+				8'd40: command <= CMD_REFRESH;
+				8'd48: command <= CMD_REFRESH;
+				8'd56: begin command <= CMD_MODE; SDRAM_A <= MODE; end
+				8'd64: begin state <= S_IDLE; ready <= 1'b1; end
+				default: ;
+			endcase
 		end
 
 		S_IDLE: begin
-			t <= 16'd0;
+			t <= 8'd0;
 			dqm <= 2'b00;
 			if (ref_take) begin
 				// both ranks, one after the other
@@ -249,27 +256,27 @@ always_ff @(posedge clk) begin
 		end
 
 		S_REF: begin
-			if (t == 16'd0) begin chip <= 1'b1; command <= CMD_REFRESH; end
-			if (t == 16'(T_RFC)) state <= S_IDLE;
+			if (t == 8'd0) begin chip <= 1'b1; command <= CMD_REFRESH; end
+			if (t == 8'(T_RFC)) state <= S_IDLE;
 		end
 
 		S_ACT: begin
 			beat   <= 5'd0;
 			issued <= 5'd0;
-			if (t == 16'(T_RCD - 2)) state <= (r_we & ~r_rmw) ? S_WRITE : S_READ;
+			if (t == 8'(T_RCD - 2)) state <= (r_we & ~r_rmw) ? S_WRITE : S_READ;
 		end
 
 		// READ at the first column, and for a line again eight clocks later at
 		// the ninth: sixteen beats without a gap. A word takes its two beats
 		// and lets the burst run out.
 		S_READ: begin
-			if (issued == 5'd0 || (r_line && issued == 5'd1 && t == 16'd8)) begin
+			if (issued == 5'd0 || (r_line && issued == 5'd1 && t == 8'd8)) begin
 				command  <= CMD_READ;
 				SDRAM_A  <= {2'b00, 1'b0, r_hw[25], r_hw[9:5], r_line ? issued[0] : r_hw[4], r_hw[3:1]};
 				issued   <= issued + 5'd1;
-				if (issued == 5'd0) t <= 16'd1;
+				if (issued == 5'd0) t <= 8'd1;
 			end
-			if (t >= 16'(CAP) && beat < nbeats) begin
+			if (t >= 8'(CAP) && beat < nbeats) begin
 				// a line's halfword k at bits 255-16k down; a word in bits 31-0
 				if (r_line) rdata[255 - 16 * beat -: 16] <= dq_q;
 				else        rdata[31 - 16 * beat[0] -: 16] <= dq_q;
@@ -281,20 +288,20 @@ always_ff @(posedge clk) begin
 			end
 			// precharge once the burst has left the bus (8 or 16 beats); a read-modify-
 			// write goes on to write the word, the enabled bytes replaced, in the open row
-			if (t == 16'(CAP) + (r_line ? 16'd16 : 16'd8)) begin
+			if (t == 8'(CAP) + (r_line ? 8'd16 : 8'd8)) begin
 				if (r_rmw) begin
 					r_wd[31:0] <= {r_be[3] ? r_wd[31:24] : rdata[31:24], r_be[2] ? r_wd[23:16] : rdata[23:16],
 					               r_be[1] ? r_wd[15:8]  : rdata[15:8],  r_be[0] ? r_wd[7:0]   : rdata[7:0]};
 					r_be   <= 4'hF;
 					r_rmw  <= 1'b0;
 					issued <= 5'd0;
-					t      <= 16'd0;
+					t      <= 8'd0;
 					state  <= S_WRITE;
 				end
 				else begin
 					command     <= CMD_PRECHARGE;
 					SDRAM_A[10] <= 1'b0;
-					t           <= 16'd0;
+					t           <= 8'd0;
 					state       <= S_PRE;
 				end
 			end
@@ -315,9 +322,9 @@ always_ff @(posedge clk) begin
 				else if (r_line) dq_out <= r_wd[255 - 16 * issued -: 16];
 				else             dq_out <= issued[0] ? r_wd[15:0] : r_wd[31:16];   // the word's high halfword (the lower address) first
 				issued <= issued + 5'd1;
-				t      <= 16'd0;
+				t      <= 8'd0;
 			end
-			else if (t == 16'(T_WR) && issued != 5'd0) begin
+			else if (t == 8'(T_WR) && issued != 5'd0) begin
 				if (~r_up) begin
 					ack   <= 1'b1;
 					acked <= 1'b1;
@@ -330,13 +337,13 @@ always_ff @(posedge clk) begin
 				command     <= CMD_PRECHARGE;
 				SDRAM_A[10] <= 1'b0;
 				dqm         <= 2'b00;
-				t           <= 16'd0;
+				t           <= 8'd0;
 				state       <= S_PRE;
 			end
 		end
 
 		S_PRE: begin
-			if (t == 16'(T_RP - 2)) state <= S_IDLE;
+			if (t == 8'(T_RP - 2)) state <= S_IDLE;
 		end
 
 		default: state <= S_IDLE;
@@ -345,7 +352,9 @@ always_ff @(posedge clk) begin
 	if (init) begin
 		last_ref <= 1'b0;
 		state   <= S_INIT;
-		t       <= 16'd0;
+		t       <= 8'd0;
+		st_cnt  <= 16'd0;
+		st_go   <= 1'b0;
 		ready   <= 1'b0;
 		chip    <= 1'b0;
 		acked   <= 1'b0;
