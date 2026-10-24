@@ -427,8 +427,43 @@ always_ff @(posedge clk) begin
 /* synthesis translate_on */
 	ibat_q <= bat[7:0];
 end
-assign ixl = translate(i_ir_q, 1'b1, 1'b0, 1'b0, i_pr_q, {i_page_q, 12'd0}, ibat_q, i_sr_q,
-                       itlb_valid[i_page_q[TLB_BITS-1:0]], itlb_q);
+// ... and the translation itself is registered (the 66 MHz work, 2026-10-24:
+// the BAT compares were in front of the cache's request and so of the fetch
+// PC): ixl_q is the translation of the page read ahead a cycle earlier,
+// usable for a fetch into that page when nothing it was made from has
+// changed since (ixl_valid_q: the segment register was the page's, no BAT,
+// SR, TLB or MSR[IR,PR] write landed at its edge). A fetch into a page other
+// than the one translated costs one more cycle than before.
+xl_t         ixl_now, ixl_q;
+logic [19:0] ixl_page_q;
+logic        ixl_valid_q;
+assign ixl_now = translate(i_ir_q, 1'b1, 1'b0, 1'b0, i_pr_q, {i_page_q, 12'd0}, ibat_q, i_sr_q,
+                           itlb_valid[i_page_q[TLB_BITS-1:0]], itlb_q);
+always_ff @(posedge clk) begin
+	ixl_q       <= ixl_now;
+	ixl_page_q  <= i_page_q;
+	ixl_valid_q <= ~reset & (i_sr_seg == i_page_q[19:16]) & ~i_stale & ~i_tlb_collision &
+	               ~(w_we & w_side) & ~tlbie & ~sr_changed & ~ibat_write &
+	               (msr_ir_d == i_ir_q) & (msr_pr_d == i_pr_q);
+end
+wire i_xl_fresh = ixl_valid_q & (ixl_page_q == i_addr[31:12]);
+// with translation off the address is used as it is (ixl_q may be stale then)
+always_comb begin
+	ixl = ixl_q;
+	if (~i_ir_q) begin
+		ixl      = '0;
+		ixl.ok   = 1'b1;
+		ixl.pa   = {i_addr[31:12], 12'd0};
+		ixl.wimg = 4'b0011;
+	end
+end
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & i_req & i_ir_q & ~i_stale & i_xl_fresh &
+	    (ixl_q != translate(i_ir_q, 1'b1, 1'b0, 1'b0, i_pr_q, {i_addr[31:12], 12'd0}, bat[7:0], sr[i_addr[31:28]],
+	                        itlb_valid[i_addr[12 +: TLB_BITS]], itlb_mem[i_addr[12 +: TLB_BITS]])))
+		$fatal(1, "the registered fetch translation differs from the fetch address's");
+/* synthesis translate_on */
 // Resolve a page from the registered read-ahead address. The fresh-page
 // check qualifies installation, so neither the EA adder nor forwarding
 // feeds the BAT permission/physical-page datapath in this cycle.
@@ -763,7 +798,7 @@ logic        i_cancelled;
 
 // the fetch the walk was for is still wanted
 wire i_same  = i_req & (i_addr[31:12] == w_ea[31:12]);
-wire i_ready = ~i_stale & (~i_ir_q | i_fresh);
+wire i_ready = ~i_stale & (~i_ir_q | i_xl_fresh);
 
 always_comb begin
 	w_req_i = 1'b0;
