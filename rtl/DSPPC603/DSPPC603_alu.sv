@@ -130,8 +130,10 @@ always_comb begin
 		default:    rot_res = rot & mask;
 	endcase
 
-	// sraw, srawi: carry when a negative value loses any one bits
-	rot_ca = a[31] & (|(rot & ~mask));
+	// sraw, srawi: carry when a negative value loses any one bits: those are
+	// a's low n bits (all of a for a count of 32 or more), found without the
+	// rotator (the 66 MHz work, 2026-10-24: the rotator was in front of XER)
+	rot_ca = a[31] & (sh_n[5] ? (|a) : (|(a & ~(32'hFFFFFFFF << sh_n[4:0]))));
 
 	// a shift's result is zero when the bits of a it keeps are all zero: a
 	// left shift keeps a's low 32-n bits, a right shift its high 32-n (and
