@@ -705,14 +705,15 @@ always_comb begin
 end
 
 // A miss or a fault leaves D_IDLE a cycle after the lookup that found it, from
-// a registered copy of the outcome (the request is held meanwhile, ungranted,
-// so the copy is the request's): the page compare behind the forwarded
+// a registered copy of the outcome (not granted, the request is held meanwhile,
+// so the copy is the request's; a hit may be granted and gone, so only a miss
+// or a fault is remembered): the page compare behind the forwarded
 // operands' sum was then in front of d_state and the fault's registers (the
 // 66 MHz work, 2026-10-24). A hit's grant is unchanged.
 logic d_xl_fault_q, d_xl_ok_q, d_xl_align_q, d_xl_seen_q;
 logic [31:0] d_xl_info_q;
 always_ff @(posedge clk) begin
-	d_xl_seen_q  <= (d_state == D_IDLE) & d_req & d_ready & ~reset;
+	d_xl_seen_q  <= (d_state == D_IDLE) & d_req & d_ready & ~dxl.ok & ~reset;   // (a miss or a fault: not granted, so held)
 	d_xl_fault_q <= dxl.fault;
 	d_xl_ok_q    <= dxl.ok;
 	d_xl_align_q <= dxl.align;
@@ -721,7 +722,7 @@ end
 /* synthesis translate_off */
 always_ff @(posedge clk)
 	if (~reset & d_xl_seen_q & (d_state == D_IDLE) & ~d_cancel &
-	    ((d_xl_fault_q != dxl.fault) | (d_xl_ok_q != dxl.ok) | ~d_req | ~d_ready))
+	    (~d_req | (d_ready & ((d_xl_fault_q != dxl.fault) | (d_xl_ok_q != dxl.ok)))))
 		$fatal(1, "the data lookup's registered outcome differs from the request's a cycle later");
 /* synthesis translate_on */
 always_ff @(posedge clk) begin
