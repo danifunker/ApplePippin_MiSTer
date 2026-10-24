@@ -312,6 +312,15 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     `Pippin_system.cpu_reset` `(* preserve, dont_retime *)`. run_core PASS; **CPI: random
     programs 2.20 -> 2.35 (+7 %), 603e vectors 1.52 -> 1.52, FP 2.86 -> 2.90.** Whole-core
     build: `scratch/build66_a7e0974.log`.
+  - **Build a7e0974 (20)**: Fmax 61.5, setup -1.261, TNS -23; memory -0.038. Worst -1.26 (52)
+    `ex_dec.frc -> cr` = `ex_dec.ic.mb` (MB and frC are the same instruction bits, merged):
+    **change 14's rotated mask is as deep as the shifter it replaced** (`mask_gen -> rotate by
+    SH -> a & -> zero -> cr`, 16 ns). Then the BTB's RAM-to-RAM forwarding (-0.9, `btb_forward1`).
+    The whole core moves ±0.4 ns per build with its worst at -0.85..-1.26: the fitter's noise
+    floor at standard effort. **21**: the immediate forms' masks from the raw bits of `id_insn`
+    (MB [10:6], ME [5:1], SH [15:11]), rotated in ID and registered into EX (`ex_mask_i_q`,
+    `ex_mask_rot_q`); the ALU takes them as inputs. **Effort build**: `PLACEMENT_EFFORT_MULTIPLIER
+    4.0`, `ROUTER_TIMING_OPTIMIZATION_LEVEL MAXIMUM` on a7e0974 (`scratch/build66_effort.log`).
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
