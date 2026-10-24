@@ -285,6 +285,15 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     `scratch/BandaiPippin_115d132.rbf` (not for the board: setup fails). Only ~0.35 ns worse
     than the CPU alone (fit t -0.49). The families: `scratch/sta66_paths.txt` (quartus_sta -t
     syn/sta_cpu_paths.tcl).
+  - **The whole-core families at 66.667 (115d132, `syn/sta_cpu_paths.tcl` -> `scratch/sta66_paths.txt`):
+    every failing path is inside DSPPC603** (none in the machine, the memory crossing or video):
+    -0.844 (59) `id_insn -> id_ra_q` (ID's decoder -> the sequencer -> `id_leave -> fetch_deliver`
+    (fan-out 260) -> the GPR read-address registers' enable; 15.3 ns, 6 of them in the decoder,
+    ~6 in routing), -0.82 `id_insn -> gpr_from_sequence`, -0.81 `fq_b_mem_r -> mem_result`, -0.61
+    `wb_valid -> dcache.landed_word`, -0.58 `id_insn -> ex_b`, -0.51 `dcache.r_addr -> wb_result`.
+    **So the 33 MHz bus split buys nothing for timing** (the machine is not on the failing
+    paths; the whole core is ~0.35 ns behind the CPU alone): the recommendation is to drop it
+    and judge the CPU work on whole-core builds from here (one build at a time).
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
