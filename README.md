@@ -14,7 +14,8 @@ from CD images.
 | RAM | 5 MB (the retail Pippin), 13 MB and 21 MB (the 8 and 16 MB cards; 64 MB SDRAM board or larger) |
 | CPU | 58.3 MHz (the real Pippin runs at 66 MHz; see Known limits) |
 | Sound | AWACS and CD audio on HDMI; the boot chime and Racing Days's CD music play |
-| Saves | the Flash! volume and Mac OS's settings (NVRAM), on the SD card |
+| Saves | the Flash! volume and Mac OS's settings, on the SD card |
+| Internet | PPP over the modem port to the MiSTer (the @WORLD Dialer, @World Browser) |
 | Controllers | AppleJack from the MiSTer's gamepad, a second AppleJack from the second gamepad; the keyboard and mouse as ADB devices |
 | Discs | eject, insert and change discs from the OSD |
 
@@ -71,7 +72,9 @@ loading another core. Two things to know:
 - **At Shut Down** gives the original behaviour: the flash is written only at Shut Down or
   Restart (the PC keyboard's Menu key is the Pippin's power button).
 
-Mac OS's settings (the NVRAM) are kept in the same image and saved a second after they change.
+Mac OS's settings (the alert sound, the browser's and the dialer's preferences, ...) live in
+the flash too, in its system area, so they are saved the same way. The image's last 8 KB keep
+Grand Central's NVRAM, which the Pippin's Mac OS does not use.
 
 **Controls.** OSD > Input > Controller: AppleJack (the default; the gamepad's buttons map to
 the AppleJack's, see the core's button names) or MouseStick II, Firebird, GamePad, SideWinder.
@@ -81,6 +84,16 @@ mouse are always there.
 **Video.** OSD > Video: Video out NTSC (the default), VGA or PAL (the console's switch; reset
 to apply). NTSC and PAL are interlaced: Interlace: Progressive (the default) shows every line
 each frame without flicker, Original shows the fields as the console sends them.
+
+**Internet (PPP).** The Pippin's modem port is the MiSTer's UART. The "Macintosh on Pippin"
+disc has the @WORLD Dialer (a MacTCP PPP link that dials a modem), @World Browser and
+Netscape. The MiSTer can stand in for the modem and the ISP: copy `syn/fakemodem.py` to the
+MiSTer and run `python3 fakemodem.py 57600` there with the OSD's UART mode at None (it answers
+the dialer's AT commands like a modem, then starts the MiSTer's pppd with its usual
+`/media/fat/linux/ppp_options`). In @World Browser press Connect in the dialer: the Pippin
+gets the address <MiSTer's network>.254. MacTCP still has the @WORLD service's DNS servers,
+so open pages by IP address, or set a DNS server in the MacTCP control panel (More...).
+Netscape needs more than 5 MB (choose 13 MB).
 
 **Other OSD settings.** Memory (reset to apply), Audio (MT32-pi for MIDI on the modem port),
 Advanced > Boot: ROM or the core's memory test. "Changes pending" shows settings that wait
@@ -98,7 +111,9 @@ for Apply and reset.
   the empty tray; the ROM does not see that press yet. Use Insert disc or choose a disc.
 - **The 603's misaligned page-crossing exception** is not modelled on the main branch
   (`align603` has it; it slows the boot and no title needs it so far).
-- Not yet: the modem port's PPP (serial DMA), playing titles through, the compatibility sweep.
+- **PAL**: the line and frame rates are right (15.625 kHz, 50 Hz), but the picture shows the
+  whole active line (776x576) instead of the 640x480 window the Pippin puts in it.
+- Not yet: playing titles through, the compatibility sweep.
 
 ## Repository
 

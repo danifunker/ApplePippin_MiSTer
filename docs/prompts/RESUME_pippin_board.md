@@ -217,8 +217,29 @@ when they are there** (gamepad: the AppleJack; listening).
   SENSE 31 / 1B); the bench (--tray-open from cold boot, press as the animation starts)
   does see it (MODE SENSE 31, 1B 03, boot). The early bench runs' --eject-at never pressed
   (drive() reset it each cycle; fixed 1db838d).
-- **PPP**: after these; port MacPPC7300's serial DMA (a13d565 ... f8ff304), also its SDRAM
-  DQM-on-A12/A11 fix (35af5ad) and Cuda's time-set flag (c65af4a).
+- **Ported from MacPPC7300** (1e67f2a, 7e78219): the serial DMA series (a13d565 ... f8ff304,
+  the trace's 719cc93/12aa5d8 as kind 20), the SDRAM masks on A12-A11 (35af5ad; RMW now 0,
+  `make sdram` / `make sdram-rmw` both pass), Cuda's time-set flag (c65af4a; same 341S0060).
+  Build 44 missed the memory clock by 0.292 ns (Pippin_sdram's 16-bit t to command); 68219cb
+  (8-bit t, the power-up wait on st_cnt): **build 45** slack +0.265 / +0.628.
+- **Build 45 on .92** (2026-10-23 evening): Macintosh on Pippin to the Finder (RMW 0, no
+  stall). **Settings**: the Sound control panel's alert sound (Quack) changed one byte of the
+  *flash* image (0x137D, in the flash's 8 KB system area: the Standard File technote's "8k is
+  used by the system software"), saved 2 s later; kept through a full core reload. Grand
+  Central's NVRAM (the image's last 8 KB) never changes: the Pippin's Mac OS does not use it.
+  **PPP works**: `syn/fakemodem.py` on the MiSTer (UART mode None; RTS up, OK to AT, CONNECT
+  to a dial, then pppd with ppp_options): @World Browser > Connect, the dialer sends
+  AT&D0 ... ATDT at 57600, LCP/IPCP up (Pippin 192.168.99.254), ping 6/6 at 44 ms, and the
+  browser loads a page from the MiSTer by IP (`scratch/ppp_atworld_browser_20261023.png`,
+  `scratch/ppp_pppd_20261023.log`). Without a process holding ttyS1 the dialer says "Can't
+  Send Data" (CTS down). Netscape 2.02 needs more than 5 MB. Apps' preferences (@World
+  Browser, @WORLD-Dialer folders on Flash!) survive Apply and reset (written through).
+  **Video**: NTSC 640x480 31.49 kHz 59.9 Hz (Progressive), VGA 640x481 31.48 kHz 59.9 Hz,
+  PAL 776x576 31.26 kHz 50.0 Hz: rates right, but PAL shows the whole HAL..HFP line (776)
+  while Mac OS's desktop is 640x480 (rows run on into the next; the bottom is unused VRAM).
+  Taos's window registers (VEFS, VOFS, HSTART, HEB) are kept but not used by the scan-out:
+  next, their values from the bench (runtaos_m5/m3: `taos:` lines with the frame) and the
+  scan-out windowed by them.
 
 ## Next steps
 
