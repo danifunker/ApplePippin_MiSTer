@@ -249,6 +249,13 @@ when they are there** (gamepad: the AppleJack; listening).
   50 Hz with the desktop centred. Left running on .92 for the user, who wants the OSD menu's
   layout changed before the release (v0.2.0 notes written in releases/README.md, not
   published; the rbf to publish would be this build or the one after the menu change).
+- **Menu, build 50** (4beb0ce, +0.154): top level Game disc, Eject disc, Save file, then Load
+  ROM, Memory, the pages; Input > Player 2 Controller; Advanced > Saves to SD (Immediately /
+  At Shut Down), Insert disc, Hard disk (SCSI ID 0, slot 0), Boot. On .92: Eject from the top
+  level, Game disc > Macintosh on Pippin boots; a copy of MacPPC7300's toolbox.hda
+  (`games/Pippin/Pippin test disk.hda`) mounts as "Toolbox" after a restart (unmounted after).
+  Releases are date-stamped (the user): `releases/BandaiPippin_20261024.rbf` committed; the
+  tag `20261024` and the GitHub release wait for the user's confirmation.
 
 ## Next steps
 

@@ -19,9 +19,7 @@ from CD images.
 | Controllers | AppleJack from the MiSTer's gamepad, a second AppleJack from the second gamepad; the keyboard and mouse as ADB devices |
 | Discs | eject, insert and change discs from the OSD |
 
-The last published build is v0.1.0 (`releases/`, 2026-10-22). Everything below (saves,
-the second controller, progressive video, eject and insert) is in the current builds and
-goes into the next release.
+Releases are date-stamped (`releases/`, GitHub releases named by date).
 
 ## What you need
 
@@ -36,7 +34,7 @@ goes into the next release.
 - **Discs**: `.chd` or `.cue/.bin` images in `/media/fat/games/Pippin/`.
 - **A save image** (optional, for saves): a 136 KB file, for example made on the MiSTer with
   `head -c 139264 /dev/zero | tr '\0' '\377' > "/media/fat/games/Pippin/Pippin flash.sav"`
-  (an erased flash), selected once in the OSD's Save file entry. A 128 KB image from v0.1.0
+  (an erased flash), selected once in the OSD's Save file entry. A 128 KB image from the 20261022 release
   still works and keeps the flash only.
 
 ## Using it

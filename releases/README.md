@@ -1,18 +1,19 @@
 # Releases
 
-## BandaiPippin_20261024 (v0.2.0): saves, disc changes, PPP, PAL
+## 20261024: saves, disc changes, PPP, PAL, hard disk
 
-`BandaiPippin_20261024.rbf` (CPU 58.3 MHz, the debug instruments off). Needs a Main_MiSTer
+`BandaiPippin_20261024.rbf` (build 50, 4beb0ce; CPU 58.3 MHz, the debug instruments off;
+timing met, setup slack +0.154 ns). Needs a Main_MiSTer
 with the Pippin's CD support (the `pippin-cdrom` branch of danifunker/Main_MiSTer until it is
 merged), `games/Pippin/boot.rom` (Kinka 1.3 recommended) and discs as `.chd` or `.cue/.bin`.
 Setup and use: the repository's `README.md`.
 
-New since v0.1.0, each checked on the board (MiSTer 192.168.99.92):
+New since the 20261022 release, each checked on the board (MiSTer 192.168.99.92):
 
 - **Saves**: the Flash! volume and Mac OS's settings are kept in a 136 KB image (OSD Save
   file). Saves to SD: Immediately (the default) writes every change Mac OS
   makes to the volume through to the image a second later, so no Shut Down is needed; At
-  Shut Down keeps the console's behaviour. (v0.1.0's flash never accepted a save: its erase
+  Shut Down keeps the console's behaviour. (the 20261022 build's flash never accepted a save: its erase
   answered too early.)
 - **Changing discs**: Eject disc (the OSD's top level) presses the console's eject button (Mac OS
   ejects, the Pippin restarts into its insert-disc animation, the tray stays open); choosing
@@ -24,6 +25,7 @@ New since v0.1.0, each checked on the board (MiSTer 192.168.99.92):
   PAL shows the 640x480 picture centred with borders (it showed a broken 776-dot line).
 - **PPP** over the modem port to the MiSTer (the disc's @WORLD Dialer and @World Browser),
   with `syn/fakemodem.py` on the MiSTer standing in for the modem.
+- **Hard disk**: Advanced > Hard disk (SCSI ID 0), a data disk beside the CD.
 - **Memory**: 13 and 21 MB (64 MB SDRAM boards or larger) as well as 5 MB.
 - **ROMs**: Kinka 1.0, 1.2, 1.3 and the GM flash all boot.
 - Inside: partial SDRAM writes masked on A12-A11 as the MiSTer boards wire DQM (no more
@@ -33,7 +35,7 @@ Known limits: the CPU runs at 58.3 MHz against the console's 66 MHz; a second Ej
 the insert-disc animation is not seen (use Insert disc); titles have been booted to their
 menus but not played through.
 
-## BandaiPippin_20261022 (v0.1.0) — the first titles boot
+## 20261022 (tagged v0.1.0) — the first titles boot
 
 The first release of the Bandai Pippin core for MiSTer: `BandaiPippin_20261022.rbf`
 (CPU_MHZ 58, TRACE 0, PERF 0: no debug instruments).
