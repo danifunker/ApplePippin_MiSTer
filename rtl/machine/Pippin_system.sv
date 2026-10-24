@@ -239,7 +239,9 @@ logic [31:5]  snoop_addr;
 logic         cuda_reset;         // Cuda holds the CPU in reset (Pippin_cuda)
 // (from a register: it fans out to every register of the CPU, and from
 // Cuda's own register through the OR it was a 100 MHz path, 2026-10-13)
-logic         cpu_reset = 1'b1;
+// (kept where it is: the fitter retimed it into the CPU's reset fan-out of thousands at 66 MHz,
+// cuda.cpu_reset -> the CPU's registers; 2026-10-24)
+(* preserve, dont_retime *) logic cpu_reset = 1'b1;
 always_ff @(posedge clk) cpu_reset <= reset | cuda_reset;
 
 assign cpu_in_reset = cpu_reset;

@@ -1982,7 +1982,7 @@ always_ff @(posedge clk) begin
 		$fatal(1, "the held rotator result differs from the rotator's");
 end
 /* synthesis translate_on */
-assign ex_stall = ex_stall_ops | (fsys_chk & ~fsys_held) | (slow_chk & ~slow_held) | (rot_chk & ~rot_held);
+assign ex_stall = ex_stall_ops | (fsys_chk & ~fsys_held) | (slow_chk & ~slow_held) | (rot_chk & ~rot_held) | ea_fwd;
 
 DSPPC603_fpu #(.OPERAND_REG (FPU_OPERAND_REG)) fpu
 (
@@ -2432,7 +2432,20 @@ wire x_trap   = is_int & ex_dec.trap & trap_hit_q;
 // the effective address: the adder's sum on its own (every memory access is
 // an add), ahead of the result mux the rotator feeds too; for dcbz, the line
 wire        ex_zero = (ex_dec.cop == CK_ZERO);
-wire [31:0] ex_ea   = ex_zero ? {int_sum[31:5], 5'b00000} : int_sum;
+// The memory request's effective address from EX's operand registers alone
+// (the 66 MHz work, 2026-10-24): the forwarding muxes and their routing were
+// in front of the adder, the MMU's page compare, the cache's request and so
+// of their states. An access whose address operand is still forwarded waits
+// (ea_fwd: one cycle after WB's forward, two after MEM's; the held operands
+// capture the forwarded values); checked against the unit's sum below.
+wire [31:0] ea_sum  = ex_a + ex_b;
+wire        ea_fwd  = ex_mem_access & ((ex_dec.ra_rd & (fa_mem | fa_wb)) | (ex_use_b & (fb_mem | fb_wb)));
+wire [31:0] ex_ea   = ex_zero ? {ea_sum[31:5], 5'b00000} : ea_sum;
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & mu_valid & (ea_sum != int_sum))
+		$fatal(1, "the memory request's address from the registers differs from the unit's sum");
+/* synthesis translate_on */
 
 // the 604 does not perform these accesses unless they are word-aligned
 wire x_align_w = (ex_dec.mem_rd | ex_dec.mem_wr) &
@@ -3105,8 +3118,8 @@ DSPPC603_mmu #(.TLB_BITS (TLB_BITS), .CANDIDATE_D_ADDR (1'b1)) mmu
 	.d_addr      (mu_addr),
 	// (a memory access's adder is always op_a + op_b: only compares, traps
 	// and subtractions invert A or take a carry in, and none accesses memory)
-	.d_sum_a     (op_a),
-	.d_sum_b     (op_b),
+	.d_sum_a     (ex_a),
+	.d_sum_b     (ex_b),
 	.d_sum_ci    (1'b0),
 	.d_sum_direct (mu_direct),
 	.d_addr_held (mu_addr_held),
