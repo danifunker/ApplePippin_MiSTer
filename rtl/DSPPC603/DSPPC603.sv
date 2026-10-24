@@ -1198,7 +1198,7 @@ end
 wire   id_hold  = id_wait_xer & ex_valid;
 assign id_to_ex = id_valid & ex_ready & ~id_hold;
 assign id_take  = id_to_ex | completion_push_alu;
-assign id_leave = (id_to_ex & (id_last | ~id_dec.valid)) | completion_push_alu;
+assign id_leave = (id_to_ex & (id_last | ~id_dvalid_q)) | completion_push_alu;
 
 // Read the prospective fetched word and next sequencer operation at every
 // edge. Late ID take selects a registered sample, never a RAM address. A
@@ -1278,11 +1278,17 @@ wire [31:0] gpr_rd_sc = gpr2_collision[4] ? gpr2_collision_value : gpr_collision
 // (the fetched word's, or the sequencer's next), not ID's decode of id_insn
 // (checked against it below).
 logic [5:0] id_ra_q, id_rb_q, id_rc_q;
+// ... and whether the instruction decodes at all, likewise registered: the
+// decoder's validity (a deep compare of id_insn) was in id_leave, so in
+// fetch_deliver (fan-out 260) and the read-address registers' enables, the
+// whole core's slowest family at 66 MHz (2026-10-24); checked below
+logic       id_dvalid_q;
 always_ff @(posedge clk) begin
 	if (fetch_deliver) begin
 		id_ra_q <= fetch_dec.ra;
 		id_rb_q <= fetch_dec.rb;
 		id_rc_q <= fetch_dec.rc;
+		id_dvalid_q <= fetch_dec.valid;
 	end
 	else if (gpr_seq_take) begin
 		id_ra_q <= seq_next_ra;
@@ -1294,6 +1300,9 @@ always_ff @(posedge clk)
 	if (~reset & id_valid & ((id_uop.ra_rd & (id_ra_q != id_uop.ra)) | (id_uop.rb_rd & ~id_uop.b_imm & (id_rb_q != id_uop.rb)) |
 	                         (id_uop.rc_rd & (id_rc_q != id_uop.rc))))
 		$fatal(1, "ID's registered register numbers differ from its decode");
+always_ff @(posedge clk)
+	if (~reset & id_valid & (id_dvalid_q != id_dec.valid))
+		$fatal(1, "ID's registered validity differs from its decode");
 /* synthesis translate_on */
 wire [31:0] id_reg_a = (mem_upd_fwd & (mem_upd_ra == id_ra_q)) ? mem_result[31:0] :
     (mo_valid & mo_upd & (mo_upd_ra == id_ra_q)) ? mo_result :
