@@ -299,6 +299,14 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     3 ISI runs caught the first form), out of `id_leave`. Judged on a whole-core build from
     here: `scratch/build66_8f39341.log`, families in `scratch/sta66_paths.txt` (the STA runs at
     the build's end).
+  - **Build 8f39341 (19)**: Fmax 61.63, setup -1.225, TNS -66: a worse seed; the families are
+    the data cache's state from the forwarded operand -> EA -> the request (`fq_b_upd_r` /
+    `wb_result -> dcache.state`, 20+ families), `dcache.state -> itt_spec_h`, and
+    **`Pippin_cuda.cpu_reset -> itt_spec_h`** (-1.0: the machine's reset straight into the CPU).
+    Whole-core noise ~±0.4 ns between builds. Decided: **20** (a) `cpu_reset` registered on
+    entry to the CPU; (b) the memory request's EA from EX's operand registers only (`ex_a +
+    ex_b`), a stall while an address operand is still forwarded (1 bubble after a WB forward,
+    2 after MEM's); run_core's CPI measures the cost before a build.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
