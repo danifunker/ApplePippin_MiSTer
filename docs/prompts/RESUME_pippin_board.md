@@ -1,5 +1,7 @@
 # Resume: the Pippin on the board (rewritten 2026-10-22 19:00)
 
+**2026-10-24: the next task is the CPU at 66 MHz: start from `RESUME_pippin_cpu66.md`.**
+
 Resume the Bandai Pippin MiSTer core's work. **State: v0.1.0 released
 (04:00); since then the afternoon's work below, not yet a release.** Read
 this file first. The afternoon's evidence is in `LOG_pippin_board_20261022_pm.md`;
