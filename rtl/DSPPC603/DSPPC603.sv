@@ -2118,7 +2118,16 @@ end
 // (the fetch went elsewhere: both candidates compared with the prediction
 // beside the branch decision, which then only selects; rfi redirects anyway)
 wire        tgt_miss  = (br_target != ex_pred);
-wire        seq_miss  = (ex_seq != ex_pred);
+// (the sequential case's compare is made in ID and registered with the
+// operation: it was in front of the FP push into the completion queue, so of
+// ex_done and ex_leave; the 66 MHz work, 2026-10-24)
+logic       ex_seq_miss_q;
+wire        seq_miss  = ex_seq_miss_q;
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & ex_valid & (ex_seq_miss_q != (ex_seq != ex_pred)))
+		$fatal(1, "the registered sequential-fetch miss differs from the compare");
+/* synthesis translate_on */
 wire        pc_miss   = br_taken ? tgt_miss : (~ex_fold & seq_miss);
 assign redir    = mem_fault |
                   (ex_leave & (ex_exc | (ex_last & (is_rfi | is_mtmsr | is_xlate | pc_miss))));
@@ -2703,6 +2712,7 @@ always_ff @(posedge clk) begin
 		ex_first <= id_first;
 		ex_last  <= id_last | ~id_dec.valid;
 		ex_pred  <= id_pred;
+		ex_seq_miss_q <= (id_pred != (id_cf ? id_pc + 32'd8 : id_pc + 32'd4));
 		ex_btb   <= id_btb;
 		// The preceding EX commits CR at this edge; MEM and queued ALUs cannot
 		// change it. Select the branch condition from that registered state in
