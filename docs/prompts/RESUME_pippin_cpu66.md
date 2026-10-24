@@ -230,6 +230,15 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     `back_free`; the flush applied from `flush_q` a cycle late (the pipeline is empty the cycle
     after a redirect; the pipeline's `fo_count == 0` check gated by `~fpu_flush_q`). FP CPI
     unchanged (2.86). Fit n: `check66_core_n.txt`.
+  - Fit m (11): 61.27, the CR/rotator families gone from the top 14; the whole top is the FPU
+    handoff hub (`dcache.r_* -> final_q -> mem_room -> fpu_resp_ready -> back_free -> r_q`,
+    fan-out 180). **Fit n is fit m again**: 344c4a2 carried only the pipeline's `fpu_flush_q`
+    (the edit script stopped before writing the unit's file); the FPU half is **93106a5**, fit
+    p (`check66_core_p.txt`). **13 (f96662b)** DAR a cycle after the alignment exception from
+    `dar_ea_q <= int_sum` (hub C's `fa_mem -> dar`); fit o (`check66_core_o.txt`).
+  - **Regression step 2 passed** on 344c4a2 (= changes 2-11 + 13's predecessor): `run66.sh`
+    (`run5.sh` to 60 M instructions, still `--cpu-mhz 58.333`), Super Marathon lockstep against
+    dingusppc **identical, RESULT: PASS**, 1.93 CPI after Cuda released the CPU.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
