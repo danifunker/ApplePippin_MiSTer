@@ -381,6 +381,7 @@ logic [7:0] completion_fp_pend;          // the entry's FP result has not arrive
 // EX's operation (ID's admission waits for them) and older (EX's operands
 // wait for the pop); a 32:1 choice instead of eight compares in EX's stall
 logic [31:0] cq_fpr_o;
+logic [2:0]  ex_fdep;           // ... and EX's operation's dependency on it, per FP operand (a, b, c)
 logic [2:0] completion_head, completion_tail;
 logic [3:0] completion_count;
 logic [3:0] completion_older_count;
@@ -1724,10 +1725,32 @@ wire completion_dependency =
       (ex_use_b & (|completion_match(ex_dec.rb, 1'b1))) |
       (ex_dec.rc_rd & (|completion_match(ex_dec.rc, 1'b1))))) |
      // an FP register a queued FP operation writes: wait for its pop
-     (ex_dec.fra_rd & cq_fpr_o[ex_dec.fra]) |
-     (ex_dec.frb_rd & cq_fpr_o[ex_dec.frb]) |
-     (ex_dec.frc_rd & cq_fpr_o[ex_dec.frc]);
+     (|ex_fdep);
+// (that dependency registered with the operation, from what cq_fpr_o takes
+// at this edge: its 32:1 choice was in front of ex_stall, so of ex_done,
+// ex_leave and redir; the 66 MHz work, 2026-10-24. The late signals only
+// choose among bits found from registers.)
+function automatic logic [2:0] fdep_of(input dec_t d, input logic push, input logic leave);
+	logic [2:0] cur, clr, pushed, rd;
+	logic [4:0] fr [3];
+	fr = '{d.fra, d.frb, d.frc};
+	rd = {d.fra_rd, d.frb_rd, d.frc_rd};
+	for (int i = 0; i < 3; i++) begin
+		cur[i]    = cq_fpr_o[fr[i]];
+		clr[i]    = completion_pop & completion_queue[completion_head].fp & completion_latest_older[completion_head] &
+		            (completion_queue[completion_head].rd[4:0] == fr[i]);
+		pushed[i] = (fr[i] == ex_dec.frd);
+	end
+	fdep_of = rd & (leave ? ({3{push}} & ((cur & ~clr) | pushed)) : (cur & ~clr));
+endfunction
+always_ff @(posedge clk)
+	ex_fdep <= (reset | redir) ? 3'd0 :
+	           id_to_ex ? fdep_of(id_uop_f, completion_push_ex, ex_leave) : fdep_of(ex_dec, completion_push_ex, ex_leave);
 /* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & ex_valid & (ex_fdep != {ex_dec.fra_rd & cq_fpr_o[ex_dec.fra], ex_dec.frb_rd & cq_fpr_o[ex_dec.frb],
+	                                     ex_dec.frc_rd & cq_fpr_o[ex_dec.frc]}))
+		$fatal(1, "the registered FP dependency differs from the queue's bitmap");
 always_ff @(posedge clk)
 	if (~reset & ex_valid & ((ex_dec.fra_rd & (cq_fpr_o[ex_dec.fra] != completion_fmatch(ex_dec.fra, 1'b1))) |
 	                         (ex_dec.frb_rd & (cq_fpr_o[ex_dec.frb] != completion_fmatch(ex_dec.frb, 1'b1))) |
