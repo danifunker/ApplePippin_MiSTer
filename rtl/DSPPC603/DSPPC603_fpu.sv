@@ -560,7 +560,11 @@ wire signed [13:0] e_prod = ex + ey;
 wire signed [13:0] e_dist = e_prod - ez + 14'sd108;
 wire               pin_z  = p_zero | (~z_zero & e_dist[13]);
 // the back is free for a handoff: idle, or answering this cycle
-wire               in_round  = (state == S_ROUND) & ~no_early;
+// (the early answer from S_ROUND is off since the 66 MHz work, 2026-10-24: the
+// rounding, the range checks and the result's class were then in front of
+// the completion queue's RAM, the CPU's slowest family; every operation now
+// answers from S_DONE's registers, a cycle later, as it did with traps on)
+wire               in_round  = 1'b0;
 wire               back_free = (state == S_IDLE) | ((in_round | (state == S_DONE)) & resp_ready);
 
 function automatic logic [161:0] align_z(input logic [52:0] m, input logic [7:0] amount);
