@@ -307,6 +307,11 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     entry to the CPU; (b) the memory request's EA from EX's operand registers only (`ex_a +
     ex_b`), a stall while an address operand is still forwarded (1 bubble after a WB forward,
     2 after MEM's); run_core's CPI measures the cost before a build.
+  - **20 (a7e0974)** `ea_sum = ex_a + ex_b` is the memory request's EA (the memory unit, the MMU's
+    `d_sum_a/b`, the read-ahead), `ea_fwd` stalls an access whose address operand is forwarded;
+    `Pippin_system.cpu_reset` `(* preserve, dont_retime *)`. run_core PASS; **CPI: random
+    programs 2.20 -> 2.35 (+7 %), 603e vectors 1.52 -> 1.52, FP 2.86 -> 2.90.** Whole-core
+    build: `scratch/build66_a7e0974.log`.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
