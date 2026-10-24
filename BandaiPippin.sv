@@ -116,9 +116,15 @@ localparam CONF_STR = {
 	"-;",
 	// the CD-ROM on slot 4 (the Main's Mac CD layer), the drive the Pippin boots from; SC,
 	// so the Main remembers the disc
-	"SC4,ISOTO*CUEBINCHD,Pri. CD-ROM (ID 3);",
-	"F1,ROM,Load ROM;",
+	"SC4,ISOTO*CUEBINCHD,Game disc (CD-ROM);",
+	// the console's eject button (Pippin_taos GPIO 27): Mac OS ejects the disc and restarts the
+	// Pippin, the tray open; choosing a disc above puts it in and closes the tray
+	"R[38],Eject disc;",
+	// the save flash (Pippin_flash), 128 KB, and Grand Central's 8 KB NVRAM kept in an image on
+	// slot 2 (Pippin_nvsave): 136 KB keeps both, 128 KB the flash alone
+	"SC2,SAV,Save file;",
 	"-;",
+	"F1,ROM,Load ROM;",
 	// the retail 5 MB; 13 and 21 MB (the expansion banks at 32 and 48 MB) need a 64 MB SDRAM
 	// board or larger (menu mask bit 2)
 	"H2O[7:5],Memory,5 MB;",
@@ -146,7 +152,7 @@ localparam CONF_STR = {
 	"H1P3O[14],Stick moves pointer,No,Yes;",
 	// a second AppleJack from the MiSTer's second controller (with Controller AppleJack;
 	// taken at the reset, as the controller)
-	"P3O[35],AppleJack 2,Yes,No;",
+	"P3O[35],Player 2 Controller,Yes,No;",
 	"h1P3-;",
 
 	"P4O[20],Use MT32-pi,Yes,No;",
@@ -156,18 +162,15 @@ localparam CONF_STR = {
 	"h3P4O[26:24],SoundFont,0,1,2,3,4,5,6,7;",
 	"P4O[28:27],Show Info,No,Yes,LCD-On,LCD-Auto;",
 
-	// the save flash (Pippin_flash), 128 KB, and Grand Central's 8 KB NVRAM (Mac OS's settings)
-	// kept in an image on slot 2 (Pippin_nvsave): 136 KB keeps both, 128 KB the flash alone
-	"P5SC2,SAV,Save flash;",
-	// Mac OS writes the Flash! volume back to the flash only at Shut Down or Restart; Instant
-	// writes each change through as it is made (Pippin_flash), so the image is saved a second later
-	"P5O[37],Flash! saves,Instant,At Shut Down;",
-	// the console's eject button (Pippin_taos GPIO 27): Mac OS ejects the disc and restarts the
-	// Pippin; the disc stays out until another is mounted (or Eject is pressed again)
-	"P5R[38],Eject disc;",
+	// Mac OS writes the Flash! volume back to the flash only at Shut Down or Restart;
+	// Immediately writes each change through as it is made (Pippin_flash), so the save file is
+	// written a second later
+	"P5O[37],Saves to SD,Immediately,At Shut Down;",
 	// the last disc back in the tray and the tray closed (the eject took it out); a disc
-	// chosen in the CD-ROM entry goes in the same way
+	// chosen in the Game disc entry goes in the same way
 	"P5R[39],Insert disc;",
+	// a SCSI hard disk on ID 0 (Pippin_scsidisk, block slot 0; the Mac cores' target)
+	"P5SC0,HDAVHDIMG,Hard disk (SCSI ID 0);",
 	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
 	// in the trace's DBG writes), a debug entry (2026-10-21)
 	"P5O[34],Boot,ROM,Memory test;",

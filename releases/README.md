@@ -9,17 +9,17 @@ Setup and use: the repository's `README.md`.
 
 New since v0.1.0, each checked on the board (MiSTer 192.168.99.92):
 
-- **Saves**: the Flash! volume and Mac OS's settings are kept in a 136 KB image (OSD
-  Advanced > Save flash). Flash! saves: Instant (the default) writes every change Mac OS
+- **Saves**: the Flash! volume and Mac OS's settings are kept in a 136 KB image (OSD Save
+  file). Saves to SD: Immediately (the default) writes every change Mac OS
   makes to the volume through to the image a second later, so no Shut Down is needed; At
   Shut Down keeps the console's behaviour. (v0.1.0's flash never accepted a save: its erase
   answered too early.)
-- **Changing discs**: Advanced > Eject disc presses the console's eject button (Mac OS
+- **Changing discs**: Eject disc (the OSD's top level) presses the console's eject button (Mac OS
   ejects, the Pippin restarts into its insert-disc animation, the tray stays open); choosing
-  a disc in the CD-ROM entry inserts it and closes the tray; Insert disc puts the last disc
-  back.
+  a disc in Game disc inserts it and closes the tray; Insert disc puts the last disc
+  back (Advanced).
 - **CD audio** plays (Racing Days's music), also while the title reads the disc.
-- **Second controller**: Input > AppleJack 2, from the MiSTer's second gamepad.
+- **Second controller**: Input > Player 2 Controller, from the MiSTer's second gamepad.
 - **Video**: Interlace: Progressive (the default) shows NTSC and PAL without field flicker;
   PAL shows the 640x480 picture centred with borders (it showed a broken 776-dot line).
 - **PPP** over the modem port to the MiSTer (the disc's @WORLD Dialer and @World Browser),

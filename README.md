@@ -36,21 +36,21 @@ goes into the next release.
 - **Discs**: `.chd` or `.cue/.bin` images in `/media/fat/games/Pippin/`.
 - **A save image** (optional, for saves): a 136 KB file, for example made on the MiSTer with
   `head -c 139264 /dev/zero | tr '\0' '\377' > "/media/fat/games/Pippin/Pippin flash.sav"`
-  (an erased flash), selected once in OSD > Advanced > Save flash. A 128 KB image from v0.1.0
+  (an erased flash), selected once in the OSD's Save file entry. A 128 KB image from v0.1.0
   still works and keeps the flash only.
 
 ## Using it
 
-**Starting a title.** Choose the disc in the OSD's first item (Pri. CD-ROM). The Pippin
+**Starting a title.** Choose the disc in the OSD's first item (Game disc). The Pippin
 boots whatever is in the drive when it starts; with no disc it plays its insert-disc
 animation and boots the disc as soon as one goes in.
 
 **Changing discs**, as on the console:
 
-1. OSD > Advanced > **Eject disc**. This presses the console's eject button: Mac OS ejects
+1. OSD > **Eject disc**. This presses the console's eject button: Mac OS ejects
    the disc and restarts the Pippin, which shows the insert-disc animation (the tray open,
    empty).
-2. Choose the next disc in the OSD's first item. It goes into the tray, the tray closes, and
+2. Choose the next disc in **Game disc**. It goes into the tray, the tray closes, and
    the Pippin boots it.
    Or OSD > Advanced > **Insert disc** to put the same disc back.
 
@@ -59,7 +59,7 @@ eject first.
 
 **Saving.** Pippin titles save to Flash!, a 128 KB volume in the console's flash memory. Mac
 OS keeps the volume in video memory and, on real hardware, writes it to the flash only at Shut
-Down or Restart. With OSD > Advanced > **Flash! saves: Instant** (the default) every change
+Down or Restart. With OSD > Advanced > **Saves to SD: Immediately** (the default) every change
 Mac OS writes to the volume goes to the flash at once, and the save image on the SD card is
 written a second later, so a save survives switching off the MiSTer, changing discs or
 loading another core. Two things to know:
@@ -69,7 +69,7 @@ loading another core. Two things to know:
   shut down), so titles are expected to do that; it is not yet checked title by title.
   Changes made in the Finder can stay in Mac OS's memory until Special > Shut Down or
   Restart.
-- **At Shut Down** gives the original behaviour: the flash is written only at Shut Down or
+- **At Shut Down** gives the console's behaviour: the flash is written only at Shut Down or
   Restart (the PC keyboard's Menu key is the Pippin's power button).
 
 Mac OS's settings (the alert sound, the browser's and the dialer's preferences, ...) live in
@@ -78,7 +78,7 @@ Grand Central's NVRAM, which the Pippin's Mac OS does not use.
 
 **Controls.** OSD > Input > Controller: AppleJack (the default; the gamepad's buttons map to
 the AppleJack's, see the core's button names) or MouseStick II, Firebird, GamePad, SideWinder.
-AppleJack 2 adds a second AppleJack from the MiSTer's second gamepad. The keyboard and the
+Player 2 Controller adds a second AppleJack from the MiSTer's second gamepad. The keyboard and the
 mouse are always there.
 
 **Video.** OSD > Video: Video out NTSC (the default), VGA or PAL (the console's switch; reset
@@ -95,6 +95,10 @@ the dialer's AT commands like a modem, then starts the MiSTer's pppd with its us
 gets the address <MiSTer's network>.254. MacTCP still has the @WORLD service's DNS servers,
 so open pages by IP address, or set a DNS server in the MacTCP control panel (More...).
 Netscape needs more than 5 MB (choose 13 MB).
+
+**Hard disk.** OSD > Advanced > Hard disk (SCSI ID 0) takes a SCSI disk image (.hda, .vhd,
+.img, as the Mac cores use). The Pippin boots only from its CD drive, so the disk is for data
+that Mac OS mounts beside the disc.
 
 **Other OSD settings.** Memory (reset to apply), Audio (MT32-pi for MIDI on the modem port),
 Advanced > Boot: ROM or the core's memory test. "Changes pending" shows settings that wait
