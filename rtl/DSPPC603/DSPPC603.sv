@@ -1750,6 +1750,7 @@ logic [31:0] int_sum;                      // the adder alone: the effective add
 logic        int_ca;
 logic        int_ov;
 logic [3:0]  int_cr;
+logic [3:0]  int_cr_flat;                 // ... and the pipeline's own, flat (below)
 logic        int_lts, int_ltu, int_eq;     // the ALU's compare, for the traps
 /* verilator lint_off UNUSEDSIGNAL */
 logic        int_ready;
@@ -2471,7 +2472,7 @@ always_comb begin
 			xer_next[30] = int_ov;
 			xer_next[31] = xer[31] | int_ov;
 		end
-		if (ex_dec.cr_wr) cr_next = cr_insert(cr, ex_dec.cr_fld, int_cr);
+		if (ex_dec.cr_wr) cr_next = cr_insert(cr, ex_dec.cr_fld, int_cr_flat);
 	end
 	else begin
 		case (ex_dec.sys)
@@ -2524,7 +2525,7 @@ end
 // (each unit's own results, or a register read whole, chosen flat by
 // selects registered with the operation, ex_rs: an AND-OR, with neither
 // compares nor the integer unit's own choice in front)
-localparam int RS_N = 14;
+localparam int RS_N = 15;
 function automatic logic [RS_N-1:0] rs_of(input dec_t d);
 	logic fpu_u, alu_u, mul_u, div_u, sys;
 	fpu_u = (d.unit == UNIT_FPU);
@@ -2532,7 +2533,8 @@ function automatic logic [RS_N-1:0] rs_of(input dec_t d);
 	mul_u = (d.unit == UNIT_MUL);
 	div_u = (d.unit == UNIT_DIV);
 	sys   = ~fpu_u & ~alu_u & ~mul_u & ~div_u;
-	rs_of = {div_u,                                       // 13 the divider's quotient
+	rs_of = {alu_u & (d.ic.alu_op == ALU_CMP),            // 14 a compare: its CR field is the compare's, not the result's
+	         div_u,                                       // 13 the divider's quotient
 	         mul_u & d.ic.mul_high, mul_u & ~d.ic.mul_high, // 12, 11 the product's halves
 	         alu_u & (d.ic.alu_op == ALU_EXTS),           // 10 the ALU's operations
 	         alu_u & (d.ic.alu_op == ALU_CNTLZ),          // 9
@@ -2551,10 +2553,28 @@ wire [31:0] int_flat = ({32{ex_rs[6]}} & int_sum) | ({32{ex_rs[7]}} & int_log) |
                        ({32{ex_rs[9]}} & int_clz) | ({32{ex_rs[10]}} & int_exts) |
                        ({32{ex_rs[11]}} & int_mul_lo) | ({32{ex_rs[12]}} & int_mul_hi) | ({32{ex_rs[13]}} & int_div_q);
 wire [63:0] ex_result = ({64{ex_rs[5]}} & fpu_result) | {({32{ex_rs[4]}} & 32'hFFF80000), int_flat | sys_result};
+// CR0 the same way: each operation's zero and sign from its own result, chosen
+// by ex_rs, and a compare's field by its own select, instead of the ALU's
+// choice of its operation's flags and then the integer unit's of its unit's
+// (two choice levels behind the rotator were the slowest family at 66 MHz,
+// 2026-10-24: a forwarded rB into a record-form shift's count, into CR0)
+wire int_zero_flat = (ex_rs[6] & ~(|int_sum)) | (ex_rs[7] & ~(|int_log)) | (ex_rs[8] & ~(|int_rot)) |
+                     (ex_rs[9] & ~(|int_clz)) | (ex_rs[10] & ~(|int_exts)) |
+                     (ex_rs[11] & ~(|int_mul_lo)) | (ex_rs[12] & ~(|int_mul_hi)) | (ex_rs[13] & ~(|int_div_q));
+wire int_neg_flat  = (ex_rs[6] & int_sum[31]) | (ex_rs[7] & int_log[31]) | (ex_rs[8] & int_rot[31]) |
+                     (ex_rs[10] & int_exts[31]) |
+                     (ex_rs[11] & int_mul_lo[31]) | (ex_rs[12] & int_mul_hi[31]) | (ex_rs[13] & int_div_q[31]);
+wire int_lt_flat   = ex_dec.ic.is_signed ? int_lts : int_ltu;
+wire int_so_flat   = xer[31] | (ex_dec.ic.oe & int_ov);
+assign int_cr_flat = ex_rs[14] ? {int_lt_flat, ~int_lt_flat & ~int_eq, int_eq, xer[31]} :
+                                     {int_neg_flat, ~int_neg_flat & ~int_zero_flat, int_zero_flat, int_so_flat};
 /* synthesis translate_off */
-always_ff @(posedge clk)
+always_ff @(posedge clk) begin
 	if (~reset & ex_valid & ex_done & ~x_pre & (|ex_rs[13:6]) & (int_flat != int_result))
 		$fatal(1, "the flat integer result differs from the unit's");
+	if (~reset & ex_valid & ex_done & ~x_pre & is_int & ex_dec.cr_wr & (int_cr_flat != int_cr))
+		$fatal(1, "the flat CR field differs from the integer unit's");
+end
 /* synthesis translate_on */
 wire [6:0]  ex_rd     = ex_dec.frd_wr ? {2'b10, ex_dec.frd} : {1'b0, ex_dec.rd};
 wire        ex_rd_wr  = ex_dec.rd_wr | (ex_dec.frd_wr & (~is_fpu | fpu_result_we));
