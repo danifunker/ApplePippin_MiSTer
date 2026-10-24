@@ -63,6 +63,20 @@ prove it on the board. Everything else on the core is done for now and committed
      Days (CD audio), Power Rangers Zeo; Eject + Game disc; a save reaching the SD card;
      three cold core loads in a row (build 37 had one black boot of three at negative slack).
 
+## The decided architecture (the user, 2026-10-24)
+
+**The CPU at 66.67 MHz, the machine on a 33.33 MHz bus**, as a real 603 runs its core at a
+multiple of its bus clock. One PLL, VCO 800 MHz: CPU /12 = 66.667, bus /24 = 33.333, memory
+/8 = 100, video /40 = 20 (or VCO 1000: /15, /30, /10, /50). CPU and bus outputs from the same
+VCO are phase-aligned, so the CPU <-> machine crossing is a synchronous 2:1 handoff (a
+request held for a bus cycle, multicycle constraints between the two clocks), not an
+asynchronous CDC. Today the machine (Grand Central, Taos, the VIA, SCSI, Cuda, sound: all of
+`Pippin_machine`) shares the CPU's clock; moving it to the bus clock takes its logic out of
+the 66 MHz budget. The machine's tick dividers already take their clock as a parameter
+(`CPU_HZ`/`CPU_HZ_FAST` in `Pippin_machine`): give them the bus clock's rate. The memory
+port (`DSPPC603_memcdc` to the 100 MHz SDRAM side) stays where it is, on the CPU side.
+The CPU's own slow paths still have to come down to 15 ns: that is the main work.
+
 ## Plan
 
 1. Measure: the CPU alone at 66.667 MHz (`check.py core --cpu 603 --mhz 66.667 --paths 40
@@ -70,9 +84,12 @@ prove it on the board. Everything else on the core is done for now and committed
 2. Shorten the worst families in DSPPC603 without changing behaviour (pipeline registers
    where the 603e's timing allows one more cycle, precomputed compares, splitting the
    cr/MSR/TLB-valid and cache-tag paths). Each change: lint, the CPU benches, then a fit.
-3. Add the 66.667 MHz PLL setting (a VCO that gives 100 and 20 MHz too; keep 58.333 as a
-   fallback `CPU_MHZ` value), `CPU_HZ` 66_666_667, check `TB_HZ` (the 603's time base runs
-   at bus/4: 16.667 MHz for a 66.667 MHz bus) and the timer derivations.
+3. The clocks: the PLL at VCO 800 with the CPU 66.667, the bus 33.333, memory 100, video 20
+   (keep 58.333 as a fallback build); the machine on the bus clock behind a 2:1 synchronous
+   bridge; `CPU_HZ` 66_666_667, the machine's dividers at 33_333_333; `TB_HZ` (the 603's time
+   base runs at bus/4: 8.333 MHz for a 33.333 MHz bus; check what the ROM's timebase
+   calibration expects) and the timer derivations. Bench first (the machine bench needs the
+   two clocks too).
 4. Whole-core builds and seed sweeps until setup and hold pass on every clock with margin.
 5. The regression above, then update `README.md` (Known limits: CPU speed), the release notes
    and `RESUME_pippin_board.md`; a new date-stamped rbf in `releases/` (not published).
