@@ -205,8 +205,9 @@ wire        ilace = VHL[0];
 // Mac OS's driver writes (board trace, build 46): NTSC HAL 116 HFP 756 HSTART 116, VAL 34 VFP
 // 514 VEFS 32 (the window is the active area); PAL HAL 136 HFP 912 HSTART 204, VAL 38 VFP 614
 // VEFS 84 (640 x 480 in 776 x 576, 68 dots and 48 half-lines each side; ROW_WORDS 1280, the
-// desktop's 640 dots). The boot ROM's first NTSC setting (HSTART 148, VEFS 62) gives the logo's
-// 576 x 420. Without the window PAL showed the 776-dot line, the rows running on into the next.
+// desktop's 640 dots). VIDEO_MODE 3 (the boot logo, Racing Days) shows the active area whole
+// (Pippin_taos sends HAL and VAL - 2 then). Without the window PAL showed the 776-dot line, the
+// rows running on into the next.
 wire [11:0] W_HST = window[23:12];
 wire [11:0] W_VEF = window[11:0] + 12'd2;
 logic [11:0] hw0, hw1, vw0, vw1;          // the window: dots HW0-HW1, half-lines VW0-VW1

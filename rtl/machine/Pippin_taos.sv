@@ -80,7 +80,11 @@ logic [31:0] vefs /*verilator public_flat_rd*/, vofs /*verilator public_flat_rd*
 logic [31:0] sw [15];
 
 always_comb for (int i = 0; i < 15; i++) swatch[32 * i +: 32] = sw[i];
-assign window = {hstart[31:20], vefs[31:20]};
+// (VIDEO_MODE 3, the ROM's boot logo and Racing Days (HSTART 148, VEFS 62, VCONV_END 480 on
+// NTSC; board trace 2026-10-24): the picture fills the active area, as it does on the console
+// (Racing Days's 640x480 screens whole); the registers there set up the convolution, so the
+// window is the active area. VIDEO_MODE 2 (Mac OS's desktop): from HSTART and VEFS.)
+assign window = (video_mode == 2'd3) ? {sw[2][31:20], 12'(sw[10][31:20] - 12'd2)} : {hstart[31:20], vefs[31:20]};
 
 wire [8:0]  rn     = addr[10:2];          // register number: offset >> 2
 wire [3:0]  sw_n   = 4'(rn - 9'h0B);      // a timing register's index (HEQ 0 ... VHLINE 14)
