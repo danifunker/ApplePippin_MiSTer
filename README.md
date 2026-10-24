@@ -94,7 +94,7 @@ gets the address <MiSTer's network>.254. MacTCP still has the @WORLD service's D
 so open pages by IP address, or set a DNS server in the MacTCP control panel (More...).
 Netscape needs more than 5 MB (choose 13 MB).
 
-**Hard disk.** OSD > Advanced > Hard disk (SCSI ID 0) takes a SCSI disk image (.hda, .vhd,
+**Hard disk.** The OSD's Hard disk (SCSI ID 0) entry takes a SCSI disk image (.hda, .vhd,
 .img, as the Mac cores use). The Pippin boots only from its CD drive, so the disk is for data
 that Mac OS mounts beside the disc.
 

@@ -25,7 +25,7 @@ New since the 20261022 release, each checked on the board (MiSTer 192.168.99.92)
   PAL shows the 640x480 picture centred with borders (it showed a broken 776-dot line).
 - **PPP** over the modem port to the MiSTer (the disc's @WORLD Dialer and @World Browser),
   with `syn/fakemodem.py` on the MiSTer standing in for the modem.
-- **Hard disk**: Advanced > Hard disk (SCSI ID 0), a data disk beside the CD.
+- **Hard disk**: Hard disk (SCSI ID 0) on the OSD's first page, a data disk beside the CD.
 - **Memory**: 13 and 21 MB (64 MB SDRAM boards or larger) as well as 5 MB.
 - **ROMs**: Kinka 1.0, 1.2, 1.3 and the GM flash all boot.
 - Inside: partial SDRAM writes masked on A12-A11 as the MiSTer boards wire DQM (no more

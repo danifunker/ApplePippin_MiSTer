@@ -254,8 +254,9 @@ when they are there** (gamepad: the AppleJack; listening).
   At Shut Down), Insert disc, Hard disk (SCSI ID 0, slot 0), Boot. On .92: Eject from the top
   level, Game disc > Macintosh on Pippin boots; a copy of MacPPC7300's toolbox.hda
   (`games/Pippin/Pippin test disk.hda`) mounts as "Toolbox" after a restart (unmounted after).
-  Releases are date-stamped (the user): `releases/BandaiPippin_20261024.rbf` committed; the
-  tag `20261024` and the GitHub release wait for the user's confirmation.
+  Releases are date-stamped (the user): `releases/BandaiPippin_20261024.rbf` committed (build
+  50); no tags, and no GitHub release until the user says. Then the hard disk moved to the
+  first page (build 51, the release rbf to be replaced by it).
 
 ## Next steps
 

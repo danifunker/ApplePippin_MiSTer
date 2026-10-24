@@ -123,6 +123,9 @@ localparam CONF_STR = {
 	// the save flash (Pippin_flash), 128 KB, and Grand Central's 8 KB NVRAM kept in an image on
 	// slot 2 (Pippin_nvsave): 136 KB keeps both, 128 KB the flash alone
 	"SC2,SAV,Save file;",
+	// a SCSI hard disk on ID 0 (Pippin_scsidisk, block slot 0; the Mac cores' target), a data
+	// disk beside the CD (the ROM boots only from the CD)
+	"SC0,HDAVHDIMG,Hard disk (SCSI ID 0);",
 	"-;",
 	"F1,ROM,Load ROM;",
 	// the retail 5 MB; 13 and 21 MB (the expansion banks at 32 and 48 MB) need a 64 MB SDRAM
@@ -169,8 +172,6 @@ localparam CONF_STR = {
 	// the last disc back in the tray and the tray closed (the eject took it out); a disc
 	// chosen in the Game disc entry goes in the same way
 	"P5R[39],Insert disc;",
-	// a SCSI hard disk on ID 0 (Pippin_scsidisk, block slot 0; the Mac cores' target)
-	"P5SC0,HDAVHDIMG,Hard disk (SCSI ID 0);",
 	// the RTL's memory-test boot program in place of the ROM (Pippin_bootrom; its progress
 	// in the trace's DBG writes), a debug entry (2026-10-21)
 	"P5O[34],Boot,ROM,Memory test;",
