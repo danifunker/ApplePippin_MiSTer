@@ -237,9 +237,18 @@ when they are there** (gamepad: the AppleJack; listening).
   **Video**: NTSC 640x480 31.49 kHz 59.9 Hz (Progressive), VGA 640x481 31.48 kHz 59.9 Hz,
   PAL 776x576 31.26 kHz 50.0 Hz: rates right, but PAL shows the whole HAL..HFP line (776)
   while Mac OS's desktop is 640x480 (rows run on into the next; the bottom is unused VRAM).
-  Taos's window registers (VEFS, VOFS, HSTART, HEB) are kept but not used by the scan-out:
-  next, their values from the bench (runtaos_m5/m3: `taos:` lines with the frame) and the
-  scan-out windowed by them.
+  **PAL window fixed** (7c18c99, 25d8e3a, 807e412): board traces (build 46, Taos writes in the
+  trace) give Mac OS's desktop (VIDEO_MODE 0x2xxxxxxx) NTSC HAL 116 HFP 756 HSTART 116, VAL 34
+  VFP 514 VEFS 32 and PAL HAL 136 HFP 912 HSTART 204, VAL 38 VFP 614 VEFS 84 (ROW_WORDS 1280):
+  the 640x480 picture from HSTART and VEFS + 2, centred, black around it. The boot logo and
+  Racing Days use VIDEO_MODE 0x3xxxxxxx with HSTART 148 VEFS 62 VCONV_END 480 and fill the
+  active area (the window clipped Racing Days in builds 47-48): Pippin_taos sends the active
+  area as the window in mode 3 (bits 31-28; the 2-bit video_mode reads bits 31-30, 0 for both).
+  **Build 49** (807e412, seed 2, slack +0.136, hold met; `scratch/BandaiPippin_807e412.rbf`):
+  on .92 Racing Days whole, Eject + Macintosh on Pippin chosen: the Finder (NTSC), PAL 776x576
+  50 Hz with the desktop centred. Left running on .92 for the user, who wants the OSD menu's
+  layout changed before the release (v0.2.0 notes written in releases/README.md, not
+  published; the rbf to publish would be this build or the one after the menu change).
 
 ## Next steps
 
