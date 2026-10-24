@@ -75,6 +75,7 @@ module DSPPC603_fpu
 	input  logic [31:0] fpscr_in,
 
 	output logic        resp_valid,
+	output logic        resp_back,    // ... and that it is the back's (S_DONE), from the state alone: the queue's live pop
 	input  logic        resp_ready,
 	output logic [63:0] result,
 	output logic        result_we,
@@ -1285,6 +1286,7 @@ end
 
 assign req_ready  = (fstate == F_IDLE) & (~op_simple | (state == S_IDLE));
 assign req_simple = op_simple & ~op_compare;
+assign resp_back  = (state == S_DONE);
 
 // ---- response --------------------------------------------------------------
 // An enabled invalid operation or zero divide leaves the target register and

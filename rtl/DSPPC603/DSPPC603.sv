@@ -1359,7 +1359,17 @@ logic        fpu_resp;                   // the unit's answer, and whom it goes 
 // in its request's cycle, which the FIFO never sees: EX's)
 wire         fo_for_ex  = (fo_count == 3'd0) | fo_ex[fo_head];
 wire         fpu_resp_ex = fpu_resp & fo_for_ex;
-wire         fpu_resp_q  = fpu_resp & ~fo_for_ex;
+// (the queue's answer from the unit's state alone: a simple operation's answer,
+// behind EX's stall through its request, was in front of the queue's live pop
+// and so of FPSCR; the 66 MHz work, 2026-10-24. A simple operation is only
+// answered with the back idle, so the order FIFO is empty then: checked below)
+logic        fpu_resp_back;
+wire         fpu_resp_q  = fpu_resp_back & ~fo_for_ex;
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & (fpu_resp_q != (fpu_resp & ~fo_for_ex)))
+		$fatal(1, "the queue's FPU answer from the unit's state differs from the response");
+/* synthesis translate_on */
 logic [63:0] fpu_result;
 logic        fpu_result_we;
 logic [31:0] fpu_set;                    // the result's FPSCR effects on their own (a queued operation's commit)
@@ -1951,6 +1961,7 @@ DSPPC603_fpu #(.OPERAND_REG (FPU_OPERAND_REG)) fpu
 	.cls_c      (fcls_c),
 	.fpscr_in   (fpscr),
 	.resp_valid (fpu_resp),
+	.resp_back  (fpu_resp_back),
 	.resp_ready (fpu_resp_ready),
 	.result     (fpu_result),
 	.result_we  (fpu_result_we),

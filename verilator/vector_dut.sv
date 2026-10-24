@@ -165,7 +165,7 @@ generate if (HAVE_FPU != 0) begin : g_fpu
 		.cls_b      (DSPPC604_pkg::fp_classify(fop_b)),
 		.cls_c      (DSPPC604_pkg::fp_classify(fop_c)),
 		.fpscr_in   (fpscr),
-		.resp_valid (fpu_resp),
+		.resp_valid (fpu_resp), .resp_back (),
 		.resp_ready (1'b1),
 		.result     (fpu_result),
 		.result_we  (fpu_result_we),
