@@ -239,6 +239,21 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
   - **Regression step 2 passed** on 344c4a2 (= changes 2-11 + 13's predecessor): `run66.sh`
     (`run5.sh` to 60 M instructions, still `--cpu-mhz 58.333`), Super Marathon lockstep against
     dingusppc **identical, RESULT: PASS**, 1.93 CPI after Cuda released the CPU.
+  - Fit p (12 complete + 13): 61.34, -1.303 `wb_result -> mmu.d_state.D_FAULT/D_WREQ, d_align_q`
+    (hub C: the page compare into the MMU's miss/fault transitions), -1.189 `wb_result -> cr`
+    **through the immediate-count rotator**: a rotate by an instruction-field count is still a
+    barrel shifter for the (late) operand. Fit o: **"Disk is full"** (/tmp is a 7.5 GB tmpfs;
+    a dozen worktrees' Quartus builds filled it): remove each worktree once its fit is read;
+    the watcher loops stop on `constraint 66.67` *or* `^Error`.
+  - **14 (42887f9)** the immediate forms' zero/sign from the mask rotated by the count (`a &
+    rotr(m, n) == 0`; srawi `~a[31] &`; rlwimi adds `b & ~m`; the sign a 32:1 choice of a):
+    `alu.rot_imm_zero/neg`. Fit q: `check66_core_q.txt`.
+  - **15 (f8e2439 + bc94038 + fa0df46)** MMU: a data miss or fault leaves D_IDLE a cycle after
+    its lookup from a registered copy of the outcome (`d_xl_seen_q` for `~dxl.ok` only: a
+    granted hit is gone the next cycle), and **a fault is granted from that copy too** (it was
+    granted in the lookup cycle, so the request vanished before the deferred transition: 9
+    runs failed until fa0df46). `dxl.fault` is out of `d_gnt`; the hit's `dxl.ok & dbus_gnt`
+    stays. A walk or fault answer starts one cycle later. Fit r: `check66_core_r.txt`.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
