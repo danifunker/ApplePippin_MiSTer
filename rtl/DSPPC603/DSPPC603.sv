@@ -1733,7 +1733,7 @@ wire completion_dependency =
 function automatic logic [2:0] fdep_of(input dec_t d, input logic push, input logic leave);
 	logic [2:0] cur, clr, pushed, rd;
 	logic [4:0] fr [3];
-	fr = '{d.fra, d.frb, d.frc};
+	fr = '{2: d.fra, 1: d.frb, 0: d.frc};   // (bit 2 is a, as the flags below)
 	rd = {d.fra_rd, d.frb_rd, d.frc_rd};
 	for (int i = 0; i < 3; i++) begin
 		cur[i]    = cq_fpr_o[fr[i]];
