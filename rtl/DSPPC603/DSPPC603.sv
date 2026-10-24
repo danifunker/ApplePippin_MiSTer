@@ -1831,6 +1831,12 @@ assign ex_fp_elig = (COMPLETION_QUEUE != 0) & ex_valid & is_fpu & ex_dec.frd_wr 
                     ~fp_trap_on & msr[MSR_FP] & ~seq_miss & ~ex_fold & ~ex_cf & ex_first & ex_last & ~x_pre;
 assign completion_push_ex = ex_fp_elig & ex_fpu_req & fpu_ready & ~fpu_req_simple &
                             (completion_count < 4'd8) & ~mem_fault & ~reset;
+wire fp_commit_ex = ex_fpu_taken | fp_simple_of(ex_dec.fc.op);
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & ex_leave & ~ex_abort & is_fpu & (fp_commit_ex == completion_push_ex))
+		$fatal(1, "EX's FP commit (taken or simple) differs from not leaving into the queue");
+/* synthesis translate_on */
 always_ff @(posedge clk) begin
 	if (ex_fpu_req & fpu_ready & ~fpu_req_simple) ex_fpu_taken <= 1'b1;
 	if (ex_leave | id_to_ex | fpu_flush | reset) ex_fpu_taken <= 1'b0;
@@ -2449,7 +2455,13 @@ always_comb begin
 	fpscr_next = fpscr;
 	msr_next   = msr;
 
-	if (is_fpu & ~completion_push_ex) begin        // (a queued operation's effects commit at its pop)
+	// (a queued operation's effects commit at its pop.) An FP operation that commits here has
+	// been taken by the unit in an earlier cycle (ex_fpu_taken) or is one the unit answers in
+	// its own cycle (simple); the one leaving into the queue is neither (it is taken in the
+	// cycle it leaves). From registers and EX's decode, so FPSCR's and CR's commit no longer
+	// wait for completion_push_ex (the 66 MHz work, 2026-10-24: ex_dec.frc -> fpscr was the
+	// CPU's slowest family; checked against completion_push_ex below)
+	if (is_fpu & fp_commit_ex) begin
 		if (ex_dec.fpscr_wr) fpscr_next = fpu_fpscr_ex;
 		if (ex_dec.cr_wr)    cr_next    = cr_insert(cr, ex_dec.cr_fld, fpu_cmp ? fpu_cr : fpu_fpscr_ex[31:28]);
 	end
