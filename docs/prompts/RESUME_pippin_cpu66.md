@@ -270,6 +270,15 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     **The 120 M lockstep boot (run66b, fa0df46): PASS, identical.**
   - **17** sraw's carry from a mask of the count (`a[31] & |(a & ~(~0 << n))`, `|a` for n >= 32).
     Fit t: `check66_core_t.txt`. **One fit at a time from now on (the user, 2026-10-24).**
+  - **Fit t (17): 64.55 MHz, worst -0.493**, twelve families all under 0.5 ns; the top is the
+    structural grant path (a forwarded operand -> EA -> the MMU's page match -> d_ok_hit -> d_gnt
+    -> mem_unit.state, 14.8 ns). The per-change gains are at the seed noise now.
+  - **18 (115d132) the whole core at 66.667 MHz on today's architecture**: `pll_0002.v` C66
+    variant (M 16 -> VCO 800; C0 /40; C1 /12, 100 MHz through pll_cfg /8 (4/4); C2 /8 (4/4)),
+    `BandaiPippin.sv` CPU_MHZ 66 / CPU_HZ 66_666_667. A measurement build (`scratch/
+    build66_115d132.log`, slack in `output_files/BandaiPippin.sta.rpt`): how far the whole core
+    is and which machine paths the 33 MHz bus must take out, before the split is written.
+    The 420 M lockstep boot (`run66c.sh`, a4e697e) was running meanwhile.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
