@@ -1715,8 +1715,14 @@ assign fcls_c  = ffc_mem ? mem_cls : ffc_wb ? wb_cls : fp_classify(ex_fc);
 
 // an older load passed in MEM: its data is not there until it reaches WB
 // (unless the newer operation in MEM writes the same register)
-wire mo_ld = mo_valid & mo_rd_wr;   // a passed load's rD, or a store with update's rA: not forwarded
-wire mo_dep = mo_ld &
+wire mo_ld = mo_valid & mo_rd_wr;
+// (the compares registered with the operation since the 66 MHz work,
+// 2026-10-24: they were in front of ex_stall, so of ex_done, ex_leave and
+// redir; mo_dep is assigned with the forwarding selects below, from the same
+// register matches, the older slot's validity and the kills staying live)
+logic mo_dep;
+/* synthesis translate_off */
+wire mo_dep_c = mo_ld &
     ((ex_dec.ra_rd & (mo_rd == {1'b0, ex_dec.ra}) & ~fa_mem) |
      (ex_use_b     & (mo_rd == {1'b0, ex_dec.rb}) & ~fb_mem) |
      (ex_dec.rc_rd & (mo_rd == {1'b0, ex_dec.rc}) & ~fc_mem) |
@@ -1728,6 +1734,10 @@ wire mo_dep = mo_ld &
      ((ex_dec.ra_rd & (mo_upd_ra == ex_dec.ra) & ~fa_mem) |
       (ex_use_b     & (mo_upd_ra == ex_dec.rb) & ~fb_mem) |
       (ex_dec.rc_rd & (mo_upd_ra == ex_dec.rc) & ~fc_mem)));
+always_ff @(posedge clk)
+	if (~reset & ex_valid & (mo_dep != mo_dep_c))
+		$fatal(1, "the registered older-slot dependency differs from the compares");
+/* synthesis translate_on */
 // a load's data is not there until it reaches WB
 wire completion_dependency =
     ((COMPLETION_ALU != 0) &
@@ -2669,6 +2679,21 @@ function automatic logic [14:0] fwd_sel(input dec_t d);
 	fwd_sel = {m_mem, m_wb, u};
 endfunction
 wire [14:0] fwd_sel_id = fwd_sel(id_uop_f);
+// EX's dependency on the older MEM slot (mo_dep): what mo_rd/mo_upd_ra will be
+// next cycle is MEM's newer slot's at a take, else the older slot's own; the
+// matches of ID's and EX's operands against both are found from registers and
+// chosen by mem_take and id_to_ex (mem_leave, the cache's answer, stays out:
+// mo_valid is applied live, as are the kills)
+function automatic logic [8:0] mo_match(input dec_t d, input logic wr, input logic [6:0] r, input logic upd, input logic [5:0] ur);
+	mo_match = {wr ? rd_match(d, r) : 6'd0, upd ? ra_match(d, ur) : 3'd0};
+endfunction
+logic [8:0] ex_mo_match_q;
+always_ff @(posedge clk)
+	ex_mo_match_q <= id_to_ex ? (mem_take ? mo_match(id_uop_f, mem_rd_wr, mem_rd, mem_upd, mem_upd_ra)
+	                                      : mo_match(id_uop_f, mo_rd_wr, mo_rd, mo_upd, mo_upd_ra))
+	                          : (mem_take ? mo_match(ex_dec, mem_rd_wr, mem_rd, mem_upd, mem_upd_ra)
+	                                      : mo_match(ex_dec, mo_rd_wr, mo_rd, mo_upd, mo_upd_ra));
+assign mo_dep = mo_valid & (|(ex_mo_match_q & ~{fa_mem, fb_mem, fc_mem, ffa_mem, ffb_mem, ffc_mem, fa_mem, fb_mem, fc_mem}));
 wire [14:0] fwd_sel_ex = fwd_sel(ex_dec);
 always_ff @(posedge clk)
 	{fq_a_mem_r, fq_b_mem_r, fq_c_mem_r, fq_fa_mem_r, fq_fb_mem_r, fq_fc_mem_r,
