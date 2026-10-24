@@ -262,6 +262,14 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     ok_vec)`, checked against `dxl.ok`); the FPU divider's `d_*` not updated at the last step
     (dead: the back takes `d_quo_next`/`d_next_b`). Fit s: `check66_core_s.txt`; its run_core
     waits for the Mac's 120 M lockstep boot (`run66b.sh`, `runrep66b.txt`) of fa0df46.
+  - Fit r (15): 62.01, -1.126 `wb_result -> xer`: **sraw's carry through the rotator**
+    (`rot_ca = a[31] & |(rot & ~mask)`), -0.9 `ex_fa -> op_b` (unexplained; a seed artefact?).
+    **Fit s (16): 63.67 MHz, worst -0.706** `id_insn -> decoder -> sequencer -> fwd_sel ->
+    fq_fc_mem` (ID's decode in the forwarding selects), then -0.53 `wb_result ->
+    mem_unit.state`, -0.47 `mem_unit.state -> dcache.landed_tag_hit`. 16 run_core PASS.
+    **The 120 M lockstep boot (run66b, fa0df46): PASS, identical.**
+  - **17** sraw's carry from a mask of the count (`a[31] & |(a & ~(~0 << n))`, `|a` for n >= 32).
+    Fit t: `check66_core_t.txt`. **One fit at a time from now on (the user, 2026-10-24).**
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
