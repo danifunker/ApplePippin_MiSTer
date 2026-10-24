@@ -103,8 +103,16 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
   `~completion_push_ex` (an FP op committing in EX was taken earlier or is answered in its
   own cycle; the one leaving into the queue is neither); a `$fatal` check holds them equal.
   `run_core.py` PASS on the Mac (all vectors, exceptions, 1,071,375 random instructions in
-  lockstep, the CDC ratios; the check never fired). Its fit: `scratch/check66_core_b.txt`
-  (queued behind other sessions' Quartus jobs when this was written).
+  lockstep, the CDC ratios; the check never fired). **Its fit** (`scratch/check66_core_b.txt`):
+  **Fmax 58.30 -> 60.85 MHz, worst -2.153 -> -1.433 ns**; every FPSCR family gone. New worst:
+  - -1.433 (233) `fb_wb -> cr`, -1.109 (115) `wb_result -> cr`, -1.051 (205) `mem_result ->
+    cr`, -0.955 `fb_mem -> cr`, -0.942 `ex_dec.ic.sh_reg -> cr`: the forwarded operands into
+    EX's compare into CR;
+  - -1.111 (39) `Add29 -> mmu.d_cached_page`, -0.874 `Add29 -> fa_mem`, -0.781 `ex_pc8 ->
+    mmu.d_cached_page`: EX's address adder into the data MMU's page compare;
+  - -1.013 (71) `fb_mem -> mem_unit.state.S_RSP1`, -0.972 (185) `mem_result -> mem_unit.state`,
+    -0.961 `-> S_REQ1`: forwarded operands into the memory unit's state machine;
+  - -0.807 (92) `mmu.i_page_q -> pc_f`: the instruction MMU into the fetch PC.
 - **The 33 MHz bus cut** (from reading `rtl/machine/Pippin_system.sv`): `Pippin_machine` is
   not only the I/O chips: the CPU's memory port goes through it (CPU `c_*` -> machine ->
   `m_*` -> `Pippin_l2` -> `DSPPC603_memcdc` -> SDRAM at 100 MHz), with snooping and Grand
