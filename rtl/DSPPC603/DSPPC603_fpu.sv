@@ -932,6 +932,7 @@ wire sb_eff   = b_s ^ op_sub;                                             // sig
 wire s_prod   = a_s ^ c_s;
 
 logic sp_check;   // the cycle after start: a special result overrides the stage begun
+logic flush_q;    // the flush, a cycle late (see the handoff)
 
 // the front's handoff to the back: a compare's result, a special result
 // (the cycle after the start, or held in F_SPEC), or the arithmetic's
@@ -941,6 +942,14 @@ wire hand_cmp  = (fstate == F_OPND) & cmp_q;
 wire hand_spec = (fstate == F_SPEC) | (sp_check & sp_valid);
 wire hand_data = (fstate == F_ALGN) | (fstate == F_MUL2) | ((fstate == F_DIV) & (d_cnt == 5'd0)) | (fstate == F_RSQ);
 wire hand_now  = back_free & (hand_cmp | hand_spec | hand_data);
+// The back's working registers (the sum's operands, r_q, lz_q ...) load
+// whenever the back is idle or holds an answer, taken or not (back_room: from
+// the state alone), reloading the same values while the front waits; S_DONE
+// answers from fin_* only, so they are free then. The states and fin_* keep
+// back_free, which waits for the answer's taking (resp_ready: MEM's room, a
+// late signal that was then the enable of ~170 registers; the 66 MHz work,
+// 2026-10-24).
+wire back_room = (state == S_IDLE) | (state == S_DONE);
 
 always_ff @(posedge clk) begin
 	// ---- the front -----------------------------------------------------------
@@ -1010,40 +1019,42 @@ always_ff @(posedge clk) begin
 		fstate  <= F_MUL2;
 	end
 
-	F_ALGN: if (back_free) begin
+	F_ALGN: begin
 		// The product is a * 1.0 exactly: the operand at bits 104-52, as
 		// F_MUL2 would sum it. The distance and the aligned addend in one
 		// cycle (the exponents are registers here).
-		e_win <= a_pin ? (ez - 14'sd108) : e_prod;
-		sr    <= algn_sr;
-		p_q   <= {1'b0, mx, 52'd0};
-		zal   <= algn_zal;
-		zst   <= algn_st;
-		state <= S_ADD;
-		if (z_zero & ~p_zero) begin                  // no addend: the operand is the sum
-			r_q      <= {57'd0, mx, 52'd0};
-			r_sign   <= s_p_f;
-			r_sticky <= 1'b0;
-			lz_q     <= 8'd57;
-			rzero_q  <= 1'b0;
-			state    <= S_NORM;
+		if (back_room) begin
+			e_win <= a_pin ? (ez - 14'sd108) : e_prod;
+			sr    <= algn_sr;
+			p_q   <= {1'b0, mx, 52'd0};
+			zal   <= algn_zal;
+			zst   <= algn_st;
+			if (z_zero & ~p_zero) begin              // no addend: the operand is the sum
+				r_q      <= {57'd0, mx, 52'd0};
+				r_sign   <= s_p_f;
+				r_sticky <= 1'b0;
+				lz_q     <= 8'd57;
+				rzero_q  <= 1'b0;
+			end
 		end
+		if (back_free) state <= (z_zero & ~p_zero) ? S_NORM : S_ADD;
 	end
 
-	F_MUL2: if (back_free) begin
-		p_q <= p_sum;
-		{zal, zst} <= align_z(mz, sr_f);
-		e_win <= e_win_f;
-		sr    <= sr_f;
-		state <= S_ADD;
-		if (z_zero & ~p_zero) begin                  // no addend (fmul): the product is the sum,
-			r_q      <= {56'd0, p_sum};              // its top at bit 105 or 104 (normalised operands)
-			r_sign   <= s_p_f;
-			r_sticky <= 1'b0;
-			lz_q     <= p_sum[105] ? 8'd56 : 8'd57;
-			rzero_q  <= 1'b0;
-			state    <= S_NORM;
+	F_MUL2: begin
+		if (back_room) begin
+			p_q <= p_sum;
+			{zal, zst} <= align_z(mz, sr_f);
+			e_win <= e_win_f;
+			sr    <= sr_f;
+			if (z_zero & ~p_zero) begin              // no addend (fmul): the product is the sum,
+				r_q      <= {56'd0, p_sum};          // its top at bit 105 or 104 (normalised operands)
+				r_sign   <= s_p_f;
+				r_sticky <= 1'b0;
+				lz_q     <= p_sum[105] ? 8'd56 : 8'd57;
+				rzero_q  <= 1'b0;
+			end
 		end
+		if (back_free) state <= (z_zero & ~p_zero) ? S_NORM : S_ADD;
 	end
 
 	F_DIV0: begin
@@ -1068,7 +1079,7 @@ always_ff @(posedge clk) begin
 			d_quo <= d_quo_next;
 			d_cnt <= d_cnt - 5'd1;
 		end
-		if ((d_cnt == 5'd0) & back_free) begin
+		if ((d_cnt == 5'd0) & back_room) begin
 			// the first quotient bit lands on window bit 161; the quotient of
 			// normalised operands is in (1/2, 2), so it or the next is the top
 			r_q      <= f_sgl ? {d_quo_next[28:0], 133'd0} : {d_quo_next, 105'd0};
@@ -1077,8 +1088,8 @@ always_ff @(posedge clk) begin
 			e_win    <= ex - ez - 14'sd161;
 			lz_q     <= {7'd0, ~(f_sgl ? d_quo_next[28] : d_quo_next[56])};
 			rzero_q  <= 1'b0;
-			state    <= S_NORM;
 		end
+		if ((d_cnt == 5'd0) & back_free) state <= S_NORM;
 	end
 
 	F_RSQ: if (back_free) begin
@@ -1276,7 +1287,12 @@ always_ff @(posedge clk) begin
 	else if (sp_check & sp_valid) fstate <= F_SPEC;   // ... when the back is free
 
 	if (fstate == F_IDLE) pre_phase <= 1'b0;
-	if (reset | flush) begin
+	// (the flush a cycle late, from a register: it comes from the pipeline's
+	// redirect, which was then in front of these state machines; the pipeline
+	// is empty in the cycle after a redirect, so the killed operation's one
+	// more cycle is not seen, and no request comes; the 66 MHz work, 2026-10-24)
+	flush_q <= flush & ~reset;
+	if (reset | flush_q) begin
 		state    <= S_IDLE;
 		fstate   <= F_IDLE;
 		sp_check <= 1'b0;
