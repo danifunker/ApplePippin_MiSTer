@@ -321,6 +321,10 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     (MB [10:6], ME [5:1], SH [15:11]), rotated in ID and registered into EX (`ex_mask_i_q`,
     `ex_mask_rot_q`); the ALU takes them as inputs. **Effort build**: `PLACEMENT_EFFORT_MULTIPLIER
     4.0`, `ROUTER_TIMING_OPTIMIZATION_LEVEL MAXIMUM` on a7e0974 (`scratch/build66_effort.log`).
+  - **The 420 M lockstep boot of a7e0974 (change 20): PASS, identical.** The effort build
+    (811884f, 4x placement / maximum router) came out **identical to a7e0974's to the
+    picosecond**: the settings did not take (see the next note). Change 21 (cd065b5) run_core:
+    below.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
