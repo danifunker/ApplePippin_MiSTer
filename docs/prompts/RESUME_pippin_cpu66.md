@@ -254,6 +254,14 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     granted in the lookup cycle, so the request vanished before the deferred transition: 9
     runs failed until fa0df46). `dxl.fault` is out of `d_gnt`; the hit's `dxl.ok & dbus_gnt`
     stays. A walk or fault answer starts one cycle later. Fit r: `check66_core_r.txt`.
+  - **Fit q (14): 63.38 MHz, worst -0.777, twelve negative families** (`check66_core_q.txt`):
+    `wb_valid -> fb_wb -> op_b -> the MMU's compare -> dxl -> d_gnt -> mem_unit.state` (-0.78),
+    `dcache.r_kind -> fpu.d_rem` (-0.70: the divider's step enable carried `back_free`),
+    `wb_result -> xer` (-0.42), `id_insn -> ex_b` (-0.32), `wb_valid -> cr` (-0.20).
+  - **16 (4386197)** the hit's grant from a per-entry ok bit (`d_ok_vec`, `d_ok_hit = |(match &
+    ok_vec)`, checked against `dxl.ok`); the FPU divider's `d_*` not updated at the last step
+    (dead: the back takes `d_quo_next`/`d_next_b`). Fit s: `check66_core_s.txt`; its run_core
+    waits for the Mac's 120 M lockstep boot (`run66b.sh`, `runrep66b.txt`) of fa0df46.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
