@@ -704,11 +704,31 @@ always_comb begin
 	endcase
 end
 
+// A miss or a fault leaves D_IDLE a cycle after the lookup that found it, from
+// a registered copy of the outcome (the request is held meanwhile, ungranted,
+// so the copy is the request's): the page compare behind the forwarded
+// operands' sum was then in front of d_state and the fault's registers (the
+// 66 MHz work, 2026-10-24). A hit's grant is unchanged.
+logic d_xl_fault_q, d_xl_ok_q, d_xl_align_q, d_xl_seen_q;
+logic [31:0] d_xl_info_q;
+always_ff @(posedge clk) begin
+	d_xl_seen_q  <= (d_state == D_IDLE) & d_req & d_ready & ~reset;
+	d_xl_fault_q <= dxl.fault;
+	d_xl_ok_q    <= dxl.ok;
+	d_xl_align_q <= dxl.align;
+	d_xl_info_q  <= dxl.info;
+end
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & d_xl_seen_q & (d_state == D_IDLE) & ~d_cancel &
+	    ((d_xl_fault_q != dxl.fault) | (d_xl_ok_q != dxl.ok) | ~d_req | ~d_ready))
+		$fatal(1, "the data lookup's registered outcome differs from the request's a cycle later");
+/* synthesis translate_on */
 always_ff @(posedge clk) begin
 	case (d_state)
-		D_IDLE: if (d_req & d_ready) begin
-			if (dxl.fault) d_state <= D_FAULT;     // (its DSISR and DAR: below)
-			else if (~dxl.ok) d_state <= D_WREQ;
+		D_IDLE: if (d_xl_seen_q & d_req & ~d_cancel) begin
+			if (d_xl_fault_q) d_state <= D_FAULT;  // (its DSISR and DAR: below)
+			else if (~d_xl_ok_q) d_state <= D_WREQ;
 		end
 		D_WREQ: if (w_start_d) begin
 			d_state <= D_WALK;
@@ -737,9 +757,10 @@ always_ff @(posedge clk) begin
 	if (d_cancel & (d_state == D_WALK)) d_cancelled <= 1'b1;
 	if (d_state == D_IDLE) begin
 		// A fault found here is answered from these in D_FAULT; they are
-		// read nowhere else, so they need no enable behind the compare.
-		d_info_q  <= dxl.info;
-		d_align_q <= dxl.align;
+		// read nowhere else, so they need no enable behind the compare
+		// (the lookup's own from the registered copy, a cycle behind it)
+		d_info_q  <= d_xl_info_q;
+		d_align_q <= d_xl_align_q;
 		d_dar_q   <= d_dar_now;
 		dw_ea    <= d_ea_w;
 		dw_vsid  <= d_cached_sr[23:0];
