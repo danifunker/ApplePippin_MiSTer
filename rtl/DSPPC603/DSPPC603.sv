@@ -1423,7 +1423,7 @@ DSPPC603_alu completion_alu
 	.ca_in (1'b0),
 	.result (completion_result),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.sum (), .ca_out (), .ov_out (), .lt (), .gt (), .eq (), .lt_s (), .lt_u (), .zero (), .neg (), .rot_zero (), .rot_imm_o (),
+	.sum (), .ca_out (), .ov_out (), .lt (), .gt (), .eq (), .lt_s (), .lt_u (), .zero (), .neg (), .rot_zero (), .rot_imm_zero (), .rot_imm_neg (),
 	.log_o (), .rot_o (), .clz_o (), .exts_o ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
@@ -1790,7 +1790,7 @@ logic        int_resp;
 logic [31:0] int_result;
 logic [31:0] int_log, int_rot, int_clz, int_exts, int_mul_hi, int_mul_lo, int_div_q;
 logic        int_rot_zero;              // (unused since the two-cycle record forms below)
-logic [31:0] int_rot_imm;
+logic        int_rot_imm_zero, int_rot_imm_neg;
 logic [31:0] int_sum;                      // the adder alone: the effective address
 logic        int_ca;
 logic        int_ov;
@@ -1835,7 +1835,8 @@ DSPPC603_int_unit int_unit
 	.mul_lo     (int_mul_lo),
 	.div_q      (int_div_q),
 	.alu_rot_zero (int_rot_zero),
-	.alu_rot_imm (int_rot_imm)
+	.alu_rot_imm_zero (int_rot_imm_zero),
+	.alu_rot_imm_neg (int_rot_imm_neg)
 );
 
 // ---- floating-point unit ---------------------------------------------------
@@ -2641,10 +2642,10 @@ wire [63:0] ex_result = ({64{ex_rs[5]}} & fpu_result) | {({32{ex_rs[4]}} & 32'hF
 // choice of its operation's flags and then the integer unit's of its unit's
 // (two choice levels behind the rotator were the slowest family at 66 MHz,
 // 2026-10-24: a forwarded rB into a record-form shift's count, into CR0)
-wire int_zero_flat = (ex_rs[6] & ~(|int_sum)) | (ex_rs[7] & ~(|int_log)) | (ex_rs[8] & (ex_dec.ic.sh_reg ? ~(|rot_res_q) : ~(|int_rot_imm))) |
+wire int_zero_flat = (ex_rs[6] & ~(|int_sum)) | (ex_rs[7] & ~(|int_log)) | (ex_rs[8] & (ex_dec.ic.sh_reg ? ~(|rot_res_q) : int_rot_imm_zero)) |
                      (ex_rs[9] & ~(|int_clz)) | (ex_rs[10] & ~(|int_exts)) |
                      (ex_rs[11] & ~(|int_mul_lo)) | (ex_rs[12] & ~(|int_mul_hi)) | (ex_rs[13] & ~(|int_div_q));
-wire int_neg_flat  = (ex_rs[6] & int_sum[31]) | (ex_rs[7] & int_log[31]) | (ex_rs[8] & (ex_dec.ic.sh_reg ? rot_res_q[31] : int_rot_imm[31])) |
+wire int_neg_flat  = (ex_rs[6] & int_sum[31]) | (ex_rs[7] & int_log[31]) | (ex_rs[8] & (ex_dec.ic.sh_reg ? rot_res_q[31] : int_rot_imm_neg)) |
                      (ex_rs[10] & int_exts[31]) |
                      (ex_rs[11] & int_mul_lo[31]) | (ex_rs[12] & int_mul_hi[31]) | (ex_rs[13] & int_div_q[31]);
 wire int_lt_flat   = ex_dec.ic.is_signed ? int_lts : int_ltu;

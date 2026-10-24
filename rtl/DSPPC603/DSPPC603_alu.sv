@@ -30,10 +30,11 @@ module DSPPC603_alu
 	                                 // shifts (a under a mask of the count: the 66 MHz work, 2026-10-24)
 	output logic [31:0] log_o,       // each operation's own result, for a flat choice outside (sum is the adder's)
 	output logic [31:0] rot_o,
-	output logic [31:0] rot_imm_o,   // the rotator's result with the immediate count (SH) whatever ctl.sh_reg says:
-	                                 // CR0 of an immediate-count form from it, so that no forwarded count
-	                                 // reaches CR0 (the 66 MHz work, 2026-10-24; a register-count record
-	                                 // form takes a second cycle in the pipeline)
+	output logic        rot_imm_zero, // the rotator's result's zero and sign with the immediate count (SH),
+	output logic        rot_imm_neg,  // whatever ctl.sh_reg says, the mask rotated by the count instead of
+	                                 // the operand: CR0 of an immediate-count form from these, so that no
+	                                 // forwarded operand goes through a rotator to CR0 (the 66 MHz work,
+	                                 // 2026-10-24; a register-count record form takes a second cycle)
 	output logic [31:0] clz_o,
 	output logic [31:0] exts_o
 );
@@ -143,28 +144,43 @@ always_comb begin
 	endcase
 end
 
-// the same with the immediate count only (see rot_imm_o)
-logic [63:0] rotl_dbl_i, rotr_dbl_i;
-logic [31:0] rot_i, mask_i, rot_imm_res;
+// The immediate-count forms' zero and sign without rotating the operand:
+// rotl(a, n) & m == 0 exactly when a & rotr(m, n) == 0 (and rotr(a, n) & m
+// when a & rotl(m, n)), the mask and the count being control fields here;
+// srawi's sign fill makes a negative operand's result non-zero; rlwimi adds
+// the kept bits of b. The sign is one bit of the rotation (a 32:1 choice).
+logic [31:0] mask_i, mask_rot_i;
+logic [63:0] rotl_dbl_i, rotr_dbl_i, a_rotl_i, a_rotr_i;
+logic        rot_i31;
 always_comb begin
-	rotl_dbl_i = {a, a} << ctl.sh;
-	rotr_dbl_i = {a, a} >> ctl.sh;
-	case (ctl.rot_op)
-		ROT_SRW, ROT_SRAW: rot_i = rotr_dbl_i[31:0];
-		default:           rot_i = rotl_dbl_i[63:32];
-	endcase
 	case (ctl.rot_op)
 		ROT_SLW:           mask_i = mask_gen(5'd0, 5'd31 - ctl.sh);
 		ROT_SRW, ROT_SRAW: mask_i = mask_gen(ctl.sh, 5'd31);
 		default:           mask_i = mask_gen(ctl.mb, ctl.me);
 	endcase
+	rotl_dbl_i = {mask_i, mask_i} << ctl.sh;
+	rotr_dbl_i = {mask_i, mask_i} >> ctl.sh;
+	a_rotl_i   = {a, a} << ctl.sh;
+	a_rotr_i   = {a, a} >> ctl.sh;
 	case (ctl.rot_op)
-		ROT_RLWIMI: rot_imm_res = (rot_i & mask_i) | (b & ~mask_i);
-		ROT_SRAW:   rot_imm_res = (rot_i & mask_i) | ({32{a[31]}} & ~mask_i);
-		default:    rot_imm_res = rot_i & mask_i;
+		ROT_SRW, ROT_SRAW: begin mask_rot_i = rotl_dbl_i[63:32]; rot_i31 = a_rotr_i[31]; end
+		default:           begin mask_rot_i = rotr_dbl_i[31:0];  rot_i31 = a_rotl_i[63]; end
+	endcase
+	case (ctl.rot_op)
+		ROT_RLWIMI: begin
+			rot_imm_zero = ~(|(a & mask_rot_i)) & ~(|(b & ~mask_i));
+			rot_imm_neg  = mask_i[31] ? rot_i31 : b[31];
+		end
+		ROT_SRAW: begin
+			rot_imm_zero = ~a[31] & ~(|(a & mask_rot_i));
+			rot_imm_neg  = mask_i[31] ? rot_i31 : a[31];
+		end
+		default: begin
+			rot_imm_zero = ~(|(a & mask_rot_i));
+			rot_imm_neg  = mask_i[31] & rot_i31;
+		end
 	endcase
 end
-assign rot_imm_o = rot_imm_res;
 
 // ---- count leading zeros ---------------------------------------------------
 function automatic logic [5:0] clz32(input logic [31:0] v);
