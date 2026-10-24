@@ -52,7 +52,8 @@ module DSPPC603_int_unit
 	// flat among them with selects registered with the operation, instead
 	// of behind the choice result makes here
 	output logic [31:0] alu_log, alu_rot, alu_clz, alu_exts, mul_hi, mul_lo, div_q,
-	output logic        alu_rot_zero                // ... and the rotator's result's zero, found fast for the shifts
+	output logic        alu_rot_zero,               // ... and the rotator's result's zero, found fast for the shifts
+	output logic [31:0] alu_rot_imm                 // ... and the rotator's result with the immediate count
 );
 
 import DSPPC603_pkg::*;
@@ -86,6 +87,7 @@ DSPPC603_alu alu
 	.rot_zero (alu_rot_zero),
 	.log_o  (alu_log),
 	.rot_o  (alu_rot),
+	.rot_imm_o (alu_rot_imm),
 	.clz_o  (alu_clz),
 	.exts_o (alu_exts)
 );

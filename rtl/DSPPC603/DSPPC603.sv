@@ -1423,7 +1423,7 @@ DSPPC603_alu completion_alu
 	.ca_in (1'b0),
 	.result (completion_result),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.sum (), .ca_out (), .ov_out (), .lt (), .gt (), .eq (), .lt_s (), .lt_u (), .zero (), .neg (), .rot_zero (),
+	.sum (), .ca_out (), .ov_out (), .lt (), .gt (), .eq (), .lt_s (), .lt_u (), .zero (), .neg (), .rot_zero (), .rot_imm_o (),
 	.log_o (), .rot_o (), .clz_o (), .exts_o ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
@@ -1789,7 +1789,8 @@ wire is_int = (ex_dec.unit == UNIT_ALU) | (ex_dec.unit == UNIT_MUL) | (ex_dec.un
 logic        int_resp;
 logic [31:0] int_result;
 logic [31:0] int_log, int_rot, int_clz, int_exts, int_mul_hi, int_mul_lo, int_div_q;
-logic        int_rot_zero;
+logic        int_rot_zero;              // (unused since the two-cycle record forms below)
+logic [31:0] int_rot_imm;
 logic [31:0] int_sum;                      // the adder alone: the effective address
 logic        int_ca;
 logic        int_ov;
@@ -1833,7 +1834,8 @@ DSPPC603_int_unit int_unit
 	.mul_hi     (int_mul_hi),
 	.mul_lo     (int_mul_lo),
 	.div_q      (int_div_q),
-	.alu_rot_zero (int_rot_zero)
+	.alu_rot_zero (int_rot_zero),
+	.alu_rot_imm (int_rot_imm)
 );
 
 // ---- floating-point unit ---------------------------------------------------
@@ -1951,7 +1953,24 @@ wire  srin     = ex_dec.rb_rd & (ex_dec.unit != UNIT_ALU) & (ex_dec.unit != UNIT
                  (ex_dec.unit != UNIT_DIV) & (ex_dec.unit != UNIT_FPU) &
                  ((ex_dec.sys == SYS_MFSR) | (ex_dec.sys == SYS_MTSR));
 wire  slow_chk = ex_valid & (ex_dec.trap | (ex_dec.str_bytes != 7'd0) | srin);
-assign ex_stall = ex_stall_ops | (fsys_chk & ~fsys_held) | (slow_chk & ~slow_held);
+// A record-form rotate or shift by a register count (slw., srw., sraw., rlwnm.:
+// rare) takes a second cycle: the first registers the rotator's result
+// (rot_res_q), the second commits CR0 from it, so that a forwarded count's
+// path through the rotator and the 32-bit zero test ends at a register, not
+// at CR (the 66 MHz work, 2026-10-24; the operands held in EX keep their
+// values: WB's forward is captured into ex_a/ex_b/ex_c)
+logic ex_rot_chk_q, rot_held;
+logic [31:0] rot_res_q;
+wire  rot_chk = ex_valid & ex_rot_chk_q;
+/* synthesis translate_off */
+always_ff @(posedge clk) begin
+	if (~reset & ex_valid & (ex_rot_chk_q != ((ex_dec.unit == UNIT_ALU) & (ex_dec.ic.alu_op == ALU_ROT) & ex_dec.ic.sh_reg & ex_dec.cr_wr)))
+		$fatal(1, "the registered register-count record-form decode differs");
+	if (~reset & rot_chk & rot_held & ex_done & (rot_res_q != int_rot))
+		$fatal(1, "the held rotator result differs from the rotator's");
+end
+/* synthesis translate_on */
+assign ex_stall = ex_stall_ops | (fsys_chk & ~fsys_held) | (slow_chk & ~slow_held) | (rot_chk & ~rot_held);
 
 DSPPC603_fpu #(.OPERAND_REG (FPU_OPERAND_REG)) fpu
 (
@@ -2613,10 +2632,10 @@ wire [63:0] ex_result = ({64{ex_rs[5]}} & fpu_result) | {({32{ex_rs[4]}} & 32'hF
 // choice of its operation's flags and then the integer unit's of its unit's
 // (two choice levels behind the rotator were the slowest family at 66 MHz,
 // 2026-10-24: a forwarded rB into a record-form shift's count, into CR0)
-wire int_zero_flat = (ex_rs[6] & ~(|int_sum)) | (ex_rs[7] & ~(|int_log)) | (ex_rs[8] & int_rot_zero) |
+wire int_zero_flat = (ex_rs[6] & ~(|int_sum)) | (ex_rs[7] & ~(|int_log)) | (ex_rs[8] & (ex_dec.ic.sh_reg ? ~(|rot_res_q) : ~(|int_rot_imm))) |
                      (ex_rs[9] & ~(|int_clz)) | (ex_rs[10] & ~(|int_exts)) |
                      (ex_rs[11] & ~(|int_mul_lo)) | (ex_rs[12] & ~(|int_mul_hi)) | (ex_rs[13] & ~(|int_div_q));
-wire int_neg_flat  = (ex_rs[6] & int_sum[31]) | (ex_rs[7] & int_log[31]) | (ex_rs[8] & int_rot[31]) |
+wire int_neg_flat  = (ex_rs[6] & int_sum[31]) | (ex_rs[7] & int_log[31]) | (ex_rs[8] & (ex_dec.ic.sh_reg ? rot_res_q[31] : int_rot_imm[31])) |
                      (ex_rs[10] & int_exts[31]) |
                      (ex_rs[11] & int_mul_lo[31]) | (ex_rs[12] & int_mul_hi[31]) | (ex_rs[13] & int_div_q[31]);
 wire int_lt_flat   = ex_dec.ic.is_signed ? int_lts : int_ltu;
@@ -2758,6 +2777,9 @@ always_ff @(posedge clk) begin
 	srin_idx_q  <= op_b[31:28];
 	if (ex_leave | id_to_ex | reset) slow_held <= 1'b0;
 	else if (slow_chk & ~ex_stall_ops) slow_held <= 1'b1;
+	if (ex_leave | id_to_ex | reset) rot_held <= 1'b0;
+	else if (rot_chk & ~ex_stall_ops) rot_held <= 1'b1;
+	if (rot_chk & ~rot_held) rot_res_q <= int_rot;
 end
 
 always_ff @(posedge clk) begin
@@ -2774,6 +2796,7 @@ always_ff @(posedge clk) begin
 		ex_x_spr_q   <= id_x_spr;
 		ex_spr_sel   <= spr_sel_of(id_spr_n);
 		ex_rs        <= (seq_nop | seq_cr_op) ? '0 : rs_of(id_dec);
+		ex_rot_chk_q <= ~(seq_nop | seq_cr_op) & (id_dec.unit == UNIT_ALU) & (id_dec.ic.alu_op == ALU_ROT) & id_dec.ic.sh_reg & id_dec.cr_wr;
 		ex_ill   <= ~id_dec.valid;
 		ex_isi   <= id_isi;
 		ex_isi_info <= id_isi_info;
