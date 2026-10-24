@@ -212,6 +212,24 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     with both from the request's registers (`unc` holds `~hit`, so the chain was `hit -> unc ->
     post_take -> ans_now`); the cases still drive the RAM writes and the state; `ans_now_c`
     shadow + `$fatal`. Fit l: `check66_core_l.txt`.
+  - Fit i (8a+8b, a bad seed): 58.02, -2.234 (633) `wb_result -> cr`: the rotator path was still
+    there (`rlwnm.` needs the rotator and STA sees rotator -> OR -> CR0 whatever rot_op); also
+    -2.1 `dcache.r_wide -> fpu.r_lzc.count`. Fit k (9): 61.29, -1.315 `cr -> br_taken -> redir ->
+    fpu.state` (the FPU's flush three levels deep, 7 ns after redir), `-> xer` -0.5, `wb_result
+    -> cr` down to -0.24. Fit l (10): 61.38, -1.291 `dcache.r_addr -> fpu.ShiftLeft1`, -1.212
+    `wb_valid -> cr`. The i-report (`check66_i_to.txt`): `r_wide -> wide_hit -> mem_unit.final_q
+    -> mem_payload_take -> fpu_resp_ready -> fpu.back_free -> hand_now -> lz_q/r_q` (fan-out
+    166): the FPU's handoff enable behind MEM's room.
+  - **11 (fe67723)** register-count record forms (`ALU_ROT & sh_reg & Rc`: slw./srw./sraw./rlwnm.)
+    take a second EX cycle (`ex_rot_chk_q` from ID, `rot_held` like `slow_held`, `rot_res_q <=
+    int_rot` in the first cycle, CR0's zero/sign from it in the second); the immediate forms
+    take CR0 from a second rotator with SH alone (`alu.rot_imm_o`). No forwarded count reaches
+    CR0. CPI unchanged (1.52/2.20). Fit m: `check66_core_m.txt`.
+  - **12 (344c4a2)** FPU: the back's working registers load under `back_room = S_IDLE | S_DONE`
+    (from the state alone; S_DONE answers from `fin_*` since change 5), states and `fin_*` keep
+    `back_free`; the flush applied from `flush_q` a cycle late (the pipeline is empty the cycle
+    after a redirect; the pipeline's `fo_count == 0` check gated by `~fpu_flush_q`). FP CPI
+    unchanged (2.86). Fit n: `check66_core_n.txt`.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
