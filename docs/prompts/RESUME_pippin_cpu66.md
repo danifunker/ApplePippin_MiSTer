@@ -283,6 +283,17 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
   wb_valid/mem_valid/mo_*` (and `mu_gnt -> mem_unit.state`, `d_gnt`); the forwarding selects
   `fq_*` are chosen by `ex_leave`/`mem_take` (late) in `fwd_sel`; `redir` fans out to 61.
 
+- **For the clock step** (read 2026-10-24 afternoon): `rtl/pll/pll_0002.v` is refclk 50 MHz, M = 14
+  (`m_cnt_hi/lo_div` 7/7) -> VCO 700, C0 /35 (`c_cnt_hi/lo_div0` 18/17, odd duty) = 20 MHz, C1
+  /12 (6/6; 70: 5/5; 100: 4/3 odd) = the CPU, C2 /7 (4/3 odd) = 100 MHz. For 66.67: M = 16
+  (8/8) -> VCO 800, C0 /40 (20/20), C1 /12 (6/6) = 66.667, C2 /8 (4/4) = 100, **a new C3 /24
+  (12/12) = 33.333 for the bus** (`number_of_clocks` 4; `rtl/pll.v` exports it; the SDC gets the
+  clock); `pll_cfg`'s run-time 100 MHz (`BandaiPippin.sv:222`, `cfg_data`) rewrites C1 to /8.
+  The device-bus cut in `Pippin_machine.sv:476-512`: the `p_*` register stage (`present`,
+  `dev_take`, `dev_busy`, `dev_ack`, `dev_cnt`) is the boundary; the tick dividers
+  (`snd_d`, `us_d`, `scsi_d`, `rtxc_d`, `tb_d`, `via_d`, the VIA's `VIA_HALF`) take `CPU_HZ`:
+  on the bus clock they take 33_333_333.
+
 ## Next steps (in order)
 
 1. The CR family (fix (a) and/or (b) above). Then the data-MMU page compare from EX's address
