@@ -77,6 +77,60 @@ the 66 MHz budget. The machine's tick dividers already take their clock as a par
 port (`DSPPC603_memcdc` to the 100 MHz SDRAM side) stays where it is, on the CPU side.
 The CPU's own slow paths still have to come down to 15 ns: that is the main work.
 
+## Findings so far (2026-10-24, keep this section current)
+
+- **The CPU alone** (`check.py core --cpu 603 --mhz 66.667 --paths 40 --detail 3`, log
+  `scratch/check66_core.txt`, before any change): 14,386 ALMs, **Fmax 58.30 MHz, worst slack
+  -2.153 ns at 66.67 MHz**. No machine logic in that fit: the gap is DSPPC603's alone, so the
+  33 MHz bus cannot close it by itself. Worst families (slack, count, from -> to):
+  - -2.153 (458) `ex_dec.frc -> fpscr`; -1.692 (342) `ex_dec.fc.op -> fpscr`; -1.587
+    `ex_pc8 -> fpscr`; -1.560 `mem_unit.cp -> fpscr`; -1.521 `ex_dec.unit -> fpscr`; -1.481
+    (271) `ex_insn -> fpscr`; -1.472 `dcache.post_v -> fpscr`; -1.334 `comb -> fpscr`;
+    -1.298 `fq_c_upd_r -> fpscr`; -1.185 `cq_fpr_o -> fpscr`. Path 1 cell by cell:
+    `ex_dec.frc` -> Mux182 (operand decode) -> `completion_push_ex` (fan-out 71) ->
+    `always21` -> `fpscr[12]` -> fpscr's register enable: 16.4 ns of data path, ~1/3 routing.
+  - -1.670 `ex_dec.frc -> fb_mem`; -1.431 `-> srr1`; -1.376 `-> gpr_from_sequence`;
+    -1.329 `-> id_rc_q`/`id_ra_q` (ID's stall/forwarding); -1.251 `-> mmu.d_cached_page`.
+  - -1.510 (62) `wb_result -> cr`; -1.205 `mem_result -> cr`; -1.169 `fb_wb -> cr`: the
+    condition register's writeback/forwarding.
+  - -1.400 (153) `fpu.Mux0 -> completion_queue.value` RAM; -1.205 `fa_mem -> dcache.state`;
+    -1.070 `mem_unit.cp -> fpu.ShiftLeft1`.
+  So the hubs are **completion_push_ex** (the FP-op-into-the-completion-queue decision, ~25
+  families feed FPSCR through it), **ID's stall/forwarding** (`id_ra_q`, `id_rc_q`), and
+  **CR's writeback**.
+- **Change 1 (1f00327)**: FPSCR's and CR's commit in EX gated by `fp_commit_ex =
+  ex_fpu_taken | fp_simple_of(ex_dec.fc.op)` (a register and EX's decode) instead of
+  `~completion_push_ex` (an FP op committing in EX was taken earlier or is answered in its
+  own cycle; the one leaving into the queue is neither); a `$fatal` check holds them equal.
+  `run_core.py` PASS on the Mac (all vectors, exceptions, 1,071,375 random instructions in
+  lockstep, the CDC ratios; the check never fired). Its fit: `scratch/check66_core_b.txt`
+  (queued behind other sessions' Quartus jobs when this was written).
+- **The 33 MHz bus cut** (from reading `rtl/machine/Pippin_system.sv`): `Pippin_machine` is
+  not only the I/O chips: the CPU's memory port goes through it (CPU `c_*` -> machine ->
+  `m_*` -> `Pippin_l2` -> `DSPPC603_memcdc` -> SDRAM at 100 MHz), with snooping and Grand
+  Central's DMA arbitration (`dq` state machine). Clocking all of it at 33 MHz would halve the
+  CPU's memory path. **Cut at the machine's device bus instead**: the `p_*` request (already
+  a register stage: `p_sel`, `p_dev`, `p_a`, `p_we`, `p_be`, `p_wd`) and `dev_rdata`/`dev_ack`
+  back; the devices behind it (Grand Central with VIA/Cuda/MESH/SWIM3/ESCC/DBDMA/AWACS, Taos,
+  the flash, Aspen's registers, PCI config, boot ROM/debug) on the bus clock; the address
+  decode, RAM routing, snoop and the L2 stay at 66.67. Crossing the other way: Grand
+  Central's DMA requests (`gdm_*`) into the arbiter, interrupts (`ext_irq`), `tb_tick`,
+  Cuda's `cpu_reset`. The VRAM path (`v_*` -> `Pippin_vramwc` -> `vcdc`) stays CPU-side.
+- Method notes: watchers with `pgrep -f 'syn/check.py'` match their own shell; poll the log
+  for `constraint 66.67 MHz` instead. Other sessions (Sun-3, IBMRS6K7248) queue on
+  `/tmp/quartus.lock` too: a fit may wait 20-40 min.
+
+## Next steps (in order)
+
+1. Read `scratch/check66_core_b.txt`: how much change 1 won; the new worst families.
+2. Next hubs: whatever still feeds `completion_push_ex` (its own inputs: `fpu_ready`,
+   `completion_count`, `ex_fp_elig`'s decode terms, `mem_fault`); then `id_ra_q`/`id_rc_q`
+   (ID's hazard/forwarding compare against EX's destination: precompute in ID, register);
+   then CR's writeback (`wb_result -> cr`). One change at a time: lint, `run_core.py` on the
+   Mac, a CPU-alone fit; log the slack here.
+3. When the CPU alone meets 66.67 with ~0.5 ns margin: the bus split and the PLL (below),
+   then whole-core fits.
+
 ## Plan
 
 1. Measure: the CPU alone at 66.667 MHz (`check.py core --cpu 603 --mhz 66.667 --paths 40
