@@ -2519,6 +2519,13 @@ wire  stwcx_store = (ex_dec.resv == RESV_STORE) & resv_valid;
 assign ex_mem_access = ex_dec.mem_rd | (ex_dec.mem_wr & ((ex_dec.resv != RESV_STORE) | stwcx_store));
 
 logic [31:0] cr_next;
+logic        dar_ea_pend;    // the alignment exception's DAR lands now, from dar_ea_q
+logic [31:0] dar_ea_q;
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & dar_ea_pend & ((mem_fault & mem_dsi) | (ex_leave & ~ex_abort & sys_reg_write)))
+		$fatal(1, "DAR written while the alignment exception's value lands");
+/* synthesis translate_on */
 logic [31:0] xer_next;
 logic [31:0] lr_next;
 logic [31:0] ctr_next;
@@ -2925,11 +2932,20 @@ always_ff @(posedge clk) begin
 		srr1 <= (msr & SRR1_MASK) | exc_info;
 		msr  <= msr_exc;
 		if ((x_align | x_ecx) & ~x_pre) begin
-			dar   <= int_sum;
+			// (DAR lands a cycle later, from a shadow of the adder: below)
 			dsisr <= x_align ? align_dsisr : ecx_dsisr;
 		end
 		if (irq_dec) dec_pending <= 1'b0;
 	end
+
+	// the alignment exception's DAR lands a cycle after its commit, from a
+	// shadow of the adder taken every cycle (the forwarded operands' sum was
+	// behind the exception decision as DAR's data; the 66 MHz work,
+	// 2026-10-24): the handler reads it cycles later, no instruction commits
+	// in between, and MEM cannot fault then (EX left with MEM's room)
+	dar_ea_q    <= int_sum;
+	dar_ea_pend <= ex_leave & ex_exc & (x_align | x_ecx) & ~x_pre & ~reset;
+	if (dar_ea_pend) dar <= dar_ea_q;
 
 	// ... for the access in MEM that cannot be made (EX did not commit): a
 	// DSI, or the alignment exception of dcbz on a page it may not touch
