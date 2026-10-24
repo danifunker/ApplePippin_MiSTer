@@ -385,6 +385,7 @@ assign wsel = hit ? hit_sel : victim;
 
 // the answer: as decided in this cycle, or from a register a cycle later
 logic        ans_now, ans_q;
+logic        ans_now_c;                 // S_LOOK's answer as its cases say it (simulation check)
 logic [31:0] ans_data, ans_data_q;
 logic        ans_wide, ans_wide_q;
 logic [31:0] ans_data_next, ans_data_next_q;
@@ -444,6 +445,31 @@ always_comb for (int j = 0; j < 4; j++) st_mask[8*j +: 8] = {8{r_be[j]}};
 wire [31:0] st_word = (hit_word & ~st_mask) | (wdata & st_mask);
 wire [7:0]  st_wwe  = 8'd1 << (3'd7 - r_word);
 wire wide_hit = r_wide & (r_word != 3'd7);
+// S_LOOK's answer when the lookup hits and when it misses, each from the
+// request's registers: a word hits unless it is a write-through store that
+// cannot be posted (or an uncached one: it goes to memory); a miss answers
+// only a store that memory takes directly; the cache instructions as their
+// cases say, a flush or store of a dirty line and a line-zero of a dirty
+// victim writing back first
+logic [WAYS-1:0] dirty_w;
+always_comb for (int w = 0; w < WAYS; w++) dirty_w[w] = tag_q[w].dirty;
+wire dirty_hit = |(hit_w & dirty_w);
+wire ans_hit  = k_word ? ((r_ci | ~enable) ? (r_we & ~post_v) :
+                          (WRITABLE & r_we & r_wt) ? (~post_v & ~wide_hit) : 1'b1) :
+                ~enable ? 1'b1 :
+                k_zero  ? 1'b1 :
+                (k_flush | k_store) ? ~dirty_hit :
+                k_inval ? 1'b1 :
+                k_icbi  ? 1'b0 : 1'b1;
+wire ans_miss = k_word ? (WRITABLE & r_we & ~post_v & (r_ci | ~enable | lock | r_wt)) :
+                ~enable ? 1'b1 :
+                k_zero  ? ~victim_dirty :
+                k_icbi  ? 1'b0 : 1'b1;
+/* synthesis translate_off */
+always_ff @(posedge clk)
+	if (~reset & (state == S_LOOK) & (ans_now != ans_now_c))
+		$fatal(1, "the cache's flat answer differs from its cases");
+/* synthesis translate_on */
 // A wide word request (no snoop) is answered wide when it is cached: not
 // cache-inhibited, the cache on and not locked, and not a write-through
 // store (which memory takes a word at a time). A miss is filled and looked
@@ -506,6 +532,7 @@ always_comb begin
 	rd_even   = (state == S_WBREAD) ? wb_slot[1:0] : 2'((rd_word + 3'd1) >> 1);
 	rd_odd    = (state == S_WBREAD) ? wb_slot[1:0] : rd_word[2:1];
 	ans_now    = 1'b0;
+	ans_now_c  = 1'b0;
 	ans_data     = hit_word;
 	ans_wide = 1'b0;
 	ans_data_next = hit_word_next;
@@ -527,10 +554,10 @@ always_comb begin
 	end
 
 	S_LOOK: begin
-		if (unc) ans_now = post_take;                    // -> S_UNC, or posted (answered now)
-		else if (~enable) ans_now = 1'b1;                 // a cache instruction with the cache off
+		if (unc) ans_now_c = post_take;                    // -> S_UNC, or posted (answered now)
+		else if (~enable) ans_now_c = 1'b1;                 // a cache instruction with the cache off
 		else if (k_word & hit) begin
-			ans_now = 1'b1;
+			ans_now_c = 1'b1;
 			ans_wide = wide_hit;
 			if (WRITABLE & r_we) begin
 				l_data_we[hit_sel] = 1'b1;
@@ -543,7 +570,7 @@ always_comb begin
 				end
 				l_tag_we[hit_sel] = ~r_wt;               // dirty, unless memory gets it too
 				l_tag_wd = {1'b1, 1'b1, r_tag};
-				if (r_wt) ans_now = post_take;            // posted, else -> S_UNC
+				if (r_wt) ans_now_c = post_take;            // posted, else -> S_UNC
 			end
 		end
 		else if (k_word) ;                               // a miss -> S_WB or S_FILL
@@ -555,17 +582,23 @@ always_comb begin
 				l_dzero = 1'b1;
 				l_tag_we[wsel] = 1'b1;
 				l_tag_wd = {1'b1, 1'b1, r_tag};
-				ans_now = 1'b1;
+				ans_now_c = 1'b1;
 			end
 		end
 		else if ((k_flush | k_store) & hit & tag_q[hit_sel].dirty) ;   // -> S_WB
 		else if (k_flush | k_inval) begin
 			if (hit) begin l_tag_we[hit_sel] = 1'b1; l_tag_wd = '0; end
-			ans_now = 1'b1;
+			ans_now_c = 1'b1;
 		end
-		else if (k_store) ans_now = 1'b1;
+		else if (k_store) ans_now_c = 1'b1;
 		else if (k_icbi) inv_req = 1'b1;                 // -> S_ICBI
-		else ans_now = 1'b1;
+		else ans_now_c = 1'b1;
+		// the answer itself, flat around the hit (the 66 MHz work, 2026-10-24):
+		// hit was behind unc and post_take before reaching it, and from here it
+		// goes to the memory unit's response, MEM's leave and WB in the same
+		// cycle. The cases above still decide everything else (and ans_now_c,
+		// checked against this below).
+		ans_now = hit ? ans_hit : ans_miss;
 	end
 
 	S_UNC: begin
