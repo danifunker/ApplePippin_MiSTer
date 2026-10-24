@@ -57,8 +57,9 @@ module emu
 // base keeps the Pippin's 16.5 MHz whatever the CPU's clock). No speed option: the PLL is never
 // reconfigured.
 localparam int SPEED = 70;
-localparam int CPU_MHZ = 58;               // 70, 100, or 58 (58.333 MHz, the PLL's 700 MHz / 12)
-localparam int CPU_HZ  = CPU_MHZ == 58 ? 58_333_333 : CPU_MHZ * 1_000_000;
+localparam int CPU_MHZ = 66;               // 66 (66.667 MHz, a 800 MHz VCO / 12: the Pippin's own; the 66 MHz work, 2026-10-24),
+                                           // 70, 100, or 58 (58.333 MHz, a 700 MHz VCO / 12)
+localparam int CPU_HZ  = CPU_MHZ == 58 ? 58_333_333 : CPU_MHZ == 66 ? 66_666_667 : CPU_MHZ * 1_000_000;
 localparam int L2_KB = 0;               // the Pippin has no L2 cache
 localparam int TRACE = 0;               // 1: the DDR3 trace (syn\mister.py trace), for debugging builds
 localparam int SOUND_IN_DMA = 0;        // 1: DMA channel 9 (sound in, which records silence) a real channel
@@ -218,8 +219,9 @@ pll #(.CPU_MHZ(CPU_MHZ)) pll
 	.reconfig_from_pll
 );
 
-// the CPU's speed: the PLL's CPU counter (C1, of a 700 MHz VCO) rewritten through
-// pll_cfg while the machine is held in reset, 10 for 70 MHz and 7 for 100
+// the CPU's speed: the PLL's CPU counter (C1) rewritten through pll_cfg while the
+// machine is held in reset: of a 700 MHz VCO, 10 for 70 MHz and 7 for 100; of the
+// 800 MHz VCO of the 66 MHz build, 12 for 66.667 and 8 for 100
 wire        cfg_waitrequest;
 reg         cfg_write = 0;
 reg   [5:0] cfg_address = 0;
@@ -260,7 +262,8 @@ always @(posedge CLK_50M) begin
 			end
 			3'd1: begin                          // C1: odd-divide duty for 7, high and low counts
 				cfg_address <= 6'd5;
-				cfg_data    <= spd_tgt ? {9'd0, 5'd1, 1'b1, 1'b0, 8'd4, 8'd3} : {9'd0, 5'd1, 1'b0, 1'b0, 8'd5, 8'd5};
+				cfg_data    <= (CPU_MHZ == 66) ? (spd_tgt ? {9'd0, 5'd1, 1'b0, 1'b0, 8'd4, 8'd4} : {9'd0, 5'd1, 1'b0, 1'b0, 8'd6, 8'd6})
+				                               : (spd_tgt ? {9'd0, 5'd1, 1'b1, 1'b0, 8'd4, 8'd3} : {9'd0, 5'd1, 1'b0, 1'b0, 8'd5, 8'd5});
 				cfg_write   <= 1;
 				spd_st      <= 3'd2;
 			end
