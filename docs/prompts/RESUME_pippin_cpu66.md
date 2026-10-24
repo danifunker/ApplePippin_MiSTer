@@ -186,6 +186,48 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     `(|ex_fdep)` in `completion_dependency`; `$fatal` check against the bitmap. (The first
     commit paired the operands' registers with the wrong flags: `'{fra, frb, frc}` indexes a
     at 0 while the flags put a at bit 2; caught by the check.) Fit g: `check66_core_g.txt`.
+  - **7 (98a695f)** a shift's zero from `a` under a mask of the count (`rot_zero`: slw zero iff
+    `a & (~0 >> n) == 0`, srw/sraw with `~0 << n`, sraw also `~a[31]`); `int_zero_flat` takes it.
+    Fit f (change 5 alone) had the rotator path back at -1.572 (1,079 paths: rotator -> 32-bit OR
+    -> the 8-term AND-OR). Fit h (7): 61.80 MHz, -1.181 `tag_mem.valid RAM -> fa_mem` (the
+    cache's hit, see the hubs below); `mem_room -> fpu.rzero_q` (the FPU's handoff enable,
+    `hand_now`, behind `fpu_resp_ready = mem_room & ex_order_ready`), -0.8 `mem_result -> cr`.
+  - **8a (dd9d057)** the queue's live pop from the FPU's state (`resp_back = state == S_DONE`):
+    the simple operation's `resp_valid` (behind `ex_stall` through its request) fed `cq_live ->
+    cq_fpscr_new -> fpscr` (fit g's worst, -0.817; `fo_for_ex` already held `fo_count == 0` but
+    synthesis cannot see a simple answer implies an empty FIFO). **8b (7dcbfa4)** `fwd_sel` flat:
+    `fs_pop`/`fs_ex`/`fs_mem` one-hot from `mem_take`, `completion_pop`, `fwd_ex_ok`; the
+    candidates' `rd_match` from registers (fit g: `decode.Equal77`/`id_insn -> fq_fa_mem` -0.8).
+    Fit i: `check66_core_i.txt`.
+  - **LATE_ANSWER 1 for the data cache (3431dd2, reverted 461f7c2)**: 48 run_core runs FAIL (the
+    parameter is not functional with today's memory unit) and the random programs' CPI goes
+    2.20 -> 2.80. Not an option.
+  - **9 (35a7aec)** `mo_dep`'s compares registered (`ex_mo_match_q`, 9 bits: a/b/c/fa/fb/fc
+    against the older slot's rd, a/b/c against its update rA), from matches against MEM's newer
+    slot (what `mo_*` takes at `mem_take`) and the older slot's own, chosen by `mem_take` and
+    `id_to_ex`; `mo_valid` and the kills live; `mem_leave` kept out of the D-cone. (In the
+    fits `ex_dec.bi` is `ex_dec.ra`: BI and rA are the same instruction bits; Quartus merged
+    the registers.) Fit k: `check66_core_k.txt`.
+  - **10** the data cache's S_LOOK answer flat around `hit`: `ans_now = hit ? ans_hit : ans_miss`
+    with both from the request's registers (`unc` holds `~hit`, so the chain was `hit -> unc ->
+    post_take -> ans_now`); the cases still drive the RAM writes and the state; `ans_now_c`
+    shadow + `$fatal`. Fit l: `check66_core_l.txt`.
+- **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
+  cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
+  ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
+  (13.9 ns into `wb_valid`; the fitter retimes `wb_valid` forward into `ffc_wb -> ex_stall_ops`);
+  (B) `ex_stall_ops` (compares and decodes of `ex_dec`) `-> fpu resp_valid (simple) -> ex_done ->
+  ex_leave` (fan-out 110) `-> redir (61) / fwd_ex_ok -> fq_*`; (C) a forwarded operand `->
+  op_a/op_b -> the MMU's 12-bit low add -> d_cached_match -> dxl -> d_gnt -> mem_unit.state`
+  (14.5 ns), and `-> the ALU -> cr/dar` (the load's data: `r_addr -> way_word -> rdata -> rwin ->
+  wb_result`, 13.5 ns). Changes 6, 8a, 9 shorten B; 10 shortens A; C is untouched: candidates
+  are DAR a cycle later (`dar <= int_sum` under `ex_leave & ex_exc` -> copy from a shadow
+  register the next cycle, as mtsr does) and the memory unit's state not deciding on `d_gnt`
+  in the request cycle.
+- Fitter noise: the same design fits between about 61.5 and 63.7 MHz by seed; a family's
+  slack moves ±0.6 ns. When the CPU alone meets 66.67 in several seeds with ~0.5 ns margin,
+  go to the bus split and the whole core.
+
 - The remaining known structure after 4: the data cache's hit decision is ~10 ns from its
   address register and feeds, the same cycle, `d_rvalid -> mem_unit.resp_valid -> mem_leave ->
   wb_valid/mem_valid/mo_*` (and `mu_gnt -> mem_unit.state`, `d_gnt`); the forwarding selects
