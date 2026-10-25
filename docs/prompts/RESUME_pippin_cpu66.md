@@ -342,6 +342,14 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     (memory /8 stays 100): `pll_0002.v` C1 13 (7/6, odd duty), `CPU_HZ 61_538_462`, +5.5 % over
     58.333 with the CPU's new structure; (c) the registered memory request for 66.67 at a CPI
     cost; (d) revert change 20 (CPI +7 %) if the clock stays below 66.
+  - **The 420 M lockstep boot of cd065b5 (changes 2-21): PASS, identical.** **Released**
+    (fcf4c46): `releases/BandaiPippin_20261024.rbf` = build 115d132 (2-17 + the 66.67 MHz PLL;
+    SDRAM clock and hold met, CPU setup -0.844 at slow 100 C; untested on a board at this
+    clock; .143 busy with Sun-3 at 22:30). The user asked for the 66.67 release knowing the
+    CPU's negative slack ("I think it's just the memory that can't be negative"). Open with the
+    user: a seed sweep at 66.667 for a safer rbf; reverting change 20 (CPI +7 %) on main; a
+    GitHub release; the board test of the release on .143 when Sun-3 wraps up (three cold
+    loads, Finder, Super Marathon, Racing Days, Power Rangers Zeo, a save, Eject + Game disc).
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
