@@ -327,6 +327,21 @@ The CPU's own slow paths still have to come down to 15 ns: that is the main work
     Router Timing MAXIMUM): no lever there; revert them (26 min builds). **Change 21 (cd065b5)
     run_core PASS**; whole-core build `scratch/build66_cd065b5.log`; its 420 M lockstep boot
     `run66e.sh` / `runrep66e.txt`.
+  - **Build cd065b5 (21)**: 60.32 MHz, -1.578, TNS -49: `mem_unit.state.S_REQ1 -> mmu.d_outstanding`
+    (-1.58), `wb_result -> btb_sweep_idx` (-1.25, 28), `-> dcache.state`. **Four whole-core
+    builds of near-identical designs span -0.85 .. -1.58 ns with a different worst path each**:
+    the fitter's placement variance (~0.7 ns) exceeds what one RTL change moves; the depth left
+    is the memory-request pipeline (operand -> EA -> MMU match -> the cache's grant -> the
+    states), whose next cut is a registered request (+1 cycle of load latency, ~+9 % CPI on top
+    of 20's +7 %: a net loss at +14 % clock). The effort settings are reverted (no gain).
+  - **Where this leaves it (2026-10-24, 21:00)**: the CPU alone 58.3 -> 64.5 MHz (changes 2-21,
+    all run_core PASS, the 420 M lockstep boot PASS on 2-17 and on 20; 21's boot running); the
+    whole core at 66.667 does not close (-0.85 .. -1.58). Options for the user: (a) an
+    overnight sequential seed sweep (`scratch/seedsweep.sh`, one fit at a time) to find the best
+    seed (likely still -0.3 .. -0.5); (b) a lower target that closes: VCO 800 / 13 = 61.5 MHz
+    (memory /8 stays 100): `pll_0002.v` C1 13 (7/6, odd duty), `CPU_HZ 61_538_462`, +5.5 % over
+    58.333 with the CPU's new structure; (c) the registered memory request for 66.67 at a CPI
+    cost; (d) revert change 20 (CPI +7 %) if the clock stays below 66.
 - **The three hubs** (fit e's report, `scratch/check66_e_to.txt`, cell by cell): (A) the data
   cache's `hit` (tag RAM Tco 2.5 ns + a 20-bit compare + `hit_w`, fan-out 143) `-> post_take ->
   ans_now -> d_rvalid -> mem_unit.resp_valid -> mem_leave -> wb_valid/mem_valid/mem_own_left_q`
