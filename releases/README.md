@@ -1,9 +1,15 @@
 # Releases
 
-## 20261024: saves, disc changes, PPP, PAL, hard disk
+## 20261024: the CPU at 66.67 MHz; saves, disc changes, PPP, PAL, hard disk
 
-`BandaiPippin_20261024.rbf` (build 50, 4beb0ce; CPU 58.3 MHz, the debug instruments off;
-timing met, setup slack +0.154 ns). Needs a Main_MiSTer
+`BandaiPippin_20261024.rbf` (115d132; **CPU 66.67 MHz, the console's own clock**; the debug
+instruments off). Timing: the SDRAM clock and hold are met; the CPU's internal paths miss
+setup by 0.84 ns at the analyser's slow 100 °C corner (Fmax 63.1 MHz there), so the core
+relies on the board's real margin. It is untested on a board at this clock: if it misbehaves
+when warm (a black boot, a crash), use the 20261022 build or ask for a 58.3 MHz build. The
+CPU's slow paths were shortened all day (DSPPC603 changes 2-17, each checked against the
+instruction-level benches and a 420 M-instruction lockstep boot of Super Marathon against
+dingusppc; `docs/prompts/RESUME_pippin_cpu66.md` has the account). Needs a Main_MiSTer
 with the Pippin's CD support (the `pippin-cdrom` branch of danifunker/Main_MiSTer until it is
 merged), `games/Pippin/boot.rom` (Kinka 1.3 recommended) and discs as `.chd` or `.cue/.bin`.
 Setup and use: the repository's `README.md`.
@@ -25,15 +31,16 @@ New since the 20261022 release, each checked on the board (MiSTer 192.168.99.92)
   PAL shows the 640x480 picture centred with borders (it showed a broken 776-dot line).
 - **PPP** over the modem port to the MiSTer (the disc's @WORLD Dialer and @World Browser),
   with `syn/fakemodem.py` on the MiSTer standing in for the modem.
-- **Hard disk**: Hard disk (SCSI ID 0) on the OSD's first page, a data disk beside the CD.
+- **Hard disk**: Hard disk (SCSI ID 0) on the OSD's first page, a data disk beside the CD
+  (this build has it on the first page; the morning's build 50 still had it under Advanced).
 - **Memory**: 13 and 21 MB (64 MB SDRAM boards or larger) as well as 5 MB.
 - **ROMs**: Kinka 1.0, 1.2, 1.3 and the GM flash all boot.
 - Inside: partial SDRAM writes masked on A12-A11 as the MiSTer boards wire DQM (no more
   read-modify-write), MacPPC7300's serial DMA fixes, Cuda's clock flagged as set.
 
-Known limits: the CPU runs at 58.3 MHz against the console's 66 MHz; a second Eject during
-the insert-disc animation is not seen (use Insert disc); titles have been booted to their
-menus but not played through.
+Known limits: the CPU's clock is the console's but its timing is not fully met (above); a
+second Eject during the insert-disc animation is not seen (use Insert disc); titles have been
+booted to their menus but not played through.
 
 ## 20261022 (tagged v0.1.0) — the first titles boot
 

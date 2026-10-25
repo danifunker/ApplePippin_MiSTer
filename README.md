@@ -12,7 +12,7 @@ from CD images.
 | Titles | Super Marathon, Racing Days, Power Rangers Zeo and Macintosh on Pippin boot to their menus or the Finder (`docs/compatibility.md`); playing through is not yet tested |
 | ROMs | Kinka 1.0, 1.2, 1.3 and GM flash boot; Kinka 1.3 recommended |
 | RAM | 5 MB (the retail Pippin), 13 MB and 21 MB (the 8 and 16 MB cards; 64 MB SDRAM board or larger) |
-| CPU | 58.3 MHz (the real Pippin runs at 66 MHz; see Known limits) |
+| CPU | 66.67 MHz, the Pippin's own clock (see Known limits) |
 | Sound | AWACS and CD audio on HDMI; the boot chime and Racing Days's CD music play |
 | Saves | the Flash! volume and Mac OS's settings, on the SD card |
 | Internet | PPP over the modem port to the MiSTer (the @WORLD Dialer, @World Browser) |
@@ -104,9 +104,12 @@ for Apply and reset.
 
 ## Known limits
 
-- **CPU speed**: 58.3 MHz against the Pippin's 66 MHz. The CPU's longest paths (DSPPC603's
-  condition-register and TLB-valid logic) barely meet timing at 58.3 MHz; 66 MHz needs them
-  shortened. Titles run, a little slower than on the console.
+- **CPU timing**: the CPU runs at the console's 66.67 MHz, but its internal paths miss the
+  timing analyser's worst-case (slow, 100 °C) setup by about 0.8 ns (Fmax 63 MHz there); the
+  SDRAM interface meets it. On a board at room temperature this margin usually exists; if the
+  core misbehaves when warm, a 58.3 MHz build (`CPU_MHZ = 58` in `BandaiPippin.sv`) meets
+  timing with margin. The remaining slow path is a load or store's address translation and
+  cache lookup in one cycle, as the 603 does it.
 - **Video clock**: the core uses the standard dot clocks (NTSC 15.734 kHz, PAL 15.625 kHz,
   VGA 31.469 kHz lines) rather than the Athens clock chips' outputs, which Mac OS programs only
   in part; the rates are right on the board (NTSC and VGA 59.9 Hz, PAL 50 Hz).
